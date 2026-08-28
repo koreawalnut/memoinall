@@ -1,0 +1,13 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+numpy>=1.24
+
+# 선택: 의미(시맨틱) 검색 품질용 로컬 임베딩 모델.
+# 없어도 앱은 동작합니다(해시 임베더로 자동 폴백).
+sentence-transformers>=2.5
+
+# 선택: LLM 보강/생성. 설정 탭에서 프로바이더를 고른 뒤 해당 패키지만 있으면 됩니다.
+#   Claude                     → anthropic
+#   ChatGPT · Gemini · Ollama  → openai  (Gemini/Ollama 는 OpenAI 호환 엔드포인트로 접속)
+anthropic>=0.40
+openai>=1.40
