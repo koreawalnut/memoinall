@@ -116,6 +116,23 @@ def main() -> int:
     check("문장 중간 GUID 는 유지",
           "id=f5024f0e-4c7c-431e-8b7e-2bc941475a6a" in _strip_markup("참고 id=f5024f0e-4c7c-431e-8b7e-2bc941475a6a"))
 
+    # 회귀: 줄 앞의 보이지 않는 문자 때문에 '^id=' 가 안 맞으면
+    # 정규식은 멀쩡한데 아무것도 안 지워진 것처럼 보인다.
+    guid = "id=f5024f0e-4c7c-431e-8b7e-2bc941475a6a"
+    for label, prefix in (("제로폭 공백", "​"), ("BOM", "﻿"),
+                          ("LTR 표식", "‎"), ("제어문자", "\x01")):
+        check(f"{label} 이 앞에 있어도 제거",
+              _strip_markup(f"{prefix}{guid} 네트워크") == "네트워크",
+              repr(_strip_markup(f"{prefix}{guid} 네트워크")))
+    check("대문자 GUID", _strip_markup("ID=F5024F0E-4C7C-431E-8B7E-2BC941475A6A 내용") == "내용",
+          _strip_markup("ID=F5024F0E-4C7C-431E-8B7E-2BC941475A6A 내용"))
+    check("중괄호 GUID", _strip_markup("id={f5024f0e-4c7c-431e-8b7e-2bc941475a6a} 내용") == "내용",
+          _strip_markup("id={f5024f0e-4c7c-431e-8b7e-2bc941475a6a} 내용"))
+    check("하이픈 없는 GUID", _strip_markup("id=f5024f0e4c7c431e8b7e2bc941475a6a 내용") == "내용",
+          _strip_markup("id=f5024f0e4c7c431e8b7e2bc941475a6a 내용"))
+    check("공백 없이 붙은 경우", _strip_markup(f"{guid}내용") == "내용", _strip_markup(f"{guid}내용"))
+    check("탭 구분", _strip_markup(f"{guid}\t내용") == "내용", _strip_markup(f"{guid}\t내용"))
+
     r = importers.run_import(imp, dry_run=True, background_enrich=False)
     check("dry-run 은 저장 안 함", r.imported == 3 and store.stats()["memos"] == 0, store.stats()["memos"])
     check("빈 본문 집계", r.skipped_empty == 0 or r.skipped_empty >= 0)

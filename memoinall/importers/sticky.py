@@ -87,6 +87,36 @@ class StickyNotesImporter:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+    def raw_rows(self, limit: int = 3) -> list[dict]:
+        """진단용 — 가공 전 원문을 그대로 보여준다.
+
+        저장 형식이 예상과 다르면 눈에 안 보이는 문자(제로폭·제어문자) 때문인 경우가
+        많아서, 어떤 컬럼을 읽었는지와 repr 을 같이 낸다.
+        """
+        conn, tmpdir = open_readonly_copy(self.path)
+        try:
+            tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            table = next((t for t in ("Note", "Notes", "note") if t in tables), None)
+            if not table:
+                return [{"error": f"메모 테이블 없음. 있는 테이블: {sorted(tables)}"}]
+            cols = [r[1] for r in conn.execute(f'PRAGMA table_info("{table}")')]
+            text_col = _pick(cols, TEXT_COLUMNS)
+            out = [{"table": table, "columns": cols, "text_column": text_col}]
+            if not text_col:
+                return out
+            for row in conn.execute(f'SELECT "{text_col}" AS body FROM "{table}" LIMIT {int(limit)}'):
+                raw = row["body"]
+                out.append({
+                    "raw_repr": repr(raw)[:600],
+                    "first_line_repr": repr((str(raw or "").split("\n") or [""])[0])[:300],
+                    "parsed": _strip_markup(raw)[:300],
+                })
+            return out
+        finally:
+            conn.close()
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def _pick(available: list[str], candidates: list[str]) -> str | None:
     lowered = {c.lower(): c for c in available}
     for cand in candidates:
@@ -108,8 +138,15 @@ def _is_deleted(value) -> bool:
 #     id=f0ebc9a4-4b0b-4065-b659-f82bbe281ec2          ← 내용 없는 줄 = 빈 줄
 # 이걸 그대로 넣으면 메모가 온통 GUID 로 뒤덮이고, 제목도 'id=...' 로 잡히며,
 # 검색 색인에도 쓸모없는 16진수가 잔뜩 들어간다.
+# 눈에 안 보이는 문자들. 이게 줄 앞에 있으면 strip() 으로는 안 지워져서
+# '^id=' 매칭이 실패한다 — 정규식은 멀쩡한데 아무것도 안 지워지는 것처럼 보인다.
+INVISIBLE_RE = re.compile(r"[​-‏  ‪-‮⁠﻿\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+# GUID 는 중괄호가 붙거나 하이픈이 없는 변형도 있어 넉넉히 받는다.
+# 뒤 구분자를 \s* 로 둬서 'id=<guid>내용' 처럼 붙어 있어도 걷어낸다.
 PARAGRAPH_ID_RE = re.compile(
-    r"^id=[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?:\s+|$)"
+    r"^id=\{?[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}\}?\s*",
+    re.IGNORECASE,
 )
 
 
@@ -119,7 +156,9 @@ def _strip_markup(text: str | None) -> str:
         return ""
     out = []
     for line in str(text).split("\n"):
-        stripped = line.strip()
+        # 보이지 않는 문자를 먼저 없앤다. 순서가 중요하다 —
+        # 이걸 나중에 하면 줄 앞의 제로폭 문자 때문에 아래 매칭이 통째로 빗나간다.
+        stripped = INVISIBLE_RE.sub("", line).strip()
         # 문단 id 접두어 제거. 완전한 GUID 형태일 때만 지워서
         # 'id=12345' 같은 진짜 메모 내용은 건드리지 않는다.
         stripped = PARAGRAPH_ID_RE.sub("", stripped, count=1).strip()

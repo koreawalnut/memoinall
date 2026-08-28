@@ -193,8 +193,38 @@ def cmd_clusters(args) -> int:
     return 0
 
 
+def _dump_raw(args) -> int:
+    """가공 전 원문을 그대로 보여준다 — 저장 형식이 예상과 다를 때 원인 확인용."""
+    from . import importers
+
+    imp = importers.get_importer(args.source if args.source != "all" else "sticky",
+                                 files_path=args.path)
+    if not hasattr(imp, "raw_rows"):
+        print(f"{imp.label} 은 원문 덤프를 지원하지 않습니다 (sticky 만 가능).", file=sys.stderr)
+        return 1
+    if not imp.available():
+        print(f"사용할 수 없습니다: {imp.unavailable_reason()}", file=sys.stderr)
+        return 1
+
+    for i, row in enumerate(imp.raw_rows(args.dump)):
+        if i == 0:
+            print(f"테이블: {row.get('table')}  본문컬럼: {row.get('text_column')}")
+            print(f"컬럼들: {row.get('columns')}\n")
+            if row.get("error"):
+                print(row["error"])
+            continue
+        print(f"--- 메모 {i} ---")
+        print(f"  첫 줄 원문 : {row['first_line_repr']}")
+        print(f"  전체 원문  : {row['raw_repr']}")
+        print(f"  파싱 결과  : {row['parsed']!r}\n")
+    return 0
+
+
 def cmd_import(args) -> int:
     from . import importers
+
+    if args.dump:
+        return _dump_raw(args)
 
     opts = {
         "files_path": args.path,
@@ -372,6 +402,8 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--min-chars", type=int, default=0, help="이 길이보다 짧은 메모는 건너뜀 (기본 0 = 전부)")
     i.add_argument("--update", action="store_true",
                    help="이미 가져온 메모도 원본과 다르면 갱신 (직접 수정한 내용은 덮어씀)")
+    i.add_argument("--dump", type=int, nargs="?", const=3, metavar="N",
+                   help="가공 전 원문을 N건 그대로 출력 (저장 형식 확인용, 스티커 메모)")
     i.set_defaults(fn=cmd_import)
 
     sub.add_parser("stats", help="상태").set_defaults(fn=cmd_stats)

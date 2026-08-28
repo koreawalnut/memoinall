@@ -204,6 +204,15 @@ def import_sources(path: str | None = None):
     return {"sources": out}
 
 
+@app.get("/api/import/sticky/raw")
+def sticky_raw(limit: int = 3):
+    """가공 전 원문 — 저장 형식이 예상과 다를 때 원인을 눈으로 확인하려고."""
+    imp = importers.get_importer("sticky")
+    if not imp.available():
+        raise HTTPException(400, imp.unavailable_reason())
+    return {"rows": imp.raw_rows(max(1, min(limit, 20)))}
+
+
 @app.post("/api/import/redmine/test")
 def redmine_test(payload: dict = Body(default={})):
     """가져오기 전에 주소·키를 확인한다. 저장 전 입력값으로도 시험할 수 있다."""
