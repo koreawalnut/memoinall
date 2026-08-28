@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -102,13 +103,26 @@ def _is_deleted(value) -> bool:
     return bool(str(value).strip())
 
 
+# 최신 스티커 메모는 본문을 '문단마다 id 를 붙인' 형태로 저장한다.
+#     id=f5024f0e-4c7c-431e-8b7e-2bc941475a6a 네트워크 사용량 확인방법
+#     id=f0ebc9a4-4b0b-4065-b659-f82bbe281ec2          ← 내용 없는 줄 = 빈 줄
+# 이걸 그대로 넣으면 메모가 온통 GUID 로 뒤덮이고, 제목도 'id=...' 로 잡히며,
+# 검색 색인에도 쓸모없는 16진수가 잔뜩 들어간다.
+PARAGRAPH_ID_RE = re.compile(
+    r"^id=[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?:\s+|$)"
+)
+
+
 def _strip_markup(text: str | None) -> str:
-    """스티커 메모는 본문을 가벼운 마크다운으로 저장한다. 목록 표시만 남기고 정리."""
+    """스티커 메모 본문에서 저장 형식 부산물을 걷어낸다."""
     if not text:
         return ""
     out = []
     for line in str(text).split("\n"):
         stripped = line.strip()
+        # 문단 id 접두어 제거. 완전한 GUID 형태일 때만 지워서
+        # 'id=12345' 같은 진짜 메모 내용은 건드리지 않는다.
+        stripped = PARAGRAPH_ID_RE.sub("", stripped, count=1).strip()
         if stripped.startswith("\\") and len(stripped) > 1:  # 이스케이프 흔적
             stripped = stripped[1:]
         out.append(stripped)

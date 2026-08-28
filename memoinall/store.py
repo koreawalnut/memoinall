@@ -70,7 +70,7 @@ def find_by_external(source: str, external_id: str) -> int | None:
     return int(row["id"]) if row else None
 
 
-def update_memo(memo_id: int, body: str) -> dict:
+def update_memo(memo_id: int, body: str, *, enqueue_enrich: bool = True) -> dict:
     body = (body or "").strip()
     if not body:
         raise ValueError("빈 메모는 저장할 수 없습니다.")
@@ -79,7 +79,8 @@ def update_memo(memo_id: int, body: str) -> dict:
         (body, textutil.title_from(body), now_iso(), memo_id),
     )
     _index_fts(memo_id, body)
-    enqueue(memo_id)
+    if enqueue_enrich:
+        enqueue(memo_id)
     return get_memo(memo_id)
 
 

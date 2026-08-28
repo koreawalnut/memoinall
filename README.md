@@ -208,12 +208,15 @@ python -m memoinall settings --test                   # 연결 테스트
 
 ## 기존 메모 가져오기
 
-`가져오기` 탭에서 소스별 가용 여부를 확인하고 미리보기 → 실행할 수 있습니다. CLI 도 동일합니다.
+`가져오기` 탭에서 **항목별로 하나씩** 가져오거나 **한 번에** 가져올 수 있습니다.
+소스마다 자기 버튼과 자기 결과 칸이 있어서, 하나를 실행해도 다른 소스의 결과는 지워지지 않습니다.
+사용할 수 없는 소스는 버튼이 비활성화되고 그 자리에 이유가 표시됩니다.
 
 ```bash
-python -m memoinall import                          # 미리보기 (아무것도 저장 안 함)
-python -m memoinall import --commit                 # 실제 저장
-python -m memoinall import --source samsung --commit
+python -m memoinall import                          # 전체 미리보기 (아무것도 저장 안 함)
+python -m memoinall import --commit                 # 전체 저장
+python -m memoinall import --source samsung --commit          # 항목별
+python -m memoinall import --source redmine --commit
 python -m memoinall import --source files --path ./notes --commit
 python -m memoinall import --commit --min-chars 20  # 너무 짧은 메모 제외
 ```
@@ -252,6 +255,34 @@ python -m memoinall import --source redmine --redmine-kinds issues,wiki --commit
 - **작성 시각 유지** — 임포트 시각이 아니라 원래 작성 시각을 씁니다. 안 그러면 기간 검색·롤업이 무의미해집니다
 - **멱등** — `external_id` 로 중복을 막습니다. 몇 번을 돌려도 같은 메모가 두 번 들어가지 않습니다
 - **미리보기 기본** — `--commit` 없이는 읽기만 하고 건수·길이 분포·샘플만 보여줍니다
+
+### 이미 가져온 메모 갱신 (`--update`)
+
+원본이 바뀌었거나 예전에 잘못 파싱돼 들어온 메모를 되살릴 때 씁니다.
+본문이 실제로 달라진 것만 덮어쓰고, 같으면 `변경없음` 으로 셉니다.
+
+```bash
+python -m memoinall import --source sticky --update --commit
+```
+
+기본이 꺼져 있는 이유는 **memoinall 안에서 직접 고친 내용이 말없이 날아가면 안 되기 때문**입니다.
+UI 에서는 `기존 메모도 갱신` 체크박스입니다.
+
+### 스티커 메모의 문단 id
+
+최신 Windows 스티커 메모는 본문을 문단마다 id 를 붙여 저장합니다.
+
+```
+id=f5024f0e-4c7c-431e-8b7e-2bc941475a6a 네트워크 사용량 확인방법
+id=f0ebc9a4-4b0b-4065-b659-f82bbe281ec2          ← 내용 없는 줄 = 빈 줄
+id=5a12eaab-3ded-470d-b3a9-8d962fd43878 211.249.118.254
+```
+
+이걸 그대로 넣으면 메모가 GUID 로 뒤덮이고 제목까지 `id=...` 가 되며, 검색 색인에도
+쓸모없는 16진수가 잔뜩 들어갑니다. 가져올 때 걷어냅니다 — 단 **완전한 GUID 형태일 때만**
+지워서 `id=12345` 같은 진짜 메모 내용은 건드리지 않습니다.
+
+예전 버전으로 이미 가져오셨다면 `--update` 로 되살리세요.
 
 Samsung Notes 는 노트 종류(타이핑/손글씨/PDF)마다 본문이 다른 컬럼에 들어가서
 실측 커버리지 순서대로 폴백 체인을 태웁니다. 손글씨 인식 결과와 PDF 텍스트도

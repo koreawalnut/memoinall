@@ -216,7 +216,8 @@ def cmd_import(args) -> int:
     pending: list[int] = []
     for importer in targets:
         result = importers.run_import(
-            importer, dry_run=dry, background_enrich=False, min_chars=args.min_chars
+            importer, dry_run=dry, background_enrich=False,
+            min_chars=args.min_chars, update_existing=args.update,
         )
         pending.extend(result.memo_ids)
         head = f"■ {importer.label} ({result.source})"
@@ -230,7 +231,10 @@ def cmd_import(args) -> int:
         detail = f"본문없음 {result.skipped_empty} · 이미있음 {result.skipped_existing}"
         if result.skipped_short:
             detail += f" · 너무짧음 {result.skipped_short}"
-        print(f"   원본 {result.found}건 → 대상 {result.imported}건 ({detail})")
+        if result.unchanged:
+            detail += f" · 변경없음 {result.unchanged}"
+        updated = f" · 갱신 {result.updated}건" if result.updated else ""
+        print(f"   원본 {result.found}건 → 대상 {result.imported}건{updated} ({detail})")
         if dry and result.lengths:
             lens = sorted(result.lengths)
             buckets = [(20, 0), (50, 0), (200, 0)]
@@ -366,6 +370,8 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--redmine-notes", action="store_true", help="이슈 코멘트도 포함(느림)")
     i.add_argument("--commit", action="store_true", help="실제로 저장 (기본은 미리보기)")
     i.add_argument("--min-chars", type=int, default=0, help="이 길이보다 짧은 메모는 건너뜀 (기본 0 = 전부)")
+    i.add_argument("--update", action="store_true",
+                   help="이미 가져온 메모도 원본과 다르면 갱신 (직접 수정한 내용은 덮어씀)")
     i.set_defaults(fn=cmd_import)
 
     sub.add_parser("stats", help="상태").set_defaults(fn=cmd_stats)

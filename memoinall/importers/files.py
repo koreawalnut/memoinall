@@ -19,16 +19,23 @@ class FilesImporter:
     name = "files"
     label = "텍스트 파일 폴더"
 
-    def __init__(self, path: str | Path):
-        self.path = Path(path).expanduser()
+    def __init__(self, path: str | Path = ""):
+        # 빈 경로를 Path 로 만들면 '.' 이 되어 현재 폴더를 통째로 읽어버린다.
+        # 경로 미지정과 '현재 폴더 지정'은 분명히 달라야 한다.
+        self.raw = str(path or "").strip()
+        self.path = Path(self.raw).expanduser() if self.raw else None
 
     def available(self) -> bool:
-        return self.path.exists() and self.path.is_dir()
+        return bool(self.path) and self.path.exists() and self.path.is_dir()
 
     def unavailable_reason(self) -> str:
+        if not self.raw:
+            return "가져올 폴더를 지정하세요 (.txt / .md 파일을 읽습니다)."
         return f"폴더를 찾을 수 없습니다: {self.path}"
 
     def read(self) -> list[Note]:
+        if not self.available():
+            raise ValueError(self.unavailable_reason())
         notes: list[Note] = []
         for file in sorted(self.path.rglob("*")):
             if not file.is_file() or file.suffix.lower() not in EXTENSIONS:

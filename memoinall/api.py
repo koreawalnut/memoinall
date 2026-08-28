@@ -238,9 +238,12 @@ def _run_imports(payload: dict, *, dry_run: bool):
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
+    update_existing = bool(payload.get("update_existing"))
     results = []
     for imp in targets:
-        r = importers.run_import(imp, dry_run=dry_run, min_chars=min_chars)
+        r = importers.run_import(
+            imp, dry_run=dry_run, min_chars=min_chars, update_existing=update_existing
+        )
         lengths = sorted(r.lengths)
         results.append(
             {
@@ -250,6 +253,8 @@ def _run_imports(payload: dict, *, dry_run: bool):
                 "path": r.path,
                 "found": r.found,
                 "importable": r.imported,
+                "updated": r.updated,
+                "unchanged": r.unchanged,
                 "skipped_existing": r.skipped_existing,
                 "skipped_empty": r.skipped_empty,
                 "skipped_short": r.skipped_short,
@@ -259,7 +264,13 @@ def _run_imports(payload: dict, *, dry_run: bool):
                 "max_chars": lengths[-1] if lengths else 0,
             }
         )
-    return {"dry_run": dry_run, "results": results, "total": sum(r["importable"] for r in results)}
+    return {
+        "dry_run": dry_run,
+        "update_existing": update_existing,
+        "results": results,
+        "total": sum(r["importable"] for r in results),
+        "total_updated": sum(r["updated"] for r in results),
+    }
 
 
 @app.post("/api/import/preview")

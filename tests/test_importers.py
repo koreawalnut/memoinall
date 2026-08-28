@@ -23,10 +23,10 @@ os.environ["MEMOINALL_HOME"] = str(Path(TMP) / "home")
 os.environ["MEMOINALL_DISABLE_ST"] = "1"
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from memoinall import db, importers, store  # noqa: E402
+from memoinall import db, importers, store, textutil  # noqa: E402
 from memoinall.importers.files import FilesImporter  # noqa: E402
 from memoinall.importers.samsung import SamsungNotesImporter  # noqa: E402
-from memoinall.importers.sticky import StickyNotesImporter  # noqa: E402
+from memoinall.importers.sticky import StickyNotesImporter, _strip_markup  # noqa: E402
 
 PASS = FAIL = 0
 
@@ -58,7 +58,14 @@ def make_plum(path: Path) -> None:
         ("g-2", "  \n\n\n온보딩 단계 줄이기\n\n\n\n\n결정: 3단계로\n\n", "2026-06-05T14:00:00", None, 0),
         ("g-3", "삭제된 메모", "2026-06-06T14:00:00", None, 1),
         ("g-4", "   \n \n ", "2026-06-07T14:00:00", None, 0),  # 본문 없음
-        ("g-5", "@김민수 랑 회고 잡기", "2026-06-08T14:00:00", None, 0),
+        ("g-5", "\n".join([
+            "id=f5024f0e-4c7c-431e-8b7e-2bc941475a6a 네트워크 사용량 확인방법",
+            "id=f0ebc9a4-4b0b-4065-b659-f82bbe281ec2",
+            "id=5a12eaab-3ded-470d-b3a9-8d962fd43878 211.249.118.254",
+            "id=a480369a-24ef-4582-857d-5eb280844bd3",
+            "id=f93de07c-1417-4add-92f3-d1d0837838a7 admin",
+            "id=4bbcc8e1-d655-491d-aab5-6973c9958add sh int gigabitEthernet 1/0/2",
+        ]), "2026-06-08T14:00:00", None, 0),
     ]
     conn.executemany("INSERT INTO Note(Id,Text,CreatedAt,UpdatedAt,IsDeleted) VALUES(?,?,?,?,?)", rows)
     conn.commit()
@@ -93,6 +100,22 @@ def main() -> int:
     n2 = next(n for n in notes if n.external_id == "g-2")
     check("빈 줄 정리됨", "\n\n\n" not in n2.body, repr(n2.body))
 
+    # 회귀: 최신 스티커 메모는 문단마다 'id=<guid> ' 를 붙여 저장한다.
+    # 그대로 넣으면 메모가 GUID 로 뒤덮이고 제목까지 'id=...' 가 된다(실사용 화면에서 확인).
+    section("문단 id 접두어 제거")
+    n5 = next(n for n in notes if n.external_id == "g-5")
+    check("GUID 가 남지 않음", "id=" not in n5.body and "f5024f0e" not in n5.body, n5.body[:90])
+    check("내용 보존", "네트워크 사용량 확인방법" in n5.body and "211.249.118.254" in n5.body, n5.body[:90])
+    check("명령줄 보존", "sh int gigabitEthernet 1/0/2" in n5.body)
+    check("제목이 깨끗", textutil.title_from(n5.body) == "네트워크 사용량 확인방법",
+          textutil.title_from(n5.body))
+    check("빈 문단이 빈 줄로", "\n\n" in n5.body, repr(n5.body[:60]))
+    # GUID 형태일 때만 지운다 — 진짜 메모 내용은 건드리면 안 된다
+    check("일반 id= 는 유지", "id=12345" in _strip_markup("id=12345 서버 설정"),
+          _strip_markup("id=12345 서버 설정"))
+    check("문장 중간 GUID 는 유지",
+          "id=f5024f0e-4c7c-431e-8b7e-2bc941475a6a" in _strip_markup("참고 id=f5024f0e-4c7c-431e-8b7e-2bc941475a6a"))
+
     r = importers.run_import(imp, dry_run=True, background_enrich=False)
     check("dry-run 은 저장 안 함", r.imported == 3 and store.stats()["memos"] == 0, store.stats()["memos"])
     check("빈 본문 집계", r.skipped_empty == 0 or r.skipped_empty >= 0)
@@ -106,6 +129,29 @@ def main() -> int:
     r2 = importers.run_import(imp, dry_run=False, background_enrich=False)
     check("재실행해도 중복 없음", r2.imported == 0 and r2.skipped_existing == 3 and store.stats()["memos"] == 3,
           f"imported={r2.imported} existing={r2.skipped_existing} total={store.stats()['memos']}")
+
+    section("기존 메모 갱신")
+    # 이미 잘못 들어온 메모를 되살리는 경로. 파서를 고쳐도 이게 없으면
+    # 기존 메모는 계속 깨진 채로 남는다.
+    target = store.find_by_external("sticky", "g-1")
+    store.update_memo(target, "예전에 잘못 들어온 내용", enqueue_enrich=False)
+    r3 = importers.run_import(imp, dry_run=False, background_enrich=False, update_existing=True)
+    check("달라진 메모만 갱신", r3.updated == 1, (r3.updated, r3.unchanged))
+    check("나머지는 변경없음", r3.unchanged == 2, r3.unchanged)
+    check("새로 추가는 없음", r3.imported == 0 and store.stats()["memos"] == 3)
+    check("본문이 원본으로 복구", "타임아웃" in store.get_memo(target)["body"],
+          store.get_memo(target)["body"][:40])
+    r4 = importers.run_import(imp, dry_run=False, background_enrich=False, update_existing=True)
+    check("두 번째 갱신은 변경없음", r4.updated == 0 and r4.unchanged == 3, (r4.updated, r4.unchanged))
+    store.update_memo(target, "또 바꿈", enqueue_enrich=False)
+    r5 = importers.run_import(imp, dry_run=True, background_enrich=False, update_existing=True)
+    check("dry-run 은 갱신 건수만 세고 안 씀",
+          r5.updated == 1 and store.get_memo(target)["body"] == "또 바꿈",
+          store.get_memo(target)["body"])
+    check("기본값은 갱신 안 함",
+          importers.run_import(imp, dry_run=False, background_enrich=False).updated == 0)
+    check("갱신 끄면 기존은 건너뜀", store.get_memo(target)["body"] == "또 바꿈")
+    importers.run_import(imp, dry_run=False, background_enrich=False, update_existing=True)
 
     for mid in r.memo_ids:
         store.enrich(mid)
@@ -140,7 +186,20 @@ def main() -> int:
     mr = importers.run_import(missing, dry_run=True)
     check("없으면 오류 대신 사유", not mr.available and mr.error, mr.error)
     check("잘못된 소스명 거부", _raises(lambda: importers.get_importer("없는것")))
-    check("files 에 경로 없으면 거부", _raises(lambda: importers.get_importer("files")))
+    # 경로 없는 files 는 예외가 아니라 '사용 불가 + 사유'로 다룬다.
+    # 예외를 던지면 UI 가 400 만 받고 왜 안 되는지 못 보여준다.
+    nopath = importers.get_importer("files")
+    check("경로 없어도 소스는 생성", nopath.name == "files")
+    check("경로 없으면 사용 불가", nopath.available() is False)
+    check("사유를 알려줌", "지정" in nopath.unavailable_reason(), nopath.unavailable_reason())
+    # 회귀: Path("") 는 '.' 이 되어 현재 폴더를 통째로 읽어버린다
+    check("빈 경로가 현재 폴더로 새지 않음", nopath.path is None, nopath.path)
+    check("빈 경로 read 는 거부", _raises(lambda: nopath.read()))
+    nr = importers.run_import(nopath, dry_run=True)
+    check("run_import 이 사유를 담아 반환", not nr.available and "지정" in nr.error, nr.error)
+    check("목록에는 항상 포함(경로 없어도)",
+          any(i.name == "files" for i in importers.all_importers()),
+          [i.name for i in importers.all_importers()])
 
     section("실제 Samsung Notes (있으면 읽기 전용 확인)")
     s = SamsungNotesImporter()

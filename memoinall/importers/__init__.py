@@ -120,6 +120,8 @@ class ImportResult:
     memo_ids: list[int] = field(default_factory=list)
     skipped_short: int = 0
     lengths: list[int] = field(default_factory=list)
+    updated: int = 0
+    unchanged: int = 0
 
 
 def run_import(
@@ -129,11 +131,16 @@ def run_import(
     sample: int = 5,
     background_enrich: bool = True,
     min_chars: int = 0,
+    update_existing: bool = False,
 ) -> ImportResult:
     """임포터 하나를 실행한다. dry_run 이면 읽기만 하고 아무것도 쓰지 않는다.
 
     background_enrich=False 면 보강 큐에 넣지 않는다. CLI 처럼 프로세스가 곧
     종료되는 환경에서는 호출자가 memo_ids 로 직접 돌려야 한다.
+
+    update_existing=True 면 이미 가져온 메모의 본문이 원본과 달라졌을 때 덮어쓴다.
+    원본이 수정됐거나, 우리 쪽 파싱이 고쳐졌을 때 되살리는 용도다.
+    기본이 False 인 이유는 memoinall 안에서 손댄 내용을 말없이 날리면 안 되기 때문이다.
     """
     result = ImportResult(source=importer.name, available=importer.available(), path=str(importer.path or ""))
     if not result.available:
@@ -160,15 +167,6 @@ def run_import(
         if min_chars and len(body) < min_chars:
             result.skipped_short += 1
             continue
-        if store.find_by_external(importer.name, note.external_id) is not None:
-            result.skipped_existing += 1
-            continue
-        if len(result.samples) < sample:
-            first = body.splitlines()[0][:50]
-            result.samples.append(f"{(note.created_at or '')[:10]}  {first}")
-        if dry_run:
-            result.imported += 1
-            continue
 
         tagged = body
         if note.tags:
@@ -176,6 +174,27 @@ def run_import(
             new_tags = [t for t in note.tags if t.lower() not in existing]
             if new_tags:
                 tagged = body + "\n" + " ".join("#" + t for t in new_tags)
+
+        memo_id = store.find_by_external(importer.name, note.external_id)
+        if memo_id is not None:
+            if not update_existing:
+                result.skipped_existing += 1
+                continue
+            if store.get_memo(memo_id, with_facets=False)["body"] == tagged:
+                result.unchanged += 1
+                continue
+            if not dry_run:
+                store.update_memo(memo_id, tagged, enqueue_enrich=background_enrich)
+                result.memo_ids.append(memo_id)
+            result.updated += 1
+            _add_sample(result, sample, note, body, prefix="갱신")
+            continue
+
+        _add_sample(result, sample, note, body)
+        if dry_run:
+            result.imported += 1
+            continue
+
         memo = store.add_memo(
             tagged,
             source=importer.name,
@@ -187,6 +206,14 @@ def run_import(
         result.memo_ids.append(memo["id"])
         result.imported += 1
     return result
+
+
+def _add_sample(result: ImportResult, cap: int, note: Note, body: str, prefix: str = "") -> None:
+    if len(result.samples) >= cap:
+        return
+    first = body.splitlines()[0][:50] if body.splitlines() else ""
+    mark = f"[{prefix}] " if prefix else ""
+    result.samples.append(f"{mark}{(note.created_at or '')[:10]}  {first}")
 
 
 def build_redmine(**kwargs):
@@ -219,10 +246,14 @@ def all_importers(**kwargs) -> list:
     from .samsung import SamsungNotesImporter
     from .sticky import StickyNotesImporter
 
-    importers = [StickyNotesImporter(), SamsungNotesImporter(), build_redmine(**kwargs)]
-    if kwargs.get("files_path"):
-        importers.append(FilesImporter(kwargs["files_path"]))
-    return importers
+    # 경로를 안 줘도 목록에는 넣는다 — UI 가 항목별 버튼을 그리려면 소스가 보여야 하고,
+    # 경로가 없으면 available()=False 라 '일괄' 실행에서도 알아서 건너뛴다.
+    return [
+        StickyNotesImporter(),
+        SamsungNotesImporter(),
+        build_redmine(**kwargs),
+        FilesImporter(kwargs.get("files_path") or ""),
+    ]
 
 
 def get_importer(name: str, **kwargs):
@@ -235,10 +266,9 @@ def get_importer(name: str, **kwargs):
         "samsung": SamsungNotesImporter,
     }
     if name == "files":
-        path = kwargs.get("files_path")
-        if not path:
-            raise ValueError("files 소스는 --path 가 필요합니다.")
-        return FilesImporter(path)
+        # 경로가 없으면 available()=False 로 사유를 돌려준다.
+        # 예외를 던지면 UI 가 400 을 받아 "왜 안 되는지"를 못 보여준다.
+        return FilesImporter(kwargs.get("files_path") or "")
     if name == "redmine":
         return build_redmine(**kwargs)
     if name not in table:

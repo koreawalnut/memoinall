@@ -116,6 +116,20 @@ def main() -> int:
         check("min_chars 필터", c.post("/api/import/preview",
               json={"source": "files", "path": str(folder), "min_chars": 500}).json()["total"] == 0)
         check("잘못된 소스 400", c.post("/api/import/preview", json={"source": "없음"}).status_code == 400)
+
+        # 항목별 가져오기 — 지정한 소스만 돌아야 한다
+        one = c.post("/api/import/preview", json={"source": "samsung"}).json()
+        check("개별 실행은 한 소스만", [x["source"] for x in one["results"]] == ["samsung"],
+              [x["source"] for x in one["results"]])
+        every = c.post("/api/import/preview", json={"source": "all"}).json()
+        check("일괄은 전 소스", {x["source"] for x in every["results"]} == {"sticky", "samsung", "redmine", "files"},
+              [x["source"] for x in every["results"]])
+        check("결과에 source 키 존재", all("source" in x for x in every["results"]))
+        # 회귀: 경로 없는 files 가 400 이면 UI 가 사유를 못 보여준다
+        nofolder = c.post("/api/import/preview", json={"source": "files"})
+        check("경로 없는 files 는 200 + 사유", nofolder.status_code == 200
+              and "지정" in nofolder.json()["results"][0]["error"], nofolder.status_code)
+        check("경로 없는 files 는 0건", nofolder.json()["total"] == 0)
         shutil.rmtree(folder, ignore_errors=True)
 
         # --- 설정 · 프로바이더 ---
