@@ -20,7 +20,7 @@
   * { box-sizing: border-box; }
   body {
     margin: 0; background: var(--bg); color: var(--fg);
-    font: 14px/1.6 "Pretendard", -apple-system, "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
+    font: 15.5px/1.65 "Pretendard", -apple-system, "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
   }
   button, input, textarea, select { font: inherit; color: inherit; }
   .app { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
@@ -31,13 +31,13 @@
     padding: 18px 14px; display: flex; flex-direction: column; gap: 18px;
     position: sticky; top: 0; height: 100vh; overflow-y: auto;
   }
-  .brand { font-weight: 700; font-size: 16px; letter-spacing: -.02em; }
+  .brand { font-weight: 700; font-size: 19px; letter-spacing: -.02em; }
   .brand span { color: var(--accent); }
-  .side-h { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }
+  .side-h { font-size: 13.5px; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }
   .chips { display: flex; flex-wrap: wrap; gap: 5px; }
   .chip {
     background: var(--panel-2); border: 1px solid var(--line); color: var(--dim);
-    border-radius: 999px; padding: 2px 9px; font-size: 12px; cursor: pointer;
+    border-radius: 999px; padding: 2px 9px; font-size: 13.5px; cursor: pointer;
   }
   .chip:hover, .chip.on { border-color: var(--accent); color: var(--accent); }
   .chip .n { opacity: .55; margin-left: 3px; }
@@ -49,7 +49,7 @@
     border: 0; outline: none; font-size: 15px; line-height: 1.7;
   }
   .capture-bar { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
-  .hint { color: var(--dim); font-size: 12px; flex: 1; }
+  .hint { color: var(--dim); font-size: 13.5px; flex: 1; }
   .btn {
     background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px;
     padding: 6px 13px; cursor: pointer;
@@ -73,6 +73,28 @@
   }
   .tab.on { color: var(--fg); border-bottom-color: var(--accent); }
 
+  /* 주 메뉴 — 8개를 작은 글씨로 늘어놓으니 뭐가 뭔지 안 보였다.
+     아이콘 + 큰 글씨 + 한 줄 설명으로 바꾸고, 성격이 다른 '관리' 항목은 떼어 놓는다. */
+  .nav { display: flex; gap: 6px; flex-wrap: wrap; align-items: stretch; margin: 0 0 18px; }
+  .nav .sep { width: 1px; background: var(--line); margin: 4px 8px; }
+  .nav .tab {
+    display: flex; flex-direction: column; gap: 1px; align-items: flex-start;
+    border: 1px solid transparent; border-radius: 10px; padding: 9px 14px;
+    background: var(--panel); min-width: 104px; line-height: 1.3;
+  }
+  .nav .tab .t { font-size: 15px; font-weight: 600; color: var(--fg); display: flex; gap: 7px; align-items: center; }
+  .nav .tab .s { font-size: 12.5px; color: var(--dim); }
+  .nav .tab:hover { border-color: var(--accent); }
+  .nav .tab.on { background: var(--accent); border-color: var(--accent); }
+  .nav .tab.on .t, .nav .tab.on .s { color: #0b0e14; }
+  .nav .tab.on .s { opacity: .75; }
+  @media (max-width: 1100px) { .nav .tab .s { display: none; } .nav .tab { min-width: 0; } }
+
+  /* 화면마다 뭘 하는 곳인지 한 줄로 알려준다 */
+  .lead { margin: 0 0 16px; }
+  .lead h2 { margin: 0 0 4px; font-size: 21px; letter-spacing: -.02em; }
+  .lead p { margin: 0; color: var(--dim); font-size: 14px; line-height: 1.6; }
+
   .card {
     background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
     padding: 13px 15px; margin-bottom: 9px; cursor: pointer;
@@ -80,11 +102,11 @@
   .card:hover { border-color: var(--accent); }
   .card-h { display: flex; align-items: baseline; gap: 8px; }
   .card-title { font-weight: 600; flex: 1; }
-  .meta { color: var(--dim); font-size: 12px; white-space: nowrap; }
-  .snip { color: var(--dim); margin-top: 5px; font-size: 13px; }
+  .meta { color: var(--dim); font-size: 13.5px; white-space: nowrap; }
+  .snip { color: var(--dim); margin-top: 5px; font-size: 14px; }
   .snip mark { background: transparent; color: var(--accent-2); font-weight: 600; }
   .badges { display: flex; gap: 5px; margin-top: 7px; flex-wrap: wrap; align-items: center; }
-  .badge { font-size: 11px; border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; color: var(--dim); }
+  .badge { font-size: 13.5px; border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; color: var(--dim); }
   .badge.why { border-color: var(--accent); color: var(--accent); }
   .badge.tag { color: var(--accent-2); border-color: var(--accent-2); }
   .badge.person { color: var(--warn); border-color: var(--warn); }
@@ -92,29 +114,29 @@
   .empty { color: var(--dim); text-align: center; padding: 44px 0; }
   pre.pack {
     background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
-    padding: 14px; white-space: pre-wrap; word-break: break-word; font-size: 12.5px;
+    padding: 14px; white-space: pre-wrap; word-break: break-word; font-size: 13.5px;
     font-family: ui-monospace, "Cascadia Code", Consolas, monospace; max-height: 62vh; overflow: auto;
   }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
-  .row label { color: var(--dim); font-size: 12px; }
+  .row label { color: var(--dim); font-size: 13.5px; }
   .row input[type=number], .row select, .row input[type=date] {
     background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 5px 9px;
   }
   .todo { display: flex; gap: 9px; align-items: flex-start; padding: 9px 12px; border-bottom: 1px solid var(--line); }
   .todo:last-child { border-bottom: 0; }
   .todo input { margin-top: 5px; accent-color: var(--accent); }
-  .todo .due { color: var(--warn); font-size: 12px; }
+  .todo .due { color: var(--warn); font-size: 13.5px; }
   .cluster { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 13px 15px; margin-bottom: 10px; }
-  .cluster h3 { margin: 0 0 8px; font-size: 14px; }
-  .cluster li { color: var(--dim); font-size: 13px; cursor: pointer; list-style: none; padding: 2px 0; }
+  .cluster h3 { margin: 0 0 8px; font-size: 15.5px; }
+  .cluster li { color: var(--dim); font-size: 14px; cursor: pointer; list-style: none; padding: 2px 0; }
   .cluster li:hover { color: var(--accent); }
   .cluster ul { margin: 0; padding: 0; }
 
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
-  .panel h3 { margin: 0 0 4px; font-size: 14px; }
-  .panel .desc { color: var(--dim); font-size: 12.5px; margin-bottom: 12px; line-height: 1.6; }
+  .panel h3 { margin: 0 0 6px; font-size: 16.5px; letter-spacing: -.01em; }
+  .panel .desc { color: var(--dim); font-size: 13.5px; margin-bottom: 12px; line-height: 1.6; }
   .field { display: grid; grid-template-columns: 130px 1fr; gap: 10px; align-items: center; margin-bottom: 9px; }
-  .field > label { color: var(--dim); font-size: 12.5px; }
+  .field > label { color: var(--dim); font-size: 13.5px; }
   /* 체크박스는 제외한다 — width:100% 가 먹으면 칸 전체로 늘어나 이상하게 보인다. */
   .field input[type=checkbox] { width: auto; margin: 0 6px 0 0; accent-color: var(--accent); }
   .field label:has(input[type=checkbox]) { justify-self: start; display: flex; align-items: center; }
@@ -123,7 +145,7 @@
     padding: 7px 10px; outline: none; width: 100%;
   }
   .field input:not([type=checkbox]):focus, .field select:focus, .field textarea:focus { border-color: var(--accent); }
-  .field .note { grid-column: 2; color: var(--dim); font-size: 11.5px; margin-top: -4px; }
+  .field .note { grid-column: 2; color: var(--dim); font-size: 14px; margin-top: -4px; }
   .src { display: flex; gap: 10px; align-items: flex-start; padding: 11px 0; border-bottom: 1px solid var(--line); }
   .src:last-child { border-bottom: 0; }
   .src-body { flex: 1; min-width: 0; }
@@ -136,7 +158,7 @@
   .qchips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .qchip {
     background: var(--panel-2); border: 1px solid var(--accent); color: var(--accent);
-    border-radius: 999px; padding: 3px 10px; font-size: 12px;
+    border-radius: 999px; padding: 3px 10px; font-size: 13.5px;
   }
   .qchip button { background: none; border: 0; color: inherit; cursor: pointer; padding: 0 0 0 5px; opacity: .6; }
   .qchip button:hover { opacity: 1; }
@@ -158,7 +180,12 @@
   }
   .dlg-f { display: flex; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--line); }
   .spacer { flex: 1; }
-  .status { font-size: 11.5px; color: var(--dim); line-height: 1.5; }
+  .status { font-size: 13.5px; color: var(--dim); line-height: 1.6; }
+  /* 숫자를 먼저 크게 — 사이드바가 작은 글씨 나열이라 아무것도 안 읽혔다 */
+  .status .stat { display: flex; align-items: baseline; gap: 7px; }
+  .status .stat b { font-size: 21px; color: var(--fg); font-weight: 700; }
+  .status .line { height: 1px; background: var(--line); margin: 10px 0 8px; }
+  .status .sub { font-size: 12.5px; opacity: .85; }
   .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; }
   .dot.ok { background: var(--accent-2); } .dot.warn { background: var(--warn); } .dot.err { background: var(--danger); }
   .toast {
@@ -187,6 +214,8 @@
   </aside>
 
   <main>
+    <nav class="nav" id="tabs"></nav>
+    <div class="lead" id="lead"></div>
     <div class="capture">
       <textarea id="capture" placeholder="생각나는 대로 적으세요.  #태그  @사람  [ ] 할일  결정: ...  은 자동으로 뽑힙니다."></textarea>
       <div class="capture-bar">
@@ -198,17 +227,6 @@
     <div class="searchbar">
       <input id="q" placeholder="의미로 검색…  (예: 결제 모듈 관련해서 걱정했던 거)" />
       <button class="btn ghost" id="clear">지우기</button>
-    </div>
-
-    <div class="tabs" id="tabs">
-      <button class="tab on" data-tab="feed">메모</button>
-      <button class="tab" data-tab="todos">할일</button>
-      <button class="tab" data-tab="clusters">주제</button>
-      <button class="tab" data-tab="rollup">브리핑</button>
-      <button class="tab" data-tab="generate">생성</button>
-      <button class="tab" data-tab="pack">컨텍스트 팩</button>
-      <button class="tab" data-tab="import">가져오기</button>
-      <button class="tab" data-tab="settings">설정</button>
     </div>
 
     <div id="view"></div>
@@ -227,7 +245,7 @@
   </div>
   <div class="dlg-f">
     <button class="btn" id="dSave">저장</button>
-    <button class="btn ghost" id="dPack">이 메모로 컨텍스트 팩</button>
+    <button class="btn ghost" id="dPack">이 메모로 문서 만들기</button>
     <span class="spacer"></span>
     <button class="btn ghost" id="dDelete" style="color:var(--danger)">삭제</button>
     <button class="btn ghost" id="dClose">닫기</button>
@@ -238,7 +256,7 @@
 
 <script>
 const $ = (s) => document.querySelector(s);
-const state = { tab: "feed", q: "", tag: null, person: null, memo: null, pack: null };
+const state = { tab: "feed", q: "", tag: null, person: null, memo: null };
 
 const api = async (path, opts = {}) => {
   const res = await fetch(path, {
@@ -301,18 +319,47 @@ let searchTimer;
 $("#q").addEventListener("input", (e) => {
   state.q = e.target.value;
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => { if (state.tab === "pack") renderPack(); else render(); }, 220);
+  searchTimer = setTimeout(render, 220);
 });
 $("#clear").onclick = () => { state.q = ""; state.tag = null; state.person = null; $("#q").value = ""; loadSidebar(); render(); };
 
-document.querySelectorAll(".tab").forEach((t) => {
-  t.onclick = () => {
-    document.querySelectorAll(".tab").forEach((x) => x.classList.remove("on"));
-    t.classList.add("on");
-    state.tab = t.dataset.tab;
-    render();
-  };
-});
+// 메뉴 정의 — 이름만 보고 뭘 하는 곳인지 알 수 있어야 한다.
+// 예전 이름(주제/브리핑/생성/컨텍스트 팩)은 내부 용어라 처음 보면 뜻을 알 수 없었다.
+const TABS = [
+  { id: "feed", icon: "📝", name: "메모", sub: "적고 찾기",
+    title: "메모", lead: "생각나는 대로 적어두고, 의미로 찾습니다. 형식은 신경 쓰지 마세요." },
+  { id: "todos", icon: "✅", name: "할 일", sub: "자동 추출",
+    title: "할 일", lead: "메모에서 자동으로 뽑아낸 할 일입니다. 체크하면 목록에서 사라집니다." },
+  { id: "clusters", icon: "🧩", name: "주제별", sub: "자동 묶음",
+    title: "주제별 묶음", lead: "비슷한 내용끼리 자동으로 묶었습니다. 태그를 달지 않아도 주제가 드러납니다." },
+  { id: "rollup", icon: "📅", name: "기간 요약", sub: "일·주·월",
+    title: "기간 요약", lead: "고른 기간의 메모에서 결정·할 일·열린 질문을 모아 보여줍니다." },
+  { id: "generate", icon: "✨", name: "AI 문서", sub: "메모로 만들기",
+    title: "메모로 문서 만들기", lead: "지시사항을 적으면 관련 메모를 찾아 근거로 삼고 결과물을 씁니다." },
+  { sep: true },
+  { id: "import", icon: "📥", name: "가져오기", sub: "다른 앱에서",
+    title: "다른 앱의 메모 가져오기", lead: "스티커 메모·Samsung Notes·Redmine·텍스트 폴더에서 가져옵니다." },
+  { id: "settings", icon: "⚙️", name: "설정", sub: "AI·검색",
+    title: "설정", lead: "어떤 AI 를 쓸지, 검색용 임베딩은 어떤 상태인지 여기서 봅니다." },
+];
+const TAB_BY_ID = Object.fromEntries(TABS.filter((t) => t.id).map((t) => [t.id, t]));
+
+function renderTabs() {
+  $("#tabs").innerHTML = TABS.map((t) => t.sep
+    ? '<div class="sep"></div>'
+    : `<button class="tab ${state.tab === t.id ? "on" : ""}" data-tab="${t.id}" title="${esc(t.lead)}">
+         <span class="t">${t.icon} ${esc(t.name)}</span><span class="s">${esc(t.sub)}</span>
+       </button>`).join("");
+  $("#tabs").querySelectorAll("[data-tab]").forEach((b) => {
+    b.onclick = () => { goTab(b.dataset.tab); };
+  });
+}
+
+function goTab(id) {
+  state.tab = id;
+  renderTabs();
+  render();
+}
 
 // ---------------------------------------------------------------- 사이드바
 async function loadSidebar() {
@@ -342,28 +389,46 @@ async function loadSidebar() {
     ? `<div class="bar"><i style="width:${e.progress.percent}%"></i></div>
        <div>${e.progress.percent}% · ${Math.round(e.progress.done / 1048576)}/${Math.round(e.progress.total / 1048576)} MB</div>`
     : "";
+  const busy = stats.queue ? ` <span style="color:var(--warn)">· 정리 중 ${stats.queue}</span>` : "";
   $("#status").innerHTML = `
-    <div><span class="dot ${cls}"></span>${label}</div>
+    <div class="stat"><b>${stats.memos}</b><span>메모</span></div>
+    <div class="stat"><b>${stats.open_todos}</b><span>남은 할 일</span></div>
+    <div class="line"></div>
+    <div><span class="dot ${cls}"></span>${label}${busy}</div>
     ${dl}
-    <div>${esc(e.model)}${e.backend && e.backend !== "hash" ? ` <span style="opacity:.6">(${esc(e.backend)})</span>` : ""}</div>
-    <div>메모 ${stats.memos} · 청크 ${stats.chunks} · 대기 ${stats.queue}</div>
-    <div>미완 할일 ${stats.open_todos}</div>
-    <div>LLM ${stats.llm_enabled ? `${esc(stats.llm_provider)} / ${esc(stats.llm_model)}` : "미설정(프롬프트만)"}</div>`;
+    <div class="sub">검색 엔진 ${esc(e.model)}</div>
+    <div class="sub">AI ${stats.llm_enabled
+      ? `${esc(stats.llm_provider)} · ${esc(stats.llm_model)}`
+      : `<a href="#" data-go="settings" style="color:var(--accent)">미설정 — 지금 연결</a>`}</div>`;
+  document.querySelectorAll("#status [data-go]").forEach((a) => {
+    a.onclick = (ev) => { ev.preventDefault(); goTab(a.dataset.go); };
+  });
 }
 
 // ---------------------------------------------------------------- 렌더
-// 검색창이 의미 없는 화면에서는 감춘다 — 있으면 뭘 하는 건지 헷갈린다.
-const NO_SEARCH = new Set(["generate", "import", "settings"]);
-
 async function render() {
   const view = $("#view");
-  document.querySelector(".searchbar").style.display = NO_SEARCH.has(state.tab) ? "none" : "flex";
-  document.querySelector(".capture").style.display = state.tab === "settings" || state.tab === "import" ? "none" : "block";
+  // 메모 입력창과 검색창은 '메모' 화면 전용이다. 다른 화면에서는 검색어가 아예
+  // 쓰이지 않는데도 검색창이 떠 있어서 "쳐도 아무 일이 없는" 상태였다.
+  const onFeed = state.tab === "feed";
+  document.querySelector(".searchbar").style.display = onFeed ? "flex" : "none";
+  document.querySelector(".capture").style.display = onFeed ? "block" : "none";
+
+  // 화면마다 제목 + 한 줄 설명. 탭 이름만으로 뭘 하는 곳인지 모르겠다는 게 문제였다.
+  const t = TAB_BY_ID[state.tab];
+  const lead = $("#lead");
+  if (t) {
+    lead.innerHTML = `<h2>${t.icon} ${esc(t.title)}</h2><p>${esc(t.lead)}</p>`;
+    lead.style.display = "block";
+  } else {
+    lead.style.display = "none";
+  }
+
   view.innerHTML = `<div class="empty">불러오는 중…</div>`;
   try {
     const views = {
       feed: renderFeed, todos: renderTodos, clusters: renderClusters, rollup: renderRollup,
-      generate: renderGenerate, pack: renderPack, import: renderImport, settings: renderSettings,
+      generate: renderGenerate, import: renderImport, settings: renderSettings,
     };
     await (views[state.tab] || renderFeed)();
   } catch (e) {
@@ -396,6 +461,10 @@ function cardHTML(m) {
 
 function bindCards() {
   document.querySelectorAll(".card[data-id]").forEach((c) => (c.onclick = () => openMemo(+c.dataset.id)));
+  // 빈 화면 안내의 '다른 앱에서 가져오기' 같은 이동 링크
+  document.querySelectorAll("[data-go]").forEach((a) => {
+    a.onclick = (e) => { e.preventDefault(); goTab(a.dataset.go); };
+  });
 }
 
 async function renderFeed() {
@@ -404,14 +473,21 @@ async function renderFeed() {
     : await api("/api/memos?" + qs({ limit: 40 }));
   const items = data.items || [];
   $("#view").innerHTML = items.length
-    ? (state.q.trim() ? `<div class="status" style="margin-bottom:10px">${items.length}건 · 의미검색+키워드 융합</div>` : "") + items.map(cardHTML).join("")
-    : `<div class="empty">${state.q ? "결과가 없습니다." : "아직 메모가 없습니다. 위에 아무거나 적어보세요."}</div>`;
+    ? (state.q.trim() ? `<div class="status" style="margin-bottom:10px">${items.length}건 — 뜻이 비슷한 메모까지 함께 찾았습니다</div>` : "") + items.map(cardHTML).join("")
+    : `<div class="empty">${state.q
+        ? `'${esc(state.q)}' 에 대한 결과가 없습니다.<br/><span style="font-size:14px">다른 말로 바꿔 보세요 — 정확한 단어가 아니어도 뜻이 비슷하면 찾습니다.</span>`
+        : `아직 메모가 없습니다.<br/><span style="font-size:14px">위 칸에 아무거나 적고 <b>Ctrl+Enter</b> 를 누르거나,
+           <a href="#" data-go="import" style="color:var(--accent)">다른 앱에서 가져오기</a> 로 시작하세요.</span>`}</div>`;
   bindCards();
 }
 
 async function renderTodos() {
   const { items } = await api("/api/todos?limit=200");
-  if (!items.length) { $("#view").innerHTML = `<div class="empty">미완 할일이 없습니다.</div>`; return; }
+  if (!items.length) {
+    $("#view").innerHTML = `<div class="empty">아직 할 일이 없습니다.<br/>
+      <span style="font-size:14px">메모에 <b>[ ]</b> 를 쓰거나 "~해야 함", "~할 것" 처럼 적으면 자동으로 잡힙니다.</span></div>`;
+    return;
+  }
   $("#view").innerHTML = `<div class="card" style="cursor:default;padding:0">` + items.map((t) => `
     <div class="todo">
       <input type="checkbox" data-todo="${t.id}" />
@@ -430,8 +506,13 @@ async function renderTodos() {
 
 async function renderClusters() {
   const { clusters } = await api("/api/clusters");
-  if (!clusters.length) { $("#view").innerHTML = `<div class="empty">묶을 메모가 아직 없습니다. (임베딩 생성 대기 중일 수 있어요)</div>`; return; }
-  $("#view").innerHTML = `<div class="status" style="margin-bottom:10px">임베딩 유사도로 자동 묶은 주제입니다. 태그를 안 달아도 나옵니다.</div>` +
+  if (!clusters.length) {
+    $("#view").innerHTML = `<div class="empty">묶을 메모가 아직 없습니다.<br/>
+      <span style="font-size:14px">메모가 몇 개 쌓이면 비슷한 것끼리 자동으로 묶입니다.
+      (방금 넣었다면 정리 중일 수 있어요)</span></div>`;
+    return;
+  }
+  $("#view").innerHTML =
     clusters.map((c) => `<div class="cluster">
       <h3>${esc(c.label)} <span class="meta">${c.size}건</span></h3>
       <ul>${c.memos.map((m) => `<li data-memo="${m.id}">· ${esc(m.title)} <span class="meta">${fmt(m.created_at)}</span></li>`).join("")}</ul>
@@ -476,38 +557,6 @@ async function renderRollup() {
   document.querySelectorAll("[data-memo]").forEach((li) => (li.onclick = () => openMemo(+li.dataset.memo)));
 }
 
-async function renderPack() {
-  const q = state.q.trim();
-  const budget = state.budget || 2000;
-  if (!q) {
-    $("#view").innerHTML = `<div class="empty">위 검색창에 질문을 적으면, 그 질문에 맞는 근거 메모를<br/>토큰 예산 안에서 골라 LLM 프롬프트로 만들어 줍니다.</div>`;
-    return;
-  }
-  const d = await api("/api/context?" + qs({ q, budget, limit: 12 }));
-  state.pack = d;
-  $("#view").innerHTML = `
-    <div class="row">
-      <label>토큰 예산</label>
-      <input type="number" id="budget" value="${budget}" min="300" max="60000" step="500" style="width:100px" />
-      <span class="meta">사용 ${d.used_tokens} · 근거 ${d.sources.length}건${d.dropped.length ? ` · 예산초과 제외 ${d.dropped.length}건` : ""}</span>
-      <span class="spacer"></span>
-      <button class="btn" id="copyPack">프롬프트 복사</button>
-      <button class="btn primary" id="askBtn">메모로 답하기</button>
-    </div>
-    <div id="answerOut"></div>
-    <pre class="pack">${esc(d.prompt)}</pre>`;
-  $("#budget").onchange = (e) => { state.budget = +e.target.value; renderPack(); };
-  $("#copyPack").onclick = () => { navigator.clipboard.writeText(d.prompt); toast("프롬프트를 복사했습니다"); };
-  $("#askBtn").onclick = async () => {
-    const out = $("#answerOut");
-    out.innerHTML = `<div class="status">생각 중…</div>`;
-    const r = await api("/api/ask", { method: "POST", body: { q, budget } });
-    out.innerHTML = r.answer
-      ? `<pre class="pack" style="border-color:var(--accent)">${esc(r.answer)}</pre>`
-      : `<div class="status" style="margin-bottom:10px">${esc(r.reason)}</div>`;
-  };
-}
-
 // ---------------------------------------------------------------- 생성
 // 지시사항 → (검색 질의 도출) → 근거 검색 → 결과물.
 // 중간의 '검색 질의'를 감추지 않고 보여주고 고칠 수 있게 한 게 핵심이다.
@@ -520,10 +569,10 @@ async function renderGenerate() {
 
   $("#view").innerHTML = `
     <div class="panel">
-      <h3>지시사항으로 결과물 만들기</h3>
+      <h3>무엇을 만들까요?</h3>
       <div class="desc">
-        지시사항을 적으면 관련 메모를 <b>여러 각도로 검색</b>해 근거로 삼고 결과물을 씁니다.
-        검색 질의는 아래에 그대로 보여주니, 엉뚱하면 직접 고치세요.
+        관련 메모를 <b>여러 각도로 검색</b>해 근거로 삼습니다.
+        어떤 말로 검색했는지 아래에 그대로 보여주니, 엉뚱하면 직접 고치세요.
         ${llm_ready
           ? `<br/><span class="meta">생성 엔진: ${esc(provider)}</span>`
           : `<br/><span style="color:var(--warn)">${esc(provider)} 설정이 없어 프롬프트까지만 만듭니다 — 설정 탭에서 등록하거나 복사해서 쓰세요.</span>`}
@@ -593,7 +642,7 @@ function renderPlanPanel() {
             <div><b>[M${s.id}]</b> ${esc(s.title)} <span class="meta">${s.created_at.slice(0, 10)}</span></div>
             <div class="meta">일치 질의: ${s.matched_queries.map(esc).join(" / ")}</div>
           </div>
-          <button class="btn ghost" data-openmemo="${s.id}" style="padding:3px 9px;font-size:12px">열기</button>
+          <button class="btn ghost" data-openmemo="${s.id}" style="padding:3px 9px;font-size:13.5px">열기</button>
         </div>`).join("") || `<div class="status">관련 메모를 찾지 못했습니다. 질의를 바꿔보세요.</div>`}
       </div>
       <div class="row" style="margin:14px 0 0">
@@ -722,11 +771,10 @@ async function renderImport() {
 
   $("#view").innerHTML = `
     <div class="panel">
-      <h3>다른 앱의 메모 가져오기</h3>
+      <h3>공통 설정</h3>
       <div class="desc">
-        원본은 <b>읽기만</b> 합니다 (앱이 켜져 있어도 안전). 원래 작성 시각을 그대로 유지하고,
-        같은 메모가 두 번 들어가지 않습니다. 먼저 미리보기로 확인한 뒤 실행하세요.
-        <br/>항목별로 가져오거나, 아래에서 <b>한 번에</b> 가져올 수 있습니다.
+        원본은 <b>읽기만</b> 합니다(앱이 켜져 있어도 안전). 원래 작성 시각을 유지하고
+        같은 메모가 두 번 들어가지 않습니다. <b>먼저 미리보기</b>로 확인한 뒤 실행하세요.
       </div>
       <div class="field">
         <label>최소 길이</label>
@@ -735,7 +783,7 @@ async function renderImport() {
       </div>
       <div class="field">
         <label>기존 메모</label>
-        <label style="color:var(--dim);font-size:12.5px;cursor:pointer">
+        <label style="color:var(--dim);font-size:13.5px;cursor:pointer">
           <input type="checkbox" id="impUpdate" ${imp.update ? "checked" : ""} style="margin-right:6px"/>이미 가져온 메모도 갱신</label>
         <div class="note">원본이 바뀌었거나 예전에 잘못 들어온 메모를 되살릴 때 켜세요.
           <b>memoinall 안에서 직접 고친 내용은 덮어써집니다.</b></div>
@@ -796,7 +844,7 @@ async function renderImport() {
         <input id="rmSince" value="${esc(s["import.redmine.since"].value)}" placeholder="YYYY-MM-DD (선택)" />
       </div>
       <div class="row" style="margin-top:12px">
-        <label style="color:var(--dim);font-size:12.5px">
+        <label style="color:var(--dim);font-size:13.5px">
           <input type="checkbox" id="rmNotes" style="margin-right:5px"/>이슈 코멘트도 포함 (건별 요청이라 느립니다)</label>
         <span class="spacer"></span>
         <button class="btn" id="rmTest">연결 테스트</button>
@@ -1144,12 +1192,10 @@ $("#dDelete").onclick = async () => {
   render(); loadSidebar();
 };
 $("#dPack").onclick = () => {
-  $("#q").value = state.memo.title;
-  state.q = state.memo.title;
+  gen.instruction = `"${state.memo.title}" 관련 내용을 정리해줘`;
+  gen.plan = gen.output = null;
   $("#detail").close();
-  document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("on", x.dataset.tab === "pack"));
-  state.tab = "pack";
-  render();
+  goTab("generate");
 };
 
 document.addEventListener("keydown", (e) => {
@@ -1158,6 +1204,7 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+renderTabs();
 loadSidebar();
 render();
 setInterval(loadSidebar, 6000);
