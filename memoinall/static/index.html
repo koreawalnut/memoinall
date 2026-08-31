@@ -747,9 +747,61 @@ function sourceCard(x, extra = "") {
         <button class="btn" data-src-preview="${x.name}" ${disabled}>미리보기</button>
         <button class="btn primary" data-src-run="${x.name}" ${disabled}>가져오기</button>
       </div>
+      ${resetRow(x)}
       <div id="impOut-${x.name}"></div>
     </div>
   </div>`;
+}
+
+// 이 앱에서 가져온 메모를 통째로 지우는 줄. 원본을 못 읽는 상태여도(앱 삭제,
+// 서버 접속 불가) 이미 들어온 데이터는 지울 수 있어야 하므로 available 과 무관하다.
+function resetRow(x) {
+  const st = x.stored || { memos: 0 };
+  if (!st.memos) {
+    return `<div class="meta" style="margin-top:8px">아직 이 앱에서 가져온 메모가 없습니다.</div>`;
+  }
+  const span = st.first ? ` <span class="meta">· ${esc(st.first)} ~ ${esc(st.last)}</span>` : "";
+  return `<div class="row" style="margin-top:8px;gap:8px">
+      <span class="meta">가져와 있는 메모 <b style="color:var(--fg)">${st.memos}건</b>${span}</span>
+      <span class="spacer"></span>
+      <button class="btn ghost" data-src-reset="${x.name}" data-n="${st.memos}"
+              style="color:var(--danger)">전부 삭제</button>
+    </div>
+    <div id="impReset-${x.name}"></div>`;
+}
+
+function askReset(name, n) {
+  const el = $(`#impReset-${name}`);
+  if (!el) return;
+  // 한 번 더 묻는다 — 되돌릴 수 없는데다, 지우는 양이 클수록 오조작 대가가 크다.
+  el.innerHTML = `<div style="margin-top:9px;padding:10px 12px;border:1px solid var(--danger);border-radius:8px">
+      <div><b style="color:var(--danger)">${esc(name)} 에서 가져온 메모 ${n}건을 지웁니다.</b></div>
+      <div class="note" style="margin-top:4px">
+        딸린 할 일·태그·임베딩도 같이 지워지고, memoinall 안에서 고친 내용도 사라집니다.
+        <b>되돌릴 수 없습니다.</b> 직접 쓴 메모와 다른 앱에서 가져온 메모는 그대로 둡니다.
+      </div>
+      <div class="row" style="margin-top:10px">
+        <span class="spacer"></span>
+        <button class="btn" data-reset-cancel>취소</button>
+        <button class="btn primary" data-reset-go
+                style="background:var(--danger);border-color:var(--danger)">${n}건 지우기</button>
+      </div>
+    </div>`;
+  el.querySelector("[data-reset-cancel]").onclick = () => { el.innerHTML = ""; };
+  el.querySelector("[data-reset-go]").onclick = () => doReset(name, el);
+}
+
+async function doReset(name, el) {
+  el.innerHTML = `<div class="status" style="margin-top:9px">지우는 중…</div>`;
+  try {
+    const r = await api("/api/import/reset", { method: "POST", body: { source: name, confirm: true } });
+    delete imp.results[name];  // 지워진 데이터의 옛 가져오기 결과가 남아 있으면 오해를 부른다
+    toast(r.deleted ? `${name} 메모 ${r.deleted}건을 지웠습니다` : "지울 메모가 없었습니다");
+    loadSidebar();
+    render();
+  } catch (err) {
+    el.innerHTML = `<div class="status" style="color:var(--danger);margin-top:9px">${esc(err.message)}</div>`;
+  }
 }
 
 async function renderImport() {
@@ -853,6 +905,7 @@ async function renderImport() {
         <button class="btn primary" data-src-run="redmine">가져오기</button>
       </div>
       <div id="rmOut" style="margin-top:10px"></div>
+      ${resetRow(byName.redmine)}
       <div id="impOut-redmine"></div>
     </div>`;
 
@@ -866,6 +919,9 @@ async function renderImport() {
   });
   document.querySelectorAll("[data-src-run]").forEach((b) => {
     b.onclick = () => doImport(false, b.dataset.srcRun);
+  });
+  document.querySelectorAll("[data-src-reset]").forEach((b) => {
+    b.onclick = () => askReset(b.dataset.srcReset, +b.dataset.n);
   });
 
   // 이전 결과를 각 소스 칸에 되살린다 (탭을 다시 그려도 남아 있게)

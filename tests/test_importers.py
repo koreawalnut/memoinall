@@ -58,13 +58,14 @@ def make_plum(path: Path) -> None:
         ("g-2", "  \n\n\n온보딩 단계 줄이기\n\n\n\n\n결정: 3단계로\n\n", "2026-06-05T14:00:00", None, 0),
         ("g-3", "삭제된 메모", "2026-06-06T14:00:00", None, 1),
         ("g-4", "   \n \n ", "2026-06-07T14:00:00", None, 0),  # 본문 없음
+        # 실제 저장 형식 그대로 — 문단마다 '\id=<guid> ' 가 붙고, 빈 문단은 뒤에 공백만 남는다
         ("g-5", "\n".join([
-            "id=f5024f0e-4c7c-431e-8b7e-2bc941475a6a 네트워크 사용량 확인방법",
-            "id=f0ebc9a4-4b0b-4065-b659-f82bbe281ec2",
-            "id=5a12eaab-3ded-470d-b3a9-8d962fd43878 211.249.118.254",
-            "id=a480369a-24ef-4582-857d-5eb280844bd3",
-            "id=f93de07c-1417-4add-92f3-d1d0837838a7 admin",
-            "id=4bbcc8e1-d655-491d-aab5-6973c9958add sh int gigabitEthernet 1/0/2",
+            "\\id=f5024f0e-4c7c-431e-8b7e-2bc941475a6a 네트워크 사용량 확인방법",
+            "\\id=f0ebc9a4-4b0b-4065-b659-f82bbe281ec2 ",
+            "\\id=5a12eaab-3ded-470d-b3a9-8d962fd43878 211.249.118.254",
+            "\\id=a480369a-24ef-4582-857d-5eb280844bd3 ",
+            "\\id=f93de07c-1417-4add-92f3-d1d0837838a7 admin",
+            "\\id=4bbcc8e1-d655-491d-aab5-6973c9958add sh int gigabitEthernet 1/0/2",
         ]), "2026-06-08T14:00:00", None, 0),
     ]
     conn.executemany("INSERT INTO Note(Id,Text,CreatedAt,UpdatedAt,IsDeleted) VALUES(?,?,?,?,?)", rows)
@@ -133,6 +134,30 @@ def main() -> int:
     check("공백 없이 붙은 경우", _strip_markup(f"{guid}내용") == "내용", _strip_markup(f"{guid}내용"))
     check("탭 구분", _strip_markup(f"{guid}\t내용") == "내용", _strip_markup(f"{guid}\t내용"))
 
+    # 회귀: 실제 저장 형식은 '\id=' 로 역슬래시가 앞에 붙는다(사용자 PC 덤프로 확인).
+    # 이걸 놓쳐서 재가져오기가 계속 '변경없음' 으로 끝났다.
+    real = (
+        "\\id=2499c50f-27b9-47fa-be00-e7f481731982 instif 서버\n"
+        "\\id=79b24e3a-9f6f-4f9f-875a-efd7aeebcb76 \n"
+        "\\id=49426e0d-7ae4-462c-ad49-8bc9fa944a85 172.16.2.220\n"
+        "\\id=33084e17-edc7-47ed-81d8-eb4dfd248405 /usr/share/tomcat/webapps/lms\n"
+        "\\id=067b4f58-27c2-4aef-9e9b-2ac469d2b0b1 /home/instif/restart.sh  또는  inst_restart 로 재기동"
+    )
+    got = _strip_markup(real)
+    check("역슬래시 붙은 실제 형식", "id=" not in got and "2499c50f" not in got, repr(got[:80]))
+    check("실제 형식 내용 보존",
+          got.startswith("instif 서버") and "172.16.2.220" in got
+          and "/usr/share/tomcat/webapps/lms" in got and "inst_restart 로 재기동" in got, repr(got))
+    check("실제 형식 제목", textutil.title_from(importers.clean(got)) == "instif 서버",
+          textutil.title_from(importers.clean(got)))
+    check("역슬래시 2개도 제거", _strip_markup(f"\\\\{guid} 내용") == "내용",
+          repr(_strip_markup(f"\\\\{guid} 내용")))
+    # 역슬래시를 무조건 떼면 UNC 경로가 망가진다 — id 마커일 때만 떼야 한다
+    check("UNC 경로는 보존", _strip_markup("\\\\서버\\공유\\문서") == "\\\\서버\\공유\\문서",
+          repr(_strip_markup("\\\\서버\\공유\\문서")))
+    check("역슬래시로 시작하는 내용 보존",
+          _strip_markup("\\연결 안 됨") == "\\연결 안 됨", repr(_strip_markup("\\연결 안 됨")))
+
     r = importers.run_import(imp, dry_run=True, background_enrich=False)
     check("dry-run 은 저장 안 함", r.imported == 3 and store.stats()["memos"] == 0, store.stats()["memos"])
     check("빈 본문 집계", r.skipped_empty == 0 or r.skipped_empty >= 0)
@@ -169,6 +194,25 @@ def main() -> int:
           importers.run_import(imp, dry_run=False, background_enrich=False).updated == 0)
     check("갱신 끄면 기존은 건너뜀", store.get_memo(target)["body"] == "또 바꿈")
     importers.run_import(imp, dry_run=False, background_enrich=False, update_existing=True)
+
+    # 회귀(실사용): 파서가 '\id=' 를 못 걷어내던 시절에 가져온 메모들은 GUID 를 그대로
+    # 안고 저장됐다. 그 상태에서 '이미 가져온 메모도 갱신' 을 켜고 다시 돌리면
+    # 새 파싱 결과와 달라지므로 반드시 갱신돼야 한다 — 예전엔 '변경없음' 으로 끝났다.
+    section("노이즈째 저장된 메모 복구")
+    noisy = store.find_by_external("sticky", "g-5")
+    store.update_memo(
+        noisy,
+        "id=f5024f0e-4c7c-431e-8b7e-2bc941475a6a 네트워크 사용량 확인방법\n"
+        "id=5a12eaab-3ded-470d-b3a9-8d962fd43878 211.249.118.254",
+        enqueue_enrich=False,
+    )
+    r6 = importers.run_import(imp, dry_run=False, background_enrich=False, update_existing=True)
+    check("노이즈 메모가 갱신 대상", r6.updated == 1, (r6.updated, r6.unchanged))
+    fixed = store.get_memo(noisy)["body"]
+    check("GUID 사라짐", "id=" not in fixed and "f5024f0e" not in fixed, fixed[:60])
+    check("제목 복구", textutil.title_from(fixed) == "네트워크 사용량 확인방법", textutil.title_from(fixed))
+    r7 = importers.run_import(imp, dry_run=False, background_enrich=False, update_existing=True)
+    check("복구 뒤엔 변경없음", r7.updated == 0 and r7.unchanged == 3, (r7.updated, r7.unchanged))
 
     for mid in r.memo_ids:
         store.enrich(mid)
@@ -217,6 +261,44 @@ def main() -> int:
     check("목록에는 항상 포함(경로 없어도)",
           any(i.name == "files" for i in importers.all_importers()),
           [i.name for i in importers.all_importers()])
+
+    section("소스별 초기화")
+    base = store.count_by_source("sticky")["memos"]  # 앞 절에서 가져온 것들이 이미 있다
+    a = store.add_memo("초기화 대상 메모 하나", source="sticky",
+                       external_id="reset-1", enqueue_enrich=False)
+    b = store.add_memo("초기화 대상 메모 둘", source="sticky",
+                       external_id="reset-2", enqueue_enrich=False)
+    store.add_memo("다른 앱 메모", source="samsung", external_id="reset-3", enqueue_enrich=False)
+    mine = store.add_memo("직접 쓴 메모", enqueue_enrich=False)
+    store.enrich(a["id"])  # 파생물(chunks/facets/todos)이 있는 상태에서 지워봐야 한다
+
+    info = store.count_by_source("sticky")
+    check("count_by_source 건수", info["memos"] == base + 2, info)
+    check("count_by_source 기간", len(info["first"]) == 10 and len(info["last"]) == 10, info)
+    check("없는 소스는 0건", store.count_by_source("nope")["memos"] == 0)
+
+    n = store.delete_by_source("sticky")
+    check("delete_by_source 반환값", n == base + 2, n)
+    check("해당 소스 전멸", store.count_by_source("sticky")["memos"] == 0)
+    check("다른 소스는 무사", store.count_by_source("samsung")["memos"] == 1)
+    check("직접 쓴 메모는 무사", store.get_memo(mine["id"])["body"] == "직접 쓴 메모")
+    check("파생물도 정리(CASCADE)",
+          db.one("SELECT COUNT(*) c FROM chunks WHERE memo_id=?", (a["id"],))["c"] == 0)
+    # 회귀: memo_fts 는 가상 테이블이라 외래키가 안 걸린다. 직접 안 지우면 유령이 남는다
+    check("FTS 잔재 없음",
+          db.one("SELECT COUNT(*) c FROM memo_fts WHERE rowid=?", (b["id"],))["c"] == 0)
+    # 지운 뒤엔 같은 external_id 로 다시 들어와야 한다 (유니크 인덱스 잔재 확인)
+    check("삭제 후 external_id 재사용", store.find_by_external("sticky", "reset-1") is None)
+    again = store.add_memo("다시 가져온 메모", source="sticky",
+                           external_id="reset-1", enqueue_enrich=False)
+    check("같은 external_id 로 재수집", again["id"] != a["id"])
+    check("빈 소스 재실행 무해", store.delete_by_source("nope") == 0)
+    store.delete_by_source("sticky")
+    store.delete_by_source("samsung")
+    store.delete_memo(mine["id"])
+    check("초기화 대상은 임포터 소스뿐",
+          set(importers.SOURCE_NAMES) == {"sticky", "samsung", "redmine", "files"},
+          importers.SOURCE_NAMES)
 
     section("실제 Samsung Notes (있으면 읽기 전용 확인)")
     s = SamsungNotesImporter()

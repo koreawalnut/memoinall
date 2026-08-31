@@ -199,9 +199,33 @@ def import_sources(path: str | None = None):
                 "path": str(imp.path or ""),
                 "reason": "" if available else imp.unavailable_reason(),
                 "network": imp.name == "redmine",
+                # 이미 가져와 있는 양. 다시 가져올지 지울지 판단할 근거가 된다.
+                "stored": store.count_by_source(imp.name),
             }
         )
     return {"sources": out}
+
+
+@app.post("/api/import/reset")
+def import_reset(payload: dict = Body(default={})):
+    """한 소스에서 가져온 메모를 통째로 지운다.
+
+    되돌릴 수 없으므로 confirm 을 명시적으로 받는다. 지우는 대상은 임포터가
+    만든 source 로 한정한다 — 손으로 쓴 메모는 이 경로로 지워지면 안 된다.
+    """
+    source = str(payload.get("source") or "")
+    if source not in importers.SOURCE_NAMES:
+        raise HTTPException(
+            400,
+            f"초기화할 수 없는 소스: {source or '(없음)'} "
+            f"(가능: {', '.join(importers.SOURCE_NAMES)})",
+        )
+    before = store.count_by_source(source)
+    if not payload.get("confirm"):
+        # 미리보기 — 몇 건이 지워질지만 알려주고 아무것도 건드리지 않는다.
+        return {"deleted": 0, "confirmed": False, "stored": before}
+    deleted = store.delete_by_source(source)
+    return {"deleted": deleted, "confirmed": True, "stored": store.count_by_source(source)}
 
 
 @app.get("/api/import/sticky/raw")

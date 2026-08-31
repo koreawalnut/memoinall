@@ -130,6 +130,38 @@ def main() -> int:
         check("경로 없는 files 는 200 + 사유", nofolder.status_code == 200
               and "지정" in nofolder.json()["results"][0]["error"], nofolder.status_code)
         check("경로 없는 files 는 0건", nofolder.json()["total"] == 0)
+
+        # --- 소스별 초기화 ---
+        files_src = [s for s in c.get("/api/import/sources").json()["sources"] if s["name"] == "files"][0]
+        check("sources 에 저장 건수", files_src["stored"]["memos"] == 1, files_src.get("stored"))
+        check("저장 기간도 함께", bool(files_src["stored"]["first"]), files_src["stored"])
+
+        before_reset = c.get("/api/stats").json()["memos"]
+        # 손으로 쓴 메모는 절대 지워지면 안 된다 — 초기화 대상은 임포터 소스뿐
+        keep = c.post("/api/memos", json={"body": "손으로 쓴 메모는 남아야 합니다"}).json()["id"]
+        check("web 소스 초기화 거부", c.post("/api/import/reset", json={"source": "web"}).status_code == 400)
+        check("빈 소스 초기화 거부", c.post("/api/import/reset", json={}).status_code == 400)
+
+        dryr = c.post("/api/import/reset", json={"source": "files"}).json()
+        check("confirm 없으면 미리보기", dryr["deleted"] == 0 and dryr["confirmed"] is False, dryr)
+        check("미리보기는 안 지움", c.get("/api/stats").json()["memos"] == before_reset + 1)
+
+        gone = c.post("/api/import/reset", json={"source": "files", "confirm": True}).json()
+        check("초기화 실행", gone["deleted"] == 1 and gone["stored"]["memos"] == 0, gone)
+        check("메모 수 감소", c.get("/api/stats").json()["memos"] == before_reset)
+        check("직접 쓴 메모는 생존", c.get(f"/api/memos/{keep}").status_code == 200)
+        # 회귀: FTS 는 외래키가 안 걸린다 — 안 지우면 유령이 검색에 남는다
+        hits = c.get("/api/search", params={"q": "가져오기 테스트 메모"}).json()["items"]
+        check("지운 메모는 검색에 안 잡힘",
+              all("가져오기 테스트" not in h["body"] for h in hits), len(hits))
+        empty = c.post("/api/import/reset", json={"source": "files", "confirm": True}).json()
+        check("빈 소스 재실행 무해", empty["deleted"] == 0, empty)
+        c.delete(f"/api/memos/{keep}")
+
+        # 초기화 뒤 다시 가져올 수 있어야 한다 (external_id 유니크 인덱스 잔재 확인)
+        readd = c.post("/api/import/run", json={"source": "files", "path": str(folder)}).json()
+        check("초기화 후 재수집 가능", readd["total"] == 1, readd["total"])
+        c.post("/api/import/reset", json={"source": "files", "confirm": True})
         shutil.rmtree(folder, ignore_errors=True)
 
         # --- 설정 · 프로바이더 ---

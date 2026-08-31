@@ -241,6 +241,11 @@ def build_redmine(**kwargs):
     )
 
 
+# 가져오기로 만들어진 source 값들. 손으로 쓴 메모('web')·CLI('cli') 는 여기 없다 —
+# 초기화가 그것까지 지우면 안 되기 때문에 삭제 대상은 이 목록으로만 받는다.
+SOURCE_NAMES = ("sticky", "samsung", "redmine", "files")
+
+
 def all_importers(**kwargs) -> list:
     from .files import FilesImporter
     from .samsung import SamsungNotesImporter

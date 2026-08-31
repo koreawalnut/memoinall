@@ -90,6 +90,44 @@ def delete_memo(memo_id: int) -> None:
     _search_cache.invalidate()
 
 
+def count_by_source(source: str) -> dict:
+    """한 소스에서 가져온 메모의 건수와 기간. '무엇을 지우게 되는지' 보여주려고."""
+    row = db.one(
+        "SELECT COUNT(*) n, MIN(created_at) first, MAX(created_at) last, "
+        "SUM(CASE WHEN archived=1 THEN 1 ELSE 0 END) archived FROM memos WHERE source=?",
+        (source,),
+    )
+    n = int(row["n"]) if row else 0
+    return {
+        "source": source,
+        "memos": n,
+        "archived": int(row["archived"] or 0) if n else 0,
+        "first": (row["first"] or "")[:10] if n else "",
+        "last": (row["last"] or "")[:10] if n else "",
+    }
+
+
+def delete_by_source(source: str) -> int:
+    """한 소스에서 가져온 메모를 통째로 지운다. 지운 건수를 돌려준다.
+
+    파생물(chunks/facets/todos)은 FK CASCADE 로 따라 지워지지만 memo_fts 는
+    가상 테이블이라 외래키가 안 걸린다 — 직접 지우지 않으면 지워진 메모가
+    검색 결과에 유령으로 남는다.
+
+    source 를 통째로 지우므로 손으로 쓴 메모('web')를 넘기면 그것도 지워진다.
+    막는 것은 호출자(API/CLI)의 몫이다.
+    """
+    ids = [int(r["id"]) for r in db.query("SELECT id FROM memos WHERE source=?", (source,))]
+    if not ids:
+        return 0
+    conn = db.connect()
+    with conn:  # 하나라도 실패하면 통째로 되돌린다 — 반쯤 지워진 상태가 제일 나쁘다
+        conn.executemany("DELETE FROM memo_fts WHERE rowid=?", [(i,) for i in ids])
+        conn.execute("DELETE FROM memos WHERE source=?", (source,))
+    _search_cache.invalidate()
+    return len(ids)
+
+
 def set_flag(memo_id: int, *, pinned: bool | None = None, archived: bool | None = None) -> dict:
     if pinned is not None:
         db.execute("UPDATE memos SET pinned=? WHERE id=?", (1 if pinned else 0, memo_id))

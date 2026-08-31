@@ -134,18 +134,19 @@ def _is_deleted(value) -> bool:
 
 
 # 최신 스티커 메모는 본문을 '문단마다 id 를 붙인' 형태로 저장한다.
-#     id=f5024f0e-4c7c-431e-8b7e-2bc941475a6a 네트워크 사용량 확인방법
-#     id=f0ebc9a4-4b0b-4065-b659-f82bbe281ec2          ← 내용 없는 줄 = 빈 줄
+#     \id=f5024f0e-4c7c-431e-8b7e-2bc941475a6a 네트워크 사용량 확인방법
+#     \id=f0ebc9a4-4b0b-4065-b659-f82bbe281ec2         ← 내용 없는 줄 = 빈 줄
 # 이걸 그대로 넣으면 메모가 온통 GUID 로 뒤덮이고, 제목도 'id=...' 로 잡히며,
 # 검색 색인에도 쓸모없는 16진수가 잔뜩 들어간다.
 # 눈에 안 보이는 문자들. 이게 줄 앞에 있으면 strip() 으로는 안 지워져서
 # '^id=' 매칭이 실패한다 — 정규식은 멀쩡한데 아무것도 안 지워지는 것처럼 보인다.
 INVISIBLE_RE = re.compile(r"[​-‏  ‪-‮⁠﻿\x00-\x08\x0b\x0c\x0e-\x1f]")
 
+# 앞의 역슬래시(\id=)는 실제 저장 형식에서 확인된 것이다. 없는 버전도 있어 0개 이상 받는다.
 # GUID 는 중괄호가 붙거나 하이픈이 없는 변형도 있어 넉넉히 받는다.
 # 뒤 구분자를 \s* 로 둬서 'id=<guid>내용' 처럼 붙어 있어도 걷어낸다.
 PARAGRAPH_ID_RE = re.compile(
-    r"^id=\{?[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}\}?\s*",
+    r"^\\*id=\{?[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}\}?\s*",
     re.IGNORECASE,
 )
 
@@ -162,7 +163,6 @@ def _strip_markup(text: str | None) -> str:
         # 문단 id 접두어 제거. 완전한 GUID 형태일 때만 지워서
         # 'id=12345' 같은 진짜 메모 내용은 건드리지 않는다.
         stripped = PARAGRAPH_ID_RE.sub("", stripped, count=1).strip()
-        if stripped.startswith("\\") and len(stripped) > 1:  # 이스케이프 흔적
-            stripped = stripped[1:]
+        # 남은 역슬래시는 건드리지 않는다 — \\서버\공유 같은 경로가 메모의 내용일 수 있다.
         out.append(stripped)
     return "\n".join(out)

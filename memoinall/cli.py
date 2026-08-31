@@ -220,11 +220,42 @@ def _dump_raw(args) -> int:
     return 0
 
 
+def _reset_source(args) -> int:
+    """한 소스에서 가져온 메모를 통째로 지운다. 가져오기와 같이 기본은 미리보기."""
+    from . import importers
+
+    if args.source not in importers.SOURCE_NAMES:
+        print(
+            f"--reset 은 소스를 하나 지정해야 합니다 (가능: {', '.join(importers.SOURCE_NAMES)}).\n"
+            f"예: python -m memoinall import --source sticky --reset",
+            file=sys.stderr,
+        )
+        return 2
+
+    info = store.count_by_source(args.source)
+    if not info["memos"]:
+        print(f"{args.source} 에서 가져온 메모가 없습니다 — 지울 것이 없습니다.")
+        return 0
+
+    span = f" ({info['first']} ~ {info['last']})" if info["first"] else ""
+    if not args.commit:
+        print(f"[미리보기] {args.source} 메모 {info['memos']}건{span} 을 지웁니다.")
+        print("  딸린 할 일·태그·임베딩도 함께 지워지고, 되돌릴 수 없습니다.")
+        print(f"  실행: python -m memoinall import --source {args.source} --reset --commit")
+        return 0
+
+    deleted = store.delete_by_source(args.source)
+    print(f"{args.source} 메모 {deleted}건을 지웠습니다.")
+    return 0
+
+
 def cmd_import(args) -> int:
     from . import importers
 
     if args.dump:
         return _dump_raw(args)
+    if args.reset:
+        return _reset_source(args)
 
     opts = {
         "files_path": args.path,
@@ -402,6 +433,8 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--min-chars", type=int, default=0, help="이 길이보다 짧은 메모는 건너뜀 (기본 0 = 전부)")
     i.add_argument("--update", action="store_true",
                    help="이미 가져온 메모도 원본과 다르면 갱신 (직접 수정한 내용은 덮어씀)")
+    i.add_argument("--reset", action="store_true",
+                   help="이 소스에서 가져온 메모를 전부 삭제 (기본은 미리보기, 실제 삭제는 --commit)")
     i.add_argument("--dump", type=int, nargs="?", const=3, metavar="N",
                    help="가공 전 원문을 N건 그대로 출력 (저장 형식 확인용, 스티커 메모)")
     i.set_defaults(fn=cmd_import)
