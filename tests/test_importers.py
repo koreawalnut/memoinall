@@ -297,8 +297,10 @@ def main() -> int:
     store.delete_by_source("samsung")
     store.delete_memo(mine["id"])
     check("초기화 대상은 임포터 소스뿐",
-          set(importers.SOURCE_NAMES) == {"sticky", "samsung", "redmine", "files"},
+          set(importers.SOURCE_NAMES) == {"sticky", "samsung", "redmine", "files", "shared"},
           importers.SOURCE_NAMES)
+    check("직접 쓴 메모 소스는 초기화 대상 아님",
+          "web" not in importers.SOURCE_NAMES and "cli" not in importers.SOURCE_NAMES)
 
     section("실제 Samsung Notes (있으면 읽기 전용 확인)")
     s = SamsungNotesImporter()

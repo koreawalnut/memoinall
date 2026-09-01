@@ -122,6 +122,7 @@ class ImportResult:
     lengths: list[int] = field(default_factory=list)
     updated: int = 0
     unchanged: int = 0
+    skipped_duplicate: int = 0  # 소스는 달라도 이미 같은 내용을 갖고 있어서 건너뜀
 
 
 def run_import(
@@ -132,6 +133,7 @@ def run_import(
     background_enrich: bool = True,
     min_chars: int = 0,
     update_existing: bool = False,
+    extra_tags: list[str] | None = None,
 ) -> ImportResult:
     """임포터 하나를 실행한다. dry_run 이면 읽기만 하고 아무것도 쓰지 않는다.
 
@@ -158,6 +160,10 @@ def run_import(
         return result
 
     result.found = len(notes)
+    # 내용 기준 중복 방지. 소스가 달라도 같은 내용이면 건너뛴다 — 받은 파일에는
+    # 내가 이미 갖고 있는 메모(돌고 돌아온 내 것 포함)가 섞여 들어오기 때문이다.
+    known = store.content_uids() if getattr(importer, "dedupe_content", False) else None
+
     for note in notes:
         body = clean(note.body)
         if not body:
@@ -168,14 +174,30 @@ def run_import(
             result.skipped_short += 1
             continue
 
+        # 원본이 갖고 있던 태그 + 이번 가져오기에 붙이기로 한 태그.
+        # 뒤엣것은 '이번에 가져온 것' 을 나중에 골라내려고 사람이 직접 고른 것이다.
+        want = list(note.tags) + list(extra_tags or [])
         tagged = body
-        if note.tags:
+        if want:
             existing = {t.lower() for t in re.findall(r"#([0-9A-Za-z가-힣_/-]+)", body)}
-            new_tags = [t for t in note.tags if t.lower() not in existing]
+            new_tags: list[str] = []
+            for t in want:
+                if t.lower() not in existing and t.lower() not in {x.lower() for x in new_tags}:
+                    new_tags.append(t)
             if new_tags:
                 tagged = body + "\n" + " ".join("#" + t for t in new_tags)
 
         memo_id = store.find_by_external(importer.name, note.external_id)
+        if memo_id is None and known is not None:
+            # external_id 로는 못 찾아도 같은 내용을 이미 갖고 있을 수 있다.
+            # 태그를 덧붙이기 전 본문으로 비교해야 보낸 쪽과 기준이 같다.
+            from .. import exchange
+
+            if exchange.content_uid(note.created_at, body) in known:
+                # 갱신 대상으로 삼지 않는다 — 남이 보낸 파일이 내가 쓴 메모를
+                # 덮어쓰는 일은 없어야 한다. 내용이 같으니 잃을 것도 없다.
+                result.skipped_duplicate += 1
+                continue
         if memo_id is not None:
             if not update_existing:
                 result.skipped_existing += 1
@@ -243,7 +265,16 @@ def build_redmine(**kwargs):
 
 # 가져오기로 만들어진 source 값들. 손으로 쓴 메모('web')·CLI('cli') 는 여기 없다 —
 # 초기화가 그것까지 지우면 안 되기 때문에 삭제 대상은 이 목록으로만 받는다.
-SOURCE_NAMES = ("sticky", "samsung", "redmine", "files")
+SOURCE_NAMES = ("sticky", "samsung", "redmine", "files", "shared")
+
+
+def build_shared(**kwargs):
+    from .shared import SharedFileImporter
+
+    return SharedFileImporter(
+        path=kwargs.get("shared_path") or "",
+        content=kwargs.get("shared_content") or "",
+    )
 
 
 def all_importers(**kwargs) -> list:
@@ -258,6 +289,7 @@ def all_importers(**kwargs) -> list:
         SamsungNotesImporter(),
         build_redmine(**kwargs),
         FilesImporter(kwargs.get("files_path") or ""),
+        build_shared(**kwargs),
     ]
 
 
@@ -276,6 +308,8 @@ def get_importer(name: str, **kwargs):
         return FilesImporter(kwargs.get("files_path") or "")
     if name == "redmine":
         return build_redmine(**kwargs)
+    if name == "shared":
+        return build_shared(**kwargs)
     if name not in table:
-        raise ValueError(f"알 수 없는 소스: {name} (사용 가능: sticky, samsung, redmine, files)")
+        raise ValueError(f"알 수 없는 소스: {name} (사용 가능: {', '.join(SOURCE_NAMES)})")
     return table[name]()

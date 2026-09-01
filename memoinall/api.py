@@ -15,6 +15,7 @@ from . import (
     context,
     db,
     embed,
+    exchange,
     generate,
     importers,
     llm,
@@ -23,6 +24,7 @@ from . import (
     search,
     settings,
     store,
+    tags,
 )
 
 log = logging.getLogger(__name__)
@@ -50,7 +52,10 @@ app = FastAPI(title="memoinall", version="0.1.0", lifespan=lifespan)
 @app.post("/api/memos")
 def create_memo(payload: dict = Body(...)):
     try:
-        return store.add_memo(payload.get("body", ""), payload.get("source", "web"))
+        # tags 로 넘어온 것은 본문 끝에 #태그 로 붙인다. 태그의 원본은 늘 본문이라야
+        # 내보낸 파일을 받은 쪽에서도 태그가 살아난다.
+        body = tags.append_to_body(payload.get("body", ""), payload.get("tags") or [])
+        return store.add_memo(body, payload.get("source", "web"))
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
@@ -60,12 +65,25 @@ def list_memos(
     limit: int = 50,
     offset: int = 0,
     tag: str | None = None,
+    # 모듈 tags 를 가리지 않도록 이름을 달리 받는다 — 가려지면 이 함수 안에서
+    # tags.xxx 가 조용히 문자열을 참조하게 된다.
+    tag_csv: str | None = Query(None, alias="tags"),
     person: str | None = None,
     since: str | None = None,
     until: str | None = None,
     archived: bool = False,
 ):
-    return {"items": store.list_memos(limit=limit, offset=offset, tag=tag, person=person, since=since, until=until, archived=archived)}
+    return {
+        "items": store.list_memos(
+            limit=limit, offset=offset, tag=tag, tags=_csv(tag_csv), person=person,
+            since=since, until=until, archived=archived,
+        )
+    }
+
+
+def _csv(value: str | None) -> list[str]:
+    """쉼표로 붙여 보낸 태그 목록. 쿼리스트링에 배열을 넣는 것보다 다루기 쉽다."""
+    return [t.strip().lstrip("#").strip() for t in str(value or "").split(",") if t.strip()]
 
 
 @app.get("/api/memos/{memo_id}")
@@ -108,11 +126,13 @@ def do_search(
     q: str = Query(""),
     limit: int = 20,
     tag: str | None = None,
+    tag_csv: str | None = Query(None, alias="tags"),
     person: str | None = None,
     since: str | None = None,
     until: str | None = None,
 ):
-    hits = search.search(q, limit=limit, tag=tag, person=person, since=since, until=until)
+    hits = search.search(q, limit=limit, tag=tag, tags=_csv(tag_csv), person=person,
+                         since=since, until=until)
     return {"query": q, "count": len(hits), "items": hits}
 
 
@@ -171,6 +191,71 @@ def get_facets(kind: str, limit: int = 30):
     return {"items": store.top_facets(kind, limit)}
 
 
+# --------------------------------------------------------------------------- 내 태그
+
+
+@app.get("/api/tags")
+def get_tags():
+    """정해 둔 태그 + 아직 등록 안 한 자주 쓰는 태그(권유용)."""
+    return {
+        "items": tags.all_tags(),
+        "colors": tags.COLORS,
+        "suggested": tags.unregistered(),
+    }
+
+
+@app.post("/api/tags")
+def create_tag(payload: dict = Body(...)):
+    try:
+        return tags.add(payload.get("name", ""), color=payload.get("color", ""),
+                        note=payload.get("note", ""))
+    except tags.TagError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.put("/api/tags/{name}")
+def edit_tag(name: str, payload: dict = Body(...)):
+    """이름·색·설명을 고친다. 이름을 바꾸면 메모 본문의 태그도 같이 바뀐다."""
+    try:
+        if payload.get("name") and payload["name"] != name:
+            out = tags.rename(name, payload["name"])
+            name = out["name"]
+        else:
+            out = tags.get(name)
+        if payload.get("color") is not None or payload.get("note") is not None:
+            out = {**tags.update(name, color=payload.get("color"), note=payload.get("note")),
+                   "memos_changed": out.get("memos_changed", 0)}
+        return out
+    except tags.TagError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.delete("/api/tags/{name}")
+def delete_tag(name: str, purge: bool = False):
+    """목록에서 뺀다. purge=true 면 메모 본문에서도 지운다(되돌릴 수 없음)."""
+    try:
+        return tags.remove(name, purge=purge)
+    except tags.TagError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/tags/order")
+def order_tags(payload: dict = Body(...)):
+    order = payload.get("order")
+    if not isinstance(order, list):
+        raise HTTPException(400, "order 는 태그 이름 목록이어야 합니다.")
+    return {"items": tags.reorder([str(x) for x in order])}
+
+
+@app.post("/api/tags/adopt")
+def adopt_tags(payload: dict = Body(...)):
+    """이미 본문에 쓰던 태그를 목록으로 데려온다."""
+    names = payload.get("names")
+    if not isinstance(names, list):
+        raise HTTPException(400, "names 는 태그 이름 목록이어야 합니다.")
+    return {"added": tags.adopt([str(x) for x in names]), "items": tags.all_tags()}
+
+
 @app.get("/api/todos")
 def get_todos(limit: int = 100):
     return {"items": store.open_todos(limit)}
@@ -186,10 +271,10 @@ def patch_todo(todo_id: int, payload: dict = Body(...)):
 
 
 @app.get("/api/import/sources")
-def import_sources(path: str | None = None):
+def import_sources(path: str | None = None, shared: str | None = None):
     """각 소스의 가용 여부. UI 가 켜고 끌 판단을 여기서 한다."""
     out = []
-    for imp in importers.all_importers(files_path=path):
+    for imp in importers.all_importers(files_path=path, shared_path=shared):
         available = imp.available()
         out.append(
             {
@@ -257,11 +342,100 @@ def _redmine_opts(payload: dict) -> dict:
     return {f"redmine_{k}": payload.get(k) for k in keys if payload.get(k) is not None}
 
 
+# --------------------------------------------------------------------------- 내보내기
+
+
+def _export_filters(payload: dict) -> dict:
+    ids = payload.get("ids")
+    return {
+        "ids": [int(i) for i in ids] if isinstance(ids, list) else None,
+        "q": str(payload.get("q") or ""),
+        "tag": payload.get("tag") or None,
+        "tags": [str(t).lstrip("#") for t in (payload.get("tags") or []) if str(t).strip()],
+        "person": payload.get("person") or None,
+        "source": payload.get("source") or None,
+        "since": payload.get("since") or None,
+        "until": payload.get("until") or None,
+        "archived": bool(payload.get("archived")),
+        "limit": max(1, min(int(payload.get("limit") or 10000), 100000)),
+    }
+
+
+@app.post("/api/export/preview")
+def export_preview(payload: dict = Body(default={})):
+    """무엇이 나갈지 먼저 보여준다. 남에게 보내는 파일이라 내용 확인이 필요하다."""
+    rows = exchange.select(**_export_filters(payload))
+    body = exchange.dumps(exchange.build(rows, note=str(payload.get("note") or "")))
+    return {
+        "count": len(rows),
+        "bytes": len(body.encode("utf-8")),
+        "filename": exchange.default_filename(len(rows)),
+        "default_dir": str(exchange.export_dir()),
+        "items": [
+            {
+                "id": m["id"],
+                "title": m["title"],
+                "created_at": m["created_at"],
+                "source": m.get("source") or "",
+            }
+            for m in rows[:30]
+        ],
+    }
+
+
+@app.post("/api/export")
+def export_run(payload: dict = Body(default={})):
+    """파일로 저장. 경로를 안 주면 다운로드 폴더에 기본 이름으로 만든다."""
+    rows = exchange.select(**_export_filters(payload))
+    if not rows:
+        raise HTTPException(400, "내보낼 메모가 없습니다 — 조건을 확인하세요.")
+    pack = exchange.build(rows, note=str(payload.get("note") or ""))
+    target = str(payload.get("path") or "").strip() or exchange.export_dir()
+    try:
+        saved = exchange.save(pack, target)
+    except OSError as exc:
+        raise HTTPException(400, f"파일을 저장하지 못했습니다: {exc}")
+    return {"path": str(saved), "count": pack["count"], "bytes": saved.stat().st_size}
+
+
+@app.post("/api/export/content")
+def export_content(payload: dict = Body(default={})):
+    """파일 대신 내용 그대로. 메신저에 붙여넣어 보낼 때 쓴다."""
+    rows = exchange.select(**_export_filters(payload))
+    if not rows:
+        raise HTTPException(400, "내보낼 메모가 없습니다 — 조건을 확인하세요.")
+    pack = exchange.build(rows, note=str(payload.get("note") or ""))
+    return {
+        "content": exchange.dumps(pack),
+        "count": pack["count"],
+        "filename": exchange.default_filename(pack["count"]),
+    }
+
+
+@app.post("/api/import/shared/describe")
+def shared_describe(payload: dict = Body(default={})):
+    """넣기 전에 파일 겉면만 확인 — 언제 만든 몇 건짜리인지."""
+    imp = importers.build_shared(
+        shared_path=payload.get("path"), shared_content=payload.get("content")
+    )
+    if not imp.available():
+        raise HTTPException(400, imp.unavailable_reason())
+    try:
+        return imp.describe()
+    except exchange.ExchangeError as exc:
+        raise HTTPException(400, str(exc))
+
+
 def _run_imports(payload: dict, *, dry_run: bool):
     source = payload.get("source", "all")
     files_path = payload.get("path")
     min_chars = int(payload.get("min_chars") or 0)
-    opts = {"files_path": files_path, **_redmine_opts(payload.get("redmine") or {})}
+    opts = {
+        "files_path": files_path,
+        "shared_path": payload.get("shared_path"),
+        "shared_content": payload.get("shared_content"),
+        **_redmine_opts(payload.get("redmine") or {}),
+    }
     try:
         targets = (
             importers.all_importers(**opts)
@@ -272,10 +446,19 @@ def _run_imports(payload: dict, *, dry_run: bool):
         raise HTTPException(400, str(exc))
 
     update_existing = bool(payload.get("update_existing"))
+    # 이번에 가져온 것에 붙일 태그. 나중에 '이건 어디서 온 건지' 골라내는 손잡이가 된다.
+    extra_tags = []
+    for raw in payload.get("tags") or []:
+        try:
+            extra_tags.append(tags.normalize(str(raw)))
+        except tags.TagError as exc:
+            raise HTTPException(400, str(exc))
+
     results = []
     for imp in targets:
         r = importers.run_import(
-            imp, dry_run=dry_run, min_chars=min_chars, update_existing=update_existing
+            imp, dry_run=dry_run, min_chars=min_chars, update_existing=update_existing,
+            extra_tags=extra_tags,
         )
         lengths = sorted(r.lengths)
         results.append(
@@ -289,6 +472,7 @@ def _run_imports(payload: dict, *, dry_run: bool):
                 "updated": r.updated,
                 "unchanged": r.unchanged,
                 "skipped_existing": r.skipped_existing,
+                "skipped_duplicate": r.skipped_duplicate,
                 "skipped_empty": r.skipped_empty,
                 "skipped_short": r.skipped_short,
                 "error": r.error,
@@ -300,6 +484,7 @@ def _run_imports(payload: dict, *, dry_run: bool):
     return {
         "dry_run": dry_run,
         "update_existing": update_existing,
+        "tags": extra_tags,
         "results": results,
         "total": sum(r["importable"] for r in results),
         "total_updated": sum(r["updated"] for r in results),
@@ -402,6 +587,7 @@ def generate_plan(payload: dict = Body(...)):
         budget_tokens=payload.get("budget"),
         fmt=payload.get("format", "auto"),
         tag=payload.get("tag"),
+        tags=[str(t) for t in (payload.get("tags") or [])],
         person=payload.get("person"),
         since=payload.get("since"),
         until=payload.get("until"),
@@ -419,6 +605,7 @@ def do_generate(payload: dict = Body(...)):
         budget_tokens=payload.get("budget"),
         fmt=payload.get("format", "auto"),
         tag=payload.get("tag"),
+        tags=[str(t) for t in (payload.get("tags") or [])],
         person=payload.get("person"),
         since=payload.get("since"),
         until=payload.get("until"),

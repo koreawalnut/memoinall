@@ -14,7 +14,20 @@ import argparse
 import json
 import sys
 
-from . import config, context, db, embed, llm, organize, providers, search, settings, store
+from . import (
+    config,
+    context,
+    db,
+    embed,
+    exchange,
+    llm,
+    organize,
+    providers,
+    search,
+    settings,
+    store,
+    tags,
+)
 
 
 def _read_stdin() -> str:
@@ -44,6 +57,8 @@ def _wait_for_enrich(memo_id: int) -> None:
 def cmd_add(args) -> int:
     parts = args.text if isinstance(args.text, list) else [args.text]
     body = _read_stdin() if parts == ["-"] else " ".join(parts)
+    if args.tag:
+        body = tags.append_to_body(body, [t for t in args.tag.split(",") if t.strip()])
     memo = store.add_memo(body, source="cli")
     if not args.no_wait:
         embed.ensure_loaded_async()
@@ -60,7 +75,10 @@ def cmd_add(args) -> int:
 
 
 def cmd_search(args) -> int:
-    hits = search.search(args.query, limit=args.limit, tag=args.tag, person=args.person)
+    hits = search.search(
+        args.query, limit=args.limit, person=args.person,
+        tags=[t.strip() for t in (args.tag or "").split(",") if t.strip()],
+    )
     if args.json:
         print(json.dumps(hits, ensure_ascii=False, indent=2, default=str))
         return 0
@@ -220,6 +238,79 @@ def _dump_raw(args) -> int:
     return 0
 
 
+def cmd_tags(args) -> int:
+    """정해 둔 태그 목록을 보고 고친다."""
+    try:
+        if args.add:
+            t = tags.add(args.add, color=args.color or "")
+            print(f"태그를 만들었습니다: #{t['name']} ({t['color']})")
+        elif args.rename:
+            old, _, new = args.rename.partition("=")
+            if not new:
+                print("--rename 은 '옛이름=새이름' 형식입니다.", file=sys.stderr)
+                return 2
+            t = tags.rename(old.strip(), new.strip())
+            print(f"#{old.strip()} → #{t['name']}  (메모 {t['memos_changed']}건의 본문도 고쳤습니다)")
+        elif args.delete:
+            r = tags.remove(args.delete, purge=args.purge)
+            extra = f" · 메모 {r['memos_changed']}건에서도 지움" if r["purged"] else ""
+            print(f"태그를 목록에서 뺐습니다: #{r['name']}{extra}")
+        elif args.adopt:
+            added = tags.adopt([t.strip() for t in args.adopt.split(",")])
+            print(f"{len(added)}개를 목록에 넣었습니다: " + " ".join("#" + t["name"] for t in added))
+    except tags.TagError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    items = tags.all_tags()
+    if not items:
+        print("정해 둔 태그가 없습니다.  만들기: python -m memoinall tags --add 결제")
+    else:
+        print(f"내 태그 {len(items)}개")
+        for t in items:
+            note = f"  — {t['note']}" if t["note"] else ""
+            print(f"  #{t['name']:<20} {t['count']:>4}건  [{t['color']}]{note}")
+    rest = tags.unregistered()
+    if rest:
+        print("\n아직 목록에 없지만 자주 쓰는 태그:")
+        print("  " + "  ".join(f"#{t['value']}({t['count']})" for t in rest))
+        print(f"  데려오기: python -m memoinall tags --adopt {','.join(t['value'] for t in rest[:3])}")
+    return 0
+
+
+def cmd_export(args) -> int:
+    """메모를 파일 하나로 내보낸다. 동료에게 그 파일만 건네면 된다."""
+    ids = [int(x) for x in args.ids.split(",") if x.strip()] if args.ids else None
+    rows = exchange.select(
+        ids=ids, q=args.query or "",
+        tags=[t.strip() for t in (args.tag or "").split(",") if t.strip()],
+        person=args.person,
+        source=args.source, since=args.since, until=args.until,
+        archived=args.archived, limit=args.limit,
+    )
+    if not rows:
+        print("내보낼 메모가 없습니다 — 조건을 확인하세요.", file=sys.stderr)
+        return 1
+
+    pack = exchange.build(rows, note=args.note or "")
+    if args.stdout:
+        print(exchange.dumps(pack))
+        return 0
+
+    saved = exchange.save(pack, args.out or exchange.export_dir())
+    print(f"메모 {pack['count']}건을 내보냈습니다.")
+    # 남에게 건네는 파일이다. 검색어로 고르면 느슨하게 걸리는 것까지 딸려오므로
+    # 무엇이 들어갔는지 눈으로 확인할 수 있어야 한다.
+    for m in pack["memos"][:10]:
+        print(f"    · {(m['created_at'] or '')[:10]}  {m['title'][:46]}")
+    if pack["count"] > 10:
+        print(f"    … 외 {pack['count'] - 10}건")
+    print(f"  {saved}  ({saved.stat().st_size:,} 바이트)")
+    print("  받는 쪽에서:  python -m memoinall import --source shared "
+          f"--shared-file \"{saved}\" --commit")
+    return 0
+
+
 def _reset_source(args) -> int:
     """한 소스에서 가져온 메모를 통째로 지운다. 가져오기와 같이 기본은 미리보기."""
     from . import importers
@@ -259,6 +350,7 @@ def cmd_import(args) -> int:
 
     opts = {
         "files_path": args.path,
+        "shared_path": args.shared_file,
         "redmine_kinds": args.redmine_kinds,
         "redmine_projects": args.redmine_projects,
         "redmine_limit": args.redmine_limit,
@@ -279,6 +371,7 @@ def cmd_import(args) -> int:
         result = importers.run_import(
             importer, dry_run=dry, background_enrich=False,
             min_chars=args.min_chars, update_existing=args.update,
+            extra_tags=[t.strip() for t in (args.tag or "").split(",") if t.strip()],
         )
         pending.extend(result.memo_ids)
         head = f"■ {importer.label} ({result.source})"
@@ -290,6 +383,8 @@ def cmd_import(args) -> int:
             continue
         print(f"{head}\n   {result.path}")
         detail = f"본문없음 {result.skipped_empty} · 이미있음 {result.skipped_existing}"
+        if result.skipped_duplicate:
+            detail += f" · 같은내용 {result.skipped_duplicate}"
         if result.skipped_short:
             detail += f" · 너무짧음 {result.skipped_short}"
         if result.unchanged:
@@ -310,7 +405,11 @@ def cmd_import(args) -> int:
         total += result.imported
 
     if dry:
-        print(f"총 {total}건을 가져올 수 있습니다.  실행: python -m memoinall import --source {args.source} --commit")
+        # 다시 칠 수 있는 명령이어야 한다 — 경로를 빼먹으면 아무것도 안 걸린다
+        extra = f' --path "{args.path}"' if args.path else ""
+        extra += f' --shared-file "{args.shared_file}"' if args.shared_file else ""
+        print(f"총 {total}건을 가져올 수 있습니다.  "
+              f"실행: python -m memoinall import --source {args.source}{extra} --commit")
         return 0
 
     print(f"총 {total}건 저장 완료.")
@@ -366,12 +465,13 @@ def build_parser() -> argparse.ArgumentParser:
     a = sub.add_parser("add", help="메모 추가 ('-' 면 stdin)")
     a.add_argument("text", nargs="+")
     a.add_argument("--no-wait", action="store_true", help="보강을 기다리지 않음")
+    a.add_argument("--tag", help="붙일 태그, 쉼표 구분 (본문에 이미 있으면 안 붙임)")
     a.set_defaults(fn=cmd_add)
 
     s = sub.add_parser("search", help="하이브리드 검색")
     s.add_argument("query")
     s.add_argument("--limit", type=int, default=10)
-    s.add_argument("--tag")
+    s.add_argument("--tag", help="이 태그가 붙은 것만 (쉼표로 여럿 주면 전부 달린 것만)")
     s.add_argument("--person")
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_search)
@@ -421,9 +521,36 @@ def build_parser() -> argparse.ArgumentParser:
     cl.add_argument("-k", type=int, default=None)
     cl.set_defaults(fn=cmd_clusters)
 
-    i = sub.add_parser("import", help="외부 메모 앱에서 일괄 가져오기")
-    i.add_argument("--source", default="all", choices=["all", "sticky", "samsung", "redmine", "files"])
+    tg = sub.add_parser("tags", help="정해 두고 쓰는 태그 관리")
+    tg.add_argument("--add", metavar="이름", help="태그 만들기")
+    tg.add_argument("--color", help=f"색 ({', '.join(tags.COLORS)})")
+    tg.add_argument("--rename", metavar="옛이름=새이름", help="이름 바꾸기 (메모 본문도 같이)")
+    tg.add_argument("--delete", metavar="이름", help="목록에서 빼기")
+    tg.add_argument("--purge", action="store_true", help="--delete 와 함께: 메모 본문에서도 지움")
+    tg.add_argument("--adopt", metavar="a,b", help="이미 쓰던 태그를 목록으로 데려오기")
+    tg.set_defaults(fn=cmd_tags)
+
+    e = sub.add_parser("export", help="메모를 파일 하나로 내보내기 (동료에게 전달용)")
+    e.add_argument("-o", "--out", help="저장할 파일 또는 폴더 (기본: 다운로드 폴더)")
+    e.add_argument("--ids", help="메모 id 목록, 쉼표 구분")
+    e.add_argument("-q", "--query", help="검색어로 고르기")
+    e.add_argument("--tag", help="이 태그가 붙은 메모만 (쉼표로 여럿 주면 전부 달린 것만)")
+    e.add_argument("--person", help="이 사람이 언급된 메모만")
+    e.add_argument("--source", help="이 소스에서 온 메모만 (web, sticky, samsung, redmine, files, shared)")
+    e.add_argument("--since", help="이 날짜 이후 (YYYY-MM-DD)")
+    e.add_argument("--until", help="이 날짜 이전 (YYYY-MM-DD)")
+    e.add_argument("--archived", action="store_true", help="보관된 메모를 내보냄")
+    e.add_argument("--limit", type=int, default=10000, help="최대 건수")
+    e.add_argument("--note", help="받는 사람에게 남길 한 줄")
+    e.add_argument("--stdout", action="store_true", help="파일 대신 화면으로 (파이프용)")
+    e.set_defaults(fn=cmd_export)
+
+    i = sub.add_parser("import", help="외부 메모 앱·받은 파일에서 가져오기")
+    i.add_argument("--source", default="all",
+                   choices=["all", "sticky", "samsung", "redmine", "files", "shared"])
     i.add_argument("--path", help="files 소스의 폴더 경로")
+    i.add_argument("--shared-file", help="shared 소스가 읽을 메모 파일(.json)")
+    i.add_argument("--tag", help="가져오는 메모에 붙일 태그, 쉼표 구분")
     i.add_argument("--redmine-kinds", help="issues,wiki,documents,news 중 골라서 (기본은 설정값)")
     i.add_argument("--redmine-projects", help="프로젝트 식별자, 쉼표 구분 (비우면 전체)")
     i.add_argument("--redmine-limit", type=int, help="최대 건수")

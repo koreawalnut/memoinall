@@ -211,6 +211,7 @@ def multi_search(
     per_query: int = 12,
     limit: int = 20,
     tag: str | None = None,
+    tags: list[str] | None = None,
     person: str | None = None,
     since: str | None = None,
     until: str | None = None,
@@ -225,7 +226,8 @@ def multi_search(
     matched_by: dict[int, list[str]] = {}
 
     for q in queries:
-        hits = search.search(q, limit=per_query, tag=tag, person=person, since=since, until=until)
+        hits = search.search(q, limit=per_query, tag=tag, tags=tags, person=person,
+                             since=since, until=until)
         rankings.append([h["id"] for h in hits])
         for h in hits:
             hits_by_id.setdefault(h["id"], h)
@@ -257,6 +259,7 @@ def build_pack(
     limit: int = 20,
     fmt: str = "auto",
     tag: str | None = None,
+    tags: list[str] | None = None,
     person: str | None = None,
     since: str | None = None,
     until: str | None = None,
@@ -269,7 +272,8 @@ def build_pack(
         derived = derive_queries(instruction)
 
     hits = multi_search(
-        derived["queries"], limit=limit, tag=tag, person=person, since=since, until=until
+        derived["queries"], limit=limit, tag=tag, tags=tags, person=person,
+        since=since, until=until,
     )
 
     included: list[dict] = []

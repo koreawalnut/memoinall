@@ -69,6 +69,17 @@ CREATE TABLE IF NOT EXISTS todos (
 CREATE INDEX IF NOT EXISTS idx_todos_memo ON todos(memo_id);
 CREATE INDEX IF NOT EXISTS idx_todos_done ON todos(done);
 
+-- 직접 정해 둔 태그 목록. facets 의 'tag' 는 본문에서 뽑아낸 결과라 무엇이든 들어오지만,
+-- 이건 '쓰기로 정한' 태그다. 적을 때 골라 넣고, 조회·내보내기 조건으로도 쓴다.
+CREATE TABLE IF NOT EXISTS tag_defs (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL UNIQUE,
+    color      TEXT NOT NULL DEFAULT '',
+    note       TEXT NOT NULL DEFAULT '',
+    sort       INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT

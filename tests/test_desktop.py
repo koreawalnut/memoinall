@@ -108,14 +108,19 @@ def main() -> int:
 
     section("중복 실행 방지")
     lock1 = desktop._single_instance_lock(Path(TMP))
-    check("첫 인스턴스는 락 획득", lock1 is not None)
-    lock2 = desktop._single_instance_lock(Path(TMP))
-    check("두 번째 인스턴스는 거부", lock2 is None)
-    lock1.close()
-    lock3 = desktop._single_instance_lock(Path(TMP))
-    check("닫으면 다시 획득 가능", lock3 is not None)
-    if lock3:
-        lock3.close()
+    if lock1 is None:
+        # 진짜 memoinall 창이 떠 있으면 락을 못 잡는 게 정상이다.
+        # 여기서 실패로 찍으면 '앱이 켜져 있다' 는 사실이 버그처럼 보인다.
+        skip("중복 실행 방지", "memoinall 이 이미 실행 중입니다 — 창을 닫고 다시 돌리세요")
+    else:
+        check("첫 인스턴스는 락 획득", True)
+        lock2 = desktop._single_instance_lock(Path(TMP))
+        check("두 번째 인스턴스는 거부", lock2 is None)
+        lock1.close()
+        lock3 = desktop._single_instance_lock(Path(TMP))
+        check("닫으면 다시 획득 가능", lock3 is not None)
+        if lock3:
+            lock3.close()
 
     section("실제 ONNX 인코딩")
     real = REAL_HOME / "models" / "intfloat__multilingual-e5-small"

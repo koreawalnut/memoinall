@@ -66,6 +66,7 @@ def search(
     *,
     limit: int = 20,
     tag: str | None = None,
+    tags: list[str] | None = None,
     person: str | None = None,
     since: str | None = None,
     until: str | None = None,
@@ -73,7 +74,7 @@ def search(
 ) -> list[dict]:
     query = (query or "").strip()
     if not query:
-        memos = store.list_memos(limit=limit, tag=tag, person=person, since=since, until=until)
+        memos = store.list_memos(limit=limit, tag=tag, tags=tags, person=person, since=since, until=until)
         for m in memos:
             m["score"] = 0.0
             m["snippet"] = textutil.snippet(m["body"], "")
@@ -96,7 +97,8 @@ def search(
         return []
 
     ranked = sorted(fused.items(), key=lambda kv: -kv[1])
-    allowed = _filter_ids([mid for mid, _ in ranked], tag=tag, person=person, since=since, until=until)
+    allowed = _filter_ids([mid for mid, _ in ranked], tag=tag, tags=tags, person=person,
+                          since=since, until=until)
 
     results: list[dict] = []
     vec_set, fts_set = set(vec_order), set(fts)
@@ -127,15 +129,15 @@ def _why(by_vector: bool, by_keyword: bool) -> str:
     return "키워드"
 
 
-def _filter_ids(ids: list[int], *, tag, person, since, until) -> set[int]:
+def _filter_ids(ids: list[int], *, tag, person, since, until, tags=None) -> set[int]:
     if not ids:
         return set()
     placeholders = ",".join("?" * len(ids))
     sql = [f"SELECT m.id FROM memos m WHERE m.id IN ({placeholders}) AND m.archived=0"]
     params: list = list(ids)
-    if tag:
+    for name in store.tag_list(tag, tags):
         sql.append("AND EXISTS(SELECT 1 FROM facets f WHERE f.memo_id=m.id AND f.kind='tag' AND f.value=?)")
-        params.append(tag)
+        params.append(name)
     if person:
         sql.append("AND EXISTS(SELECT 1 FROM facets f WHERE f.memo_id=m.id AND f.kind='person' AND f.value=?)")
         params.append(person)

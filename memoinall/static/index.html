@@ -42,6 +42,25 @@
   .chip:hover, .chip.on { border-color: var(--accent); color: var(--accent); }
   .chip .n { opacity: .55; margin-left: 3px; }
 
+  /* 내 태그 — 색으로 구분한다. 이름만으론 목록이 길어질수록 안 읽힌다. */
+  .tagchip {
+    display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+    border: 1px solid var(--tc); color: var(--tc); background: transparent;
+    border-radius: 999px; padding: 4px 11px; font-size: 14px; line-height: 1.3;
+  }
+  .tagchip:hover { background: color-mix(in srgb, var(--tc) 12%, transparent); }
+  .tagchip.on { background: var(--tc); border-color: var(--tc); color: #fff; }
+  .tagchip .n { opacity: .6; font-size: 12.5px; }
+  .tagrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .t-slate  { --tc: #8792a8; }
+  .t-blue   { --tc: #4c86e8; }
+  .t-green  { --tc: #3fa15c; }
+  .t-amber  { --tc: #c98a1b; }
+  .t-red    { --tc: #d5566d; }
+  .t-purple { --tc: #9166d8; }
+  .t-teal   { --tc: #2b9c9c; }
+  .t-pink   { --tc: #cf5fa0; }
+
   main { padding: 20px 24px 60px; max-width: 1000px; width: 100%; }
   .capture { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; }
   .capture textarea {
@@ -218,6 +237,7 @@
     <div class="lead" id="lead"></div>
     <div class="capture">
       <textarea id="capture" placeholder="생각나는 대로 적으세요.  #태그  @사람  [ ] 할일  결정: ...  은 자동으로 뽑힙니다."></textarea>
+      <div id="capTags" class="tagrow" style="margin:9px 0 2px"></div>
       <div class="capture-bar">
         <span class="hint" id="captureHint">Ctrl+Enter 저장 · 형식은 신경 쓰지 마세요</span>
         <button class="btn primary" id="save">저장</button>
@@ -226,6 +246,7 @@
 
     <div class="searchbar">
       <input id="q" placeholder="의미로 검색…  (예: 결제 모듈 관련해서 걱정했던 거)" />
+      <button class="btn ghost" id="exportHits" title="지금 조건에 걸리는 메모를 파일로 내보냅니다">내보내기</button>
       <button class="btn ghost" id="clear">지우기</button>
     </div>
 
@@ -256,7 +277,10 @@
 
 <script>
 const $ = (s) => document.querySelector(s);
-const state = { tab: "feed", q: "", tag: null, person: null, memo: null };
+// tags 는 조회 조건(AND). tag 하나만 쓰던 시절의 사이드바 클릭도 여기로 모은다.
+const state = { tab: "feed", q: "", tag: null, tags: [], person: null, memo: null };
+// 정해 둔 태그 목록. 적을 때·조회할 때·내보낼 때 같은 목록을 쓴다.
+let myTags = [];
 
 const api = async (path, opts = {}) => {
   const res = await fetch(path, {
@@ -264,7 +288,18 @@ const api = async (path, opts = {}) => {
     ...opts,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
-  if (!res.ok) throw new Error((await res.text()) || res.statusText);
+  // FastAPI 는 오류를 {"detail":"..."} 로 준다. 그대로 보여주면 사용자가
+  // 중괄호와 따옴표까지 읽게 된다 — 안내 문장만 꺼내 쓴다.
+  if (!res.ok) {
+    const raw = (await res.text()) || res.statusText;
+    let msg = raw;
+    try {
+      const d = JSON.parse(raw).detail;
+      if (typeof d === "string") msg = d;
+      else if (Array.isArray(d) && d[0]?.msg) msg = d.map((e) => e.msg).join(" · ");
+    } catch { /* JSON 이 아니면 원문 그대로 */ }
+    throw new Error(msg);
+  }
   return res.headers.get("content-type")?.includes("json") ? res.json() : res.text();
 };
 
@@ -300,8 +335,9 @@ async function save() {
   try {
     await api("/api/memos", { method: "POST", body: { body, source: "web" } });
     ta.value = "";
+    paintTagRows();   // 골라 둔 태그도 함께 비운다
     toast("저장했습니다 — 정리는 백그라운드에서 진행됩니다");
-    await Promise.all([render(), loadSidebar()]);
+    await Promise.all([render(), loadSidebar(), loadTags()]);
   } catch (e) {
     toast("저장 실패: " + e.message);
   } finally {
@@ -314,6 +350,8 @@ $("#save").onclick = save;
 $("#capture").addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); save(); }
 });
+// 직접 #태그 를 쳐도 칩이 눌린 상태로 보여야 한다 — 본문이 원본이기 때문이다.
+$("#capture").addEventListener("input", paintTagRows);
 
 let searchTimer;
 $("#q").addEventListener("input", (e) => {
@@ -321,7 +359,16 @@ $("#q").addEventListener("input", (e) => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(render, 220);
 });
-$("#clear").onclick = () => { state.q = ""; state.tag = null; state.person = null; $("#q").value = ""; loadSidebar(); render(); };
+$("#clear").onclick = () => { state.q = ""; state.tags = []; state.person = null; $("#q").value = ""; loadSidebar(); render(); };
+
+// 검색으로 좁힌 그대로 내보내기. 조건을 주고받기 화면에 옮겨 담고 목록부터 보여준다 —
+// 남에게 보내는 파일이라 무엇이 나가는지 확인 없이 저장되면 안 된다.
+$("#exportHits").onclick = async () => {
+  exp.q = state.q || "";
+  exp.tags = [...state.tags];
+  await goTab("import");
+  if ($("#expPreview")) doExportPreview();
+};
 
 // 메뉴 정의 — 이름만 보고 뭘 하는 곳인지 알 수 있어야 한다.
 // 예전 이름(주제/브리핑/생성/컨텍스트 팩)은 내부 용어라 처음 보면 뜻을 알 수 없었다.
@@ -337,8 +384,9 @@ const TABS = [
   { id: "generate", icon: "✨", name: "AI 문서", sub: "메모로 만들기",
     title: "메모로 문서 만들기", lead: "지시사항을 적으면 관련 메모를 찾아 근거로 삼고 결과물을 씁니다." },
   { sep: true },
-  { id: "import", icon: "📥", name: "가져오기", sub: "다른 앱에서",
-    title: "다른 앱의 메모 가져오기", lead: "스티커 메모·Samsung Notes·Redmine·텍스트 폴더에서 가져옵니다." },
+  { id: "import", icon: "📥", name: "주고받기", sub: "가져오기·내보내기",
+    title: "메모 주고받기",
+    lead: "동료에게 파일로 보내거나 받고, 스티커 메모·Samsung Notes·Redmine·텍스트 폴더에서 가져옵니다." },
   { id: "settings", icon: "⚙️", name: "설정", sub: "AI·검색",
     title: "설정", lead: "어떤 AI 를 쓸지, 검색용 임베딩은 어떤 상태인지 여기서 봅니다." },
 ];
@@ -358,6 +406,68 @@ function renderTabs() {
 function goTab(id) {
   state.tab = id;
   renderTabs();
+  return render();   // 화면이 다 그려진 뒤에 이어서 할 일이 있는 호출자를 위해
+}
+
+// ---------------------------------------------------------------- 내 태그
+// 태그의 원본은 언제나 메모 본문의 `#태그` 다. 칩은 그 본문을 고치는 손잡이일 뿐이라
+// 사용자는 저장 전에 무엇이 들어갈지 글로 직접 확인할 수 있다.
+const TAG_CHARS = "0-9A-Za-z가-힣_/\\-";
+
+async function loadTags() {
+  try {
+    const r = await api("/api/tags");
+    myTags = r.items || [];
+  } catch { myTags = []; }
+  paintTagRows();
+}
+
+function bodyTags(text) {
+  return [...String(text || "").matchAll(new RegExp(`(?:^|\\s)#([${TAG_CHARS}]{1,40})`, "g"))]
+    .map((m) => m[1]);
+}
+
+function tagChip(t, active, attrs = "") {
+  return `<button type="button" class="tagchip t-${esc(t.color || "slate")} ${active ? "on" : ""}"
+    data-tag="${esc(t.name)}" ${attrs} title="${esc(t.note || "")}">#${esc(t.name)}${
+    t.count ? `<span class="n">${t.count}</span>` : ""}</button>`;
+}
+
+// 적는 칸의 칩 — 누르면 본문에서 #태그가 붙었다 떨어진다.
+function paintTagRows() {
+  const row = $("#capTags");
+  if (!row) return;
+  if (!myTags.length) {
+    row.innerHTML = `<span class="hint">자주 쓰는 태그를 정해 두면 여기서 눌러 넣을 수 있습니다 —
+      <a href="#" data-go="settings" style="color:var(--accent)">설정에서 만들기</a></span>`;
+    row.querySelector("[data-go]").onclick = (e) => { e.preventDefault(); goTab("settings"); };
+    return;
+  }
+  const inBody = new Set(bodyTags($("#capture").value).map((t) => t.toLowerCase()));
+  row.innerHTML = myTags.map((t) => tagChip(t, inBody.has(t.name.toLowerCase()))).join("")
+    + `<span class="hint" style="margin-left:4px">눌러서 태그 넣기</span>`;
+  row.querySelectorAll("[data-tag]").forEach((b) => {
+    b.onclick = () => toggleTagInCapture(b.dataset.tag);
+  });
+}
+
+function toggleTagInCapture(name) {
+  const box = $("#capture");
+  const re = new RegExp(`(^|\\s)#${name.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}(?![${TAG_CHARS}])`, "g");
+  if (re.test(box.value)) {
+    box.value = box.value.replace(re, "$1").replace(/[ \t]+\n/g, "\n").replace(/[ \t]{2,}/g, " ").trim();
+  } else {
+    box.value = (box.value.trim() ? box.value.replace(/\s+$/, "") + " " : "") + "#" + name + " ";
+  }
+  box.focus();
+  paintTagRows();
+}
+
+function toggleTagFilter(name) {
+  state.tags = state.tags.includes(name)
+    ? state.tags.filter((t) => t !== name)
+    : [...state.tags, name];
+  loadSidebar();
   render();
 }
 
@@ -366,15 +476,16 @@ async function loadSidebar() {
   const [tags, people, stats] = await Promise.all([
     api("/api/facets/tag?limit=24"), api("/api/facets/person?limit=16"), api("/api/stats"),
   ]);
+  // 태그는 여러 개를 겹쳐 고를 수 있다(전부 달린 메모만). 사람은 하나만.
+  const on = (key, v) => (key === "tag" ? state.tags.includes(v) : state[key] === v);
   const chips = (items, key, prefix) =>
-    items.map((i) => `<span class="chip ${state[key] === i.value ? "on" : ""}" data-k="${key}" data-v="${esc(i.value)}">${prefix}${esc(i.value)}<span class="n">${i.count}</span></span>`).join("") || `<span class="status">없음</span>`;
+    items.map((i) => `<span class="chip ${on(key, i.value) ? "on" : ""}" data-k="${key}" data-v="${esc(i.value)}">${prefix}${esc(i.value)}<span class="n">${i.count}</span></span>`).join("") || `<span class="status">없음</span>`;
   $("#tags").innerHTML = chips(tags.items, "tag", "#");
   $("#people").innerHTML = chips(people.items, "person", "@");
   document.querySelectorAll(".chip").forEach((c) => {
     c.onclick = () => {
-      const k = c.dataset.k;
-      state[k] = state[k] === c.dataset.v ? null : c.dataset.v;
-      loadSidebar(); render();
+      if (c.dataset.k === "tag") toggleTagFilter(c.dataset.v);
+      else { state.person = state.person === c.dataset.v ? null : c.dataset.v; loadSidebar(); render(); }
     };
   });
 
@@ -438,7 +549,7 @@ async function render() {
 
 function qs(extra = {}) {
   const p = new URLSearchParams();
-  if (state.tag) p.set("tag", state.tag);
+  if (state.tags.length) p.set("tags", state.tags.join(","));
   if (state.person) p.set("person", state.person);
   for (const [k, v] of Object.entries(extra)) if (v !== null && v !== undefined && v !== "") p.set(k, v);
   return p.toString();
@@ -468,16 +579,26 @@ function bindCards() {
 }
 
 async function renderFeed() {
+  const tagArg = state.tags.join(",");
   const data = state.q.trim()
-    ? await api("/api/search?" + qs({ q: state.q, limit: 30 }))
-    : await api("/api/memos?" + qs({ limit: 40 }));
+    ? await api("/api/search?" + qs({ q: state.q, limit: 30, tags: tagArg }))
+    : await api("/api/memos?" + qs({ limit: 40, tags: tagArg }));
   const items = data.items || [];
+  // 조사(이/가)는 태그 이름의 받침에 따라 달라진다 — 가운뎃점으로 피한다.
+  const filtered = state.tags.length
+    ? `<div class="status" style="margin-bottom:10px">${state.tags.map((t) => "#" + esc(t)).join(" + ")}
+         · ${state.tags.length > 1 ? "모두 달린 " : ""}메모 ${items.length}건 —
+         <a href="#" id="clearTagFilter" style="color:var(--accent)">조건 해제</a></div>`
+    : "";
   $("#view").innerHTML = items.length
-    ? (state.q.trim() ? `<div class="status" style="margin-bottom:10px">${items.length}건 — 뜻이 비슷한 메모까지 함께 찾았습니다</div>` : "") + items.map(cardHTML).join("")
-    : `<div class="empty">${state.q
-        ? `'${esc(state.q)}' 에 대한 결과가 없습니다.<br/><span style="font-size:14px">다른 말로 바꿔 보세요 — 정확한 단어가 아니어도 뜻이 비슷하면 찾습니다.</span>`
+    ? filtered + (state.q.trim() ? `<div class="status" style="margin-bottom:10px">${items.length}건 — 뜻이 비슷한 메모까지 함께 찾았습니다</div>` : "") + items.map(cardHTML).join("")
+    : filtered + `<div class="empty">${state.q || state.tags.length
+        ? `조건에 맞는 메모가 없습니다.<br/><span style="font-size:14px">태그를 하나만 남기거나, 다른 말로 바꿔 보세요 —
+           정확한 단어가 아니어도 뜻이 비슷하면 찾습니다.</span>`
         : `아직 메모가 없습니다.<br/><span style="font-size:14px">위 칸에 아무거나 적고 <b>Ctrl+Enter</b> 를 누르거나,
            <a href="#" data-go="import" style="color:var(--accent)">다른 앱에서 가져오기</a> 로 시작하세요.</span>`}</div>`;
+  const clearBtn = $("#clearTagFilter");
+  if (clearBtn) clearBtn.onclick = (e) => { e.preventDefault(); state.tags = []; paintTagRows(); render(); };
   bindCards();
 }
 
@@ -607,7 +728,7 @@ function genPayload() {
     format: gen.format,
     budget: +($("#genBudget")?.value || 6000),
     queries: gen.queries,
-    tag: state.tag, person: state.person,
+    tags: state.tags, person: state.person,
   };
 }
 
@@ -729,7 +850,9 @@ function renderGenOutput() {
 
 // ---------------------------------------------------------------- 가져오기
 // 소스별 결과를 각자 자리에 남긴다. 하나를 가져와도 다른 소스의 결과가 지워지지 않는다.
-const imp = { path: "", minChars: 0, update: false, results: {} };
+const imp = { path: "", sharedPath: "", minChars: 0, update: false, tags: [], results: {} };
+// 내보내기 조건. 조건들은 AND 로 겹친다 — '결제 + 지난달' 처럼 좁혀 보낼 수 있어야 한다.
+const exp = { q: "", tag: "", tags: [], since: "", until: "", archived: false, note: "" };
 const RM_KINDS = { issues: "이슈", wiki: "위키", documents: "문서", news: "공지" };
 
 // 소스 한 칸: 상태 + 자기 버튼 + 자기 결과. '일괄'도 같은 칸에 결과를 흘려보낸다.
@@ -805,8 +928,11 @@ async function doReset(name, el) {
 }
 
 async function renderImport() {
+  const qs = new URLSearchParams();
+  if (imp.path) qs.set("path", imp.path);
+  if (imp.sharedPath) qs.set("shared", imp.sharedPath);
   const [{ sources }, cfg] = await Promise.all([
-    api("/api/import/sources" + (imp.path ? `?path=${encodeURIComponent(imp.path)}` : "")),
+    api("/api/import/sources" + (qs.toString() ? `?${qs}` : "")),
     api("/api/settings"),
   ]);
   const s = cfg.settings;
@@ -821,7 +947,68 @@ async function renderImport() {
       <input id="impPath" value="${esc(imp.path)}" placeholder="예) C:\\notes" />
     </div>`;
 
+  // 받은 파일은 파일 하나를 고르는 것이라 경로 입력이 칸 안에 있어야 한다.
+  const sharedExtra = `
+    <div class="field" style="margin:9px 0 0;grid-template-columns:80px 1fr">
+      <label>파일</label>
+      <input id="impShared" value="${esc(imp.sharedPath)}" placeholder="예) C:\\Users\\나\\Downloads\\memoinall-20260901-1200-12건.json" />
+      <div class="note">동료가 <b>내보내기</b>로 만든 .json 파일. 이미 갖고 있는 내용은 알아서 건너뜁니다.</div>
+    </div>`;
+
   $("#view").innerHTML = `
+    <div class="panel">
+      <h3>메모 내보내기</h3>
+      <div class="desc">
+        고른 메모를 <b>파일 하나</b>로 만듭니다. 그 파일만 건네면 상대방이 자기 memoinall 에 넣을 수 있습니다.
+        <b>본문·작성시각·태그만</b> 담기고 API 키·설정·임베딩은 들어가지 않습니다.
+        조건을 비우면 전체입니다.
+      </div>
+      <div class="field">
+        <label>검색어</label>
+        <input id="expQ" value="${esc(exp.q)}" placeholder="비우면 전체 · 의미로 찾아 고릅니다" />
+        <div class="note">의미 검색이라 느슨하게 걸리는 메모도 딸려옵니다 —
+          <b>보내기 전에 목록을 꼭 확인하세요.</b></div>
+      </div>
+      <div class="field">
+        <label>태그</label>
+        <div>
+          ${myTags.length
+            ? `<div class="tagrow" id="expTagRow">${myTags.map((t) =>
+                 tagChip(t, exp.tags.includes(t.name))).join("")}</div>`
+            : `<div class="status">정해 둔 태그가 없습니다 —
+                 <a href="#" data-go="settings" style="color:var(--accent)">설정에서 만들기</a></div>`}
+          <div class="note">여러 개를 고르면 <b>전부 달린 메모만</b> 나갑니다.
+            목록에 없는 태그는 아래 칸에 직접 적으세요.</div>
+          <input id="expTag" value="${esc(exp.tag)}" placeholder="직접 입력 (# 없이 · 쉼표로 여럿)" style="margin-top:6px" />
+        </div>
+      </div>
+      <div class="field">
+        <label>기간</label>
+        <div class="row" style="gap:8px">
+          <input id="expSince" value="${esc(exp.since)}" placeholder="YYYY-MM-DD 부터" style="flex:1" />
+          <input id="expUntil" value="${esc(exp.until)}" placeholder="YYYY-MM-DD 까지" style="flex:1" />
+        </div>
+      </div>
+      <div class="field">
+        <label>메모 남기기</label>
+        <input id="expNote" value="${esc(exp.note)}" placeholder="받는 사람에게 한 줄 (선택)" />
+      </div>
+      <div class="row" style="margin:12px 0 0">
+        <label style="color:var(--dim);font-size:13.5px;cursor:pointer">
+          <input type="checkbox" id="expArchived" ${exp.archived ? "checked" : ""} style="margin-right:6px"/>보관한 메모도 포함</label>
+        <span class="spacer"></span>
+        <button class="btn" id="expPreview">무엇이 나가는지 보기</button>
+        <button class="btn" id="expCopy">내용 복사</button>
+        <button class="btn primary" id="expSave">파일로 저장</button>
+      </div>
+      <div id="expOut"></div>
+    </div>
+
+    <div class="panel">
+      <h3>받은 메모 파일 넣기</h3>
+      ${sourceCard(byName.shared, sharedExtra)}
+    </div>
+
     <div class="panel">
       <h3>공통 설정</h3>
       <div class="desc">
@@ -840,6 +1027,15 @@ async function renderImport() {
         <div class="note">원본이 바뀌었거나 예전에 잘못 들어온 메모를 되살릴 때 켜세요.
           <b>memoinall 안에서 직접 고친 내용은 덮어써집니다.</b></div>
       </div>
+      ${myTags.length ? `
+      <div class="field">
+        <label>태그 붙이기</label>
+        <div>
+          <div class="tagrow" id="impTagRow">${myTags.map((t) => tagChip(t, imp.tags.includes(t.name))).join("")}</div>
+          <div class="note">이번에 가져오는 메모에 이 태그를 붙입니다.
+            나중에 <b>'어디서 온 메모였는지' 골라내는 손잡이</b>가 됩니다. 본문에 이미 있으면 안 붙입니다.</div>
+        </div>
+      </div>` : ""}
       <div class="row" style="margin:12px 0 0">
         <span class="meta">사용 가능한 소스 ${usable} / ${sources.length}</span>
         <span class="spacer"></span>
@@ -910,6 +1106,29 @@ async function renderImport() {
     </div>`;
 
   $("#impPath").onchange = (e) => { imp.path = e.target.value.trim(); render(); };
+  $("#impShared").onchange = (e) => { imp.sharedPath = e.target.value.trim(); render(); };
+  $("#expQ").onchange = (e) => { exp.q = e.target.value.trim(); };
+  document.querySelectorAll("#expTagRow [data-tag]").forEach((b) => {
+    b.onclick = () => {
+      const n = b.dataset.tag;
+      exp.tags = exp.tags.includes(n) ? exp.tags.filter((t) => t !== n) : [...exp.tags, n];
+      b.classList.toggle("on");
+    };
+  });
+  document.querySelectorAll("#impTagRow [data-tag]").forEach((b) => {
+    b.onclick = () => {
+      const n = b.dataset.tag;
+      imp.tags = imp.tags.includes(n) ? imp.tags.filter((t) => t !== n) : [...imp.tags, n];
+      b.classList.toggle("on");
+    };
+  });
+  $("#expSince").onchange = (e) => { exp.since = e.target.value.trim(); };
+  $("#expUntil").onchange = (e) => { exp.until = e.target.value.trim(); };
+  $("#expNote").onchange = (e) => { exp.note = e.target.value; };
+  $("#expArchived").onchange = (e) => { exp.archived = e.target.checked; };
+  $("#expPreview").onclick = doExportPreview;
+  $("#expSave").onclick = doExportSave;
+  $("#expCopy").onclick = doExportCopy;
   $("#impMin").onchange = (e) => { imp.minChars = +e.target.value || 0; };
   $("#impUpdate").onchange = (e) => { imp.update = e.target.checked; };
   $("#impPreviewAll").onclick = () => doImport(true, "all");
@@ -963,6 +1182,75 @@ async function renderImport() {
   };
 }
 
+// ---------------------------------------------------------------- 내보내기
+// 입력칸에서 바로 읽는다 — 타이핑 직후 눌러도 방금 친 값이 반영돼야 한다.
+function exportPayload() {
+  if (!$("#expQ")) return {};
+  exp.q = $("#expQ").value.trim();
+  // 칩으로 고른 것 + 직접 적은 것. 둘 다 AND 로 겹친다.
+  const typed = $("#expTag").value.split(",").map((t) => t.trim().replace(/^#/, "")).filter(Boolean);
+  exp.tag = $("#expTag").value.trim();
+  exp.since = $("#expSince").value.trim();
+  exp.until = $("#expUntil").value.trim();
+  exp.note = $("#expNote").value;
+  exp.archived = $("#expArchived").checked;
+  const all = [...new Set([...exp.tags, ...typed])];
+  return { ...exp, tag: null, tags: all };
+}
+
+function expBusy(msg) { $("#expOut").innerHTML = `<div class="status" style="margin-top:9px">${msg}</div>`; }
+function expError(msg) {
+  $("#expOut").innerHTML = `<div class="status" style="margin-top:9px;color:var(--danger)">${esc(msg)}</div>`;
+}
+
+async function doExportPreview() {
+  expBusy("고르는 중…");
+  try {
+    const r = await api("/api/export/preview", { method: "POST", body: exportPayload() });
+    if (!r.count) {
+      $("#expOut").innerHTML = `<div class="status" style="margin-top:9px">조건에 맞는 메모가 없습니다.</div>`;
+      return;
+    }
+    const rows = r.items.map((m) => `<div class="meta">· ${esc((m.created_at || "").slice(0, 10))}
+      ${esc(m.title || "")} ${m.source && m.source !== "web" ? `<span class="badge">${esc(m.source)}</span>` : ""}</div>`).join("");
+    $("#expOut").innerHTML = `<div style="margin-top:10px;padding:10px 12px;background:var(--panel-2);border-radius:8px">
+      <div><b style="color:var(--accent)">${r.count}건</b>이 나갑니다
+        <span class="meta">· ${(r.bytes / 1024).toFixed(1)}KB · ${esc(r.filename)}</span></div>
+      <div style="margin-top:6px;max-height:230px;overflow:auto">${rows}</div>
+      ${r.count > r.items.length ? `<div class="meta" style="margin-top:5px">… 외 ${r.count - r.items.length}건</div>` : ""}
+      <div class="note" style="margin-top:7px">저장 위치: ${esc(r.default_dir)}</div>
+    </div>`;
+  } catch (err) { expError(err.message); }
+}
+
+async function doExportSave() {
+  expBusy("파일로 저장하는 중…");
+  try {
+    const r = await api("/api/export", { method: "POST", body: exportPayload() });
+    $("#expOut").innerHTML = `<div style="margin-top:10px;padding:10px 12px;background:var(--panel-2);border-radius:8px">
+      <div><b style="color:var(--accent-2)">메모 ${r.count}건을 내보냈습니다.</b></div>
+      <div class="meta" style="margin-top:4px;word-break:break-all">${esc(r.path)} · ${(r.bytes / 1024).toFixed(1)}KB</div>
+      <div class="note" style="margin-top:5px">이 파일을 그대로 전달하세요.
+        받는 쪽은 <b>받은 메모 파일 넣기</b>에 경로를 넣고 가져오면 됩니다.</div>
+      <div class="row" style="margin-top:8px"><span class="spacer"></span>
+        <button class="btn" id="expCopyPath">경로 복사</button></div>
+    </div>`;
+    $("#expCopyPath").onclick = () => { navigator.clipboard.writeText(r.path); toast("경로를 복사했습니다"); };
+    toast(`${r.count}건을 파일로 내보냈습니다`);
+  } catch (err) { expError(err.message); }
+}
+
+async function doExportCopy() {
+  expBusy("만드는 중…");
+  try {
+    const r = await api("/api/export/content", { method: "POST", body: exportPayload() });
+    await navigator.clipboard.writeText(r.content);
+    $("#expOut").innerHTML = `<div class="status" style="margin-top:9px">메모 ${r.count}건을 복사했습니다 —
+      메신저에 붙여넣어 보내세요. 받는 쪽은 이 내용을 .json 파일로 저장하면 됩니다.</div>`;
+    toast(`${r.count}건을 복사했습니다`);
+  } catch (err) { expError(err.message); }
+}
+
 function redminePayload() {
   if (!$("#rmUrl")) return {};   // 가져오기 탭이 아닐 때
   return {
@@ -984,8 +1272,9 @@ async function doImport(dry, source = "all") {
   targets.forEach((n) => { const el = $(`#impOut-${n}`); if (el) el.innerHTML = busy; });
 
   const body = {
-    source, path: imp.path || null, min_chars: imp.minChars,
-    update_existing: imp.update, redmine: redminePayload(),
+    source, path: imp.path || null, shared_path: imp.sharedPath || null,
+    min_chars: imp.minChars, update_existing: imp.update, tags: imp.tags,
+    redmine: redminePayload(),
   };
   try {
     const r = await api(dry ? "/api/import/preview" : "/api/import/run", { method: "POST", body });
@@ -999,6 +1288,7 @@ async function doImport(dry, source = "all") {
       const parts = [r.total ? `${r.total}건 가져옴` : "", r.total_updated ? `${r.total_updated}건 갱신` : ""].filter(Boolean);
       toast(parts.length ? `${parts.join(" · ")} — 정리는 백그라운드에서 진행됩니다` : "새로 가져오거나 바뀐 메모가 없습니다");
       loadSidebar();
+      loadTags();   // 붙인 태그의 건수가 바로 반영돼야 한다
     }
   } catch (err) {
     targets.forEach((n) => {
@@ -1020,6 +1310,7 @@ function paintResult(name, x) {
   }
   const skips = [
     x.skipped_existing ? `이미있음 ${x.skipped_existing}` : "",
+    x.skipped_duplicate ? `같은 내용 ${x.skipped_duplicate}` : "",
     x.unchanged ? `변경없음 ${x.unchanged}` : "",
     x.skipped_empty ? `본문없음 ${x.skipped_empty}` : "",
     x.skipped_short ? `너무짧음 ${x.skipped_short}` : "",
@@ -1036,7 +1327,115 @@ function paintResult(name, x) {
   </div>`;
 }
 
+// ---------------------------------------------------------------- 내 태그 관리
+function tagMsg(text, bad = false) {
+  const el = $("#tagMsg");
+  if (el) el.innerHTML = `<span style="color:${bad ? "var(--danger)" : "var(--dim)"}">${esc(text)}</span>`;
+}
+
+async function refreshTags() {
+  await Promise.all([render(), loadSidebar(), loadTags()]);
+}
+
+function paintTagList() {
+  const box = $("#tagList");
+  if (!box) return;
+  if (!myTags.length) {
+    box.innerHTML = `<div class="status">아직 정해 둔 태그가 없습니다. 아래에서 하나 만들어 보세요.</div>`;
+    return;
+  }
+  box.innerHTML = myTags.map((t, i) => `
+    <div class="row" style="gap:8px;padding:7px 0;border-bottom:1px solid var(--line)">
+      <span class="tagchip t-${esc(t.color)} on" style="cursor:default">#${esc(t.name)}</span>
+      <span class="meta">메모 ${t.count}건</span>
+      <span class="spacer"></span>
+      <button class="btn ghost" data-tup="${i}" ${i === 0 ? "disabled" : ""} title="위로">↑</button>
+      <button class="btn ghost" data-tdown="${i}" ${i === myTags.length - 1 ? "disabled" : ""} title="아래로">↓</button>
+      <select data-tcolor="${esc(t.name)}" title="색">
+        ${TAG_COLORS.map((c) => `<option value="${c}"${c === t.color ? " selected" : ""}>${c}</option>`).join("")}
+      </select>
+      <button class="btn ghost" data-trename="${esc(t.name)}">이름 바꾸기</button>
+      <button class="btn ghost" data-tdel="${esc(t.name)}" data-n="${t.count}" style="color:var(--danger)">삭제</button>
+    </div>`).join("") + `<div id="tagAction"></div>`;
+
+  box.querySelectorAll("[data-tup]").forEach((b) => { b.onclick = () => moveTag(+b.dataset.tup, -1); });
+  box.querySelectorAll("[data-tdown]").forEach((b) => { b.onclick = () => moveTag(+b.dataset.tdown, 1); });
+  box.querySelectorAll("[data-tcolor]").forEach((s) => {
+    s.onchange = async () => {
+      await api(`/api/tags/${encodeURIComponent(s.dataset.tcolor)}`,
+                { method: "PUT", body: { color: s.value } });
+      await refreshTags();
+    };
+  });
+  box.querySelectorAll("[data-trename]").forEach((b) => { b.onclick = () => askRename(b.dataset.trename); });
+  box.querySelectorAll("[data-tdel]").forEach((b) => { b.onclick = () => askDeleteTag(b.dataset.tdel, +b.dataset.n); });
+}
+
+async function moveTag(index, delta) {
+  const order = myTags.map((t) => t.name);
+  const to = index + delta;
+  if (to < 0 || to >= order.length) return;
+  [order[index], order[to]] = [order[to], order[index]];
+  await api("/api/tags/order", { method: "POST", body: { order } });
+  await refreshTags();
+}
+
+function askRename(name) {
+  const box = $("#tagAction");
+  // 이름을 바꾸면 메모 본문까지 바뀐다. 무슨 일이 벌어지는지 먼저 말해야 한다.
+  box.innerHTML = `<div style="margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:8px">
+      <div><b>#${esc(name)}</b> 의 이름을 바꿉니다.</div>
+      <div class="note" style="margin-top:4px">이 태그가 달린 <b>메모 본문의 <code>#${esc(name)}</code> 도 함께 바뀝니다.</b>
+        <code>#${esc(name)}팀</code> 처럼 이어 붙은 다른 태그는 건드리지 않습니다.</div>
+      <div class="row" style="margin-top:9px;gap:8px">
+        <input id="renameTo" value="${esc(name)}" style="flex:1" />
+        <button class="btn" data-cancel>취소</button>
+        <button class="btn primary" data-go>바꾸기</button>
+      </div>
+      <div class="note" id="renameMsg"></div>
+    </div>`;
+  box.querySelector("[data-cancel]").onclick = () => { box.innerHTML = ""; };
+  box.querySelector("[data-go]").onclick = async () => {
+    const to = $("#renameTo").value.trim();
+    if (!to || to === name) { box.innerHTML = ""; return; }
+    try {
+      const r = await api(`/api/tags/${encodeURIComponent(name)}`, { method: "PUT", body: { name: to } });
+      toast(`#${name} → #${r.name} · 메모 ${r.memos_changed || 0}건도 고쳤습니다`);
+      await refreshTags();
+    } catch (err) {
+      $("#renameMsg").innerHTML = `<span style="color:var(--danger)">${esc(err.message)}</span>`;
+    }
+  };
+  $("#renameTo").focus();
+}
+
+function askDeleteTag(name, count) {
+  const box = $("#tagAction");
+  box.innerHTML = `<div style="margin-top:10px;padding:10px 12px;border:1px solid var(--danger);border-radius:8px">
+      <div><b style="color:var(--danger)">#${esc(name)}</b> 을 목록에서 뺍니다.</div>
+      <div class="note" style="margin-top:4px">기본은 <b>목록에서만</b> 빠집니다 — 메모 ${count}건에 적힌
+        <code>#${esc(name)}</code> 는 그대로 남고 조회도 됩니다.</div>
+      <label style="display:block;margin-top:8px;color:var(--dim);font-size:13.5px;cursor:pointer">
+        <input type="checkbox" id="purgeTag" style="margin-right:6px"/>메모 본문에서도 지우기
+        <b style="color:var(--danger)">(메모 ${count}건이 수정됩니다 · 되돌릴 수 없음)</b></label>
+      <div class="row" style="margin-top:9px">
+        <span class="spacer"></span>
+        <button class="btn" data-cancel>취소</button>
+        <button class="btn primary" data-go style="background:var(--danger);border-color:var(--danger)">빼기</button>
+      </div>
+    </div>`;
+  box.querySelector("[data-cancel]").onclick = () => { box.innerHTML = ""; };
+  box.querySelector("[data-go]").onclick = async () => {
+    const purge = $("#purgeTag").checked;
+    const r = await api(`/api/tags/${encodeURIComponent(name)}?purge=${purge}`, { method: "DELETE" });
+    toast(purge ? `#${name} 을 메모 ${r.memos_changed}건에서 지웠습니다` : `#${name} 을 목록에서 뺐습니다`);
+    state.tags = state.tags.filter((t) => t !== name);
+    await refreshTags();
+  };
+}
+
 // ---------------------------------------------------------------- 설정
+const TAG_COLORS = ["slate", "blue", "green", "amber", "red", "purple", "teal", "pink"];
 let settingsProvider = null; // 화면에서 편집 중인 프로바이더 (저장 전엔 전환만)
 
 async function renderSettings() {
@@ -1053,7 +1452,37 @@ async function renderSettings() {
       ${esc(x.label)} ${x.ready ? '<span style="color:var(--accent-2)">●</span>' : '<span style="opacity:.4">○</span>'}
     </button>`).join("");
 
+  const tg = await api("/api/tags");
+  myTags = tg.items;
+
   $("#view").innerHTML = `
+    <div class="panel">
+      <h3>내 태그 <span class="meta">${tg.items.length}개</span></h3>
+      <div class="desc">
+        자주 쓰는 태그를 정해 두면 메모를 적을 때 <b>눌러서 넣고</b>, 조회·내보내기·가져오기 조건으로 쓸 수 있습니다.
+        태그는 메모 본문의 <code>#태그</code> 로 저장되니, 내보낸 파일을 받은 쪽에서도 그대로 살아납니다.
+      </div>
+      <div id="tagList" style="margin:12px 0"></div>
+      <div class="field" style="grid-template-columns:80px 1fr">
+        <label>새 태그</label>
+        <div class="row" style="gap:8px">
+          <input id="newTag" placeholder="예) 결제  (# 없이 · 한글·영문·숫자·_ - /)" style="flex:1" />
+          <select id="newTagColor">${tg.colors.map((c) => `<option value="${c}">${c}</option>`).join("")}</select>
+          <button class="btn primary" id="addTag">만들기</button>
+        </div>
+        <div class="note" id="tagMsg">색을 안 고르면 이름에 따라 정해집니다 — 같은 태그는 늘 같은 색입니다.</div>
+      </div>
+      ${tg.suggested.length ? `
+      <div class="field" style="grid-template-columns:80px 1fr">
+        <label>이미 쓰는 중</label>
+        <div>
+          <div class="tagrow" id="suggestRow">${tg.suggested.map((t) =>
+            `<button type="button" class="tagchip t-slate" data-adopt="${esc(t.value)}">#${esc(t.value)}<span class="n">${t.count}</span></button>`).join("")}</div>
+          <div class="note">메모에는 쓰는데 목록엔 없는 태그입니다. 눌러서 데려오세요.</div>
+        </div>
+      </div>` : ""}
+    </div>
+
     <div class="panel">
       <h3>LLM 연결 <span class="meta">${cfg.llm_ready ? `● ${esc(cfg.providers.find((x) => x.name === cfg.provider)?.label || "")} 사용 중` : "○ 미설정"}</span></h3>
       <div class="desc">
@@ -1144,6 +1573,26 @@ async function renderSettings() {
     toast(msg);
     render(); loadSidebar();
   };
+
+  paintTagList();
+  $("#addTag").onclick = async () => {
+    const name = $("#newTag").value.trim();
+    if (!name) { tagMsg("태그 이름을 입력하세요.", true); return; }
+    try {
+      await api("/api/tags", { method: "POST", body: { name, color: $("#newTagColor").value } });
+      $("#newTag").value = "";
+      toast(`#${name} 을 만들었습니다`);
+      await refreshTags();
+    } catch (err) { tagMsg(err.message, true); }
+  };
+  $("#newTag").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#addTag").click(); });
+  document.querySelectorAll("[data-adopt]").forEach((b) => {
+    b.onclick = async () => {
+      await api("/api/tags/adopt", { method: "POST", body: { names: [b.dataset.adopt] } });
+      toast(`#${b.dataset.adopt} 을 목록에 넣었습니다`);
+      await refreshTags();
+    };
+  });
 
   // 프로바이더 탭: 저장 전까지는 화면만 바꾼다 — 실수로 전환되지 않게.
   document.querySelectorAll("[data-prov]").forEach((b) => {
@@ -1262,6 +1711,7 @@ document.addEventListener("keydown", (e) => {
 
 renderTabs();
 loadSidebar();
+loadTags();
 render();
 setInterval(loadSidebar, 6000);
 $("#capture").focus();

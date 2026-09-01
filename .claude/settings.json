@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(PYTHONIOENCODING=utf-8 python ui_tags.py)",
+      "Bash(PYTHONIOENCODING=utf-8 python build_exe.py)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\User\\Downloads"
+    ]
+  }
+}

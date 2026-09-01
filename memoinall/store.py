@@ -90,6 +90,21 @@ def delete_memo(memo_id: int) -> None:
     _search_cache.invalidate()
 
 
+def content_uids() -> dict[str, int]:
+    """내용 기준 식별자 → 메모 id.
+
+    받은 파일을 넣을 때 '이미 같은 내용을 갖고 있는가'를 판단하려고. 소스가
+    달라도(내가 직접 쓴 메모가 남을 거쳐 돌아온 경우) 중복으로 잡아야 해서
+    external_id 로는 부족하다.
+    """
+    from . import exchange  # 순환 방지 — exchange 는 store 를 쓴다
+
+    return {
+        exchange.content_uid(r["created_at"], r["body"]): int(r["id"])
+        for r in db.query("SELECT id, created_at, body FROM memos")
+    }
+
+
 def count_by_source(source: str) -> dict:
     """한 소스에서 가져온 메모의 건수와 기간. '무엇을 지우게 되는지' 보여주려고."""
     row = db.one(
@@ -170,11 +185,22 @@ def facets_of(memo_id: int) -> dict[str, list[str]]:
     return out
 
 
+def tag_list(tag: str | None = None, tags: list[str] | None = None) -> list[str]:
+    """`tag` 하나든 `tags` 여럿이든 하나의 목록으로. 여러 개면 AND 로 좁힌다."""
+    out: list[str] = []
+    for raw in ([tag] if tag else []) + list(tags or []):
+        name = str(raw or "").strip().lstrip("#").strip()
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
 def list_memos(
     *,
     limit: int = 50,
     offset: int = 0,
     tag: str | None = None,
+    tags: list[str] | None = None,
     person: str | None = None,
     since: str | None = None,
     until: str | None = None,
@@ -182,9 +208,10 @@ def list_memos(
 ) -> list[dict]:
     sql = ["SELECT m.* FROM memos m"]
     params: list = []
-    if tag:
-        sql.append("JOIN facets f ON f.memo_id=m.id AND f.kind='tag' AND f.value=?")
-        params.append(tag)
+    # 태그를 여러 개 주면 전부 달린 메모만 — 조건은 좁히라고 있는 것이다.
+    for i, name in enumerate(tag_list(tag, tags)):
+        sql.append(f"JOIN facets t{i} ON t{i}.memo_id=m.id AND t{i}.kind='tag' AND t{i}.value=?")
+        params.append(name)
     if person:
         sql.append("JOIN facets p ON p.memo_id=m.id AND p.kind='person' AND p.value=?")
         params.append(person)
