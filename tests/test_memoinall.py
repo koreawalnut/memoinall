@@ -134,6 +134,33 @@ def main() -> int:
     check("태그 필터", all("결제" in h["facets"].get("tag", []) for h in search.search("결제", tag="결제")))
     check("유사 메모", len(search.similar(ids[1])) > 0)
 
+    # 상세 화면이 '걸린 대목' 을 본문에서 찾아 칠하려면, 청크가 본문과 공백만
+    # 다르고 글자는 같아야 한다. 청크는 문단을 줄바꿈 하나로 이어 붙여 저장하므로
+    # 그냥 indexOf 로는 못 찾는다 — 공백을 느슨하게 본다는 전제를 여기서 못 박는다.
+    import re as _re
+
+    long_body = "\n\n".join(
+        ["긴 회의록 제목"]
+        + [f"{i}. 논의 사항이 이어집니다. 내용을 채웁니다." for i in range(1, 30)]
+        + ["결제 모듈 타임아웃이 재현되었습니다."]
+    )
+    long_id = store.add_memo(long_body, enqueue_enrich=False)["id"]
+    store.enrich(long_id)
+    rows = db.query("SELECT text FROM chunks WHERE memo_id=? ORDER BY seq", (long_id,))
+    check("여러 청크로 쪼개짐", len(rows) > 1, len(rows))
+    body = store.get_memo(long_id, with_facets=False)["body"]
+    check("청크가 본문과 글자는 같음(공백만 다름)",
+          all(_re.search(r"\s+".join(map(_re.escape, r["text"].split())), body) for r in rows),
+          [r["text"][:30] for r in rows if not _re.search(
+              r"\s+".join(map(_re.escape, r["text"].split())), body)])
+    hit = next((h for h in search.search("결제 타임아웃 재현", limit=5) if h["id"] == long_id), None)
+    check("검색 결과가 걸린 청크를 알려줌", hit and hit.get("matched_chunk"),
+          (hit or {}).get("why"))
+    if hit and hit.get("matched_chunk"):
+        check("그 청크를 본문에서 찾을 수 있음",
+              _re.search(r"\s+".join(map(_re.escape, hit["matched_chunk"].split())), body) is not None)
+    store.delete_memo(long_id)
+
     section("컨텍스트 팩")
     pack = context.build("결제 관련해서 무슨 문제가 있었지?", budget_tokens=600)
     check("근거 포함", len(pack["sources"]) > 0, len(pack["sources"]))

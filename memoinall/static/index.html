@@ -197,6 +197,29 @@
     width: 100%; min-height: 220px; background: var(--panel-2); border: 1px solid var(--line);
     border-radius: 8px; padding: 11px; outline: none; resize: vertical; line-height: 1.7;
   }
+  /* 검색으로 연 메모는 어디가 걸린 건지 눈에 띄어야 한다. textarea 로는
+     글자에 표시를 못 달아서, 읽기 화면을 따로 두고 고칠 때만 textarea 로 바꾼다. */
+  .doc {
+    white-space: pre-wrap; word-break: break-word; line-height: 1.75;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 8px; padding: 11px; min-height: 220px;
+  }
+  .doc mark {
+    background: color-mix(in srgb, var(--accent) 26%, transparent);
+    color: var(--fg); border-radius: 3px; padding: 0 1px;
+  }
+  /* 지금 보고 있는 한 곳. 나머지 표시와 확실히 구분돼야 넘겨보는 맛이 난다. */
+  .doc mark.on { background: var(--accent); color: #fff; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
+  /* 뜻으로 걸린 대목 — 검색어가 글자로는 없어도 여기가 이유다 */
+  .doc .passage {
+    display: inline; background: color-mix(in srgb, var(--accent-2) 13%, transparent);
+    box-shadow: -4px 0 0 var(--accent-2); border-radius: 2px;
+  }
+  .hitbar { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; flex-wrap: wrap; }
+  .hitbar .btn { padding: 3px 10px; }
+  /* display 를 정한 요소는 hidden 속성만으론 안 숨는다 */
+  [hidden] { display: none !important; }
+
   .dlg-f { display: flex; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--line); }
   .spacer { flex: 1; }
   .status { font-size: 13.5px; color: var(--dim); line-height: 1.6; }
@@ -260,12 +283,15 @@
     <span class="meta" id="dMeta"></span>
   </div>
   <div class="dlg-b">
-    <textarea id="dBody"></textarea>
+    <div class="hitbar" id="dHits" hidden></div>
+    <div class="doc" id="dView"></div>
+    <textarea id="dBody" hidden></textarea>
     <div class="badges" id="dBadges" style="margin-top:10px"></div>
     <div id="dSimilar" style="margin-top:14px"></div>
   </div>
   <div class="dlg-f">
-    <button class="btn" id="dSave">저장</button>
+    <button class="btn" id="dEdit">고치기</button>
+    <button class="btn primary" id="dSave" hidden>저장</button>
     <button class="btn ghost" id="dPack">이 메모로 문서 만들기</button>
     <span class="spacer"></span>
     <button class="btn ghost" id="dDelete" style="color:var(--danger)">삭제</button>
@@ -278,7 +304,8 @@
 <script>
 const $ = (s) => document.querySelector(s);
 // tags 는 조회 조건(AND). tag 하나만 쓰던 시절의 사이드바 클릭도 여기로 모은다.
-const state = { tab: "feed", q: "", tag: null, tags: [], person: null, memo: null };
+// hits: 이번 검색에서 메모마다 '어디가 왜 걸렸는지'. 상세를 열 때 넘겨준다.
+const state = { tab: "feed", q: "", tag: null, tags: [], person: null, memo: null, hits: {} };
 // 정해 둔 태그 목록. 적을 때·조회할 때·내보낼 때 같은 목록을 쓴다.
 let myTags = [];
 
@@ -315,15 +342,10 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.classList.remove("show"), 1800);
 }
 
+// 카드 미리보기와 상세 본문이 같은 규칙으로 표시돼야 한다 —
+// 카드에서 본 곳이 상세에서 안 칠해져 있으면 찾다가 헷갈린다.
 function highlight(text, query) {
-  if (!query) return esc(text);
-  const terms = query.split(/\s+/).filter((t) => t.length >= 2).slice(0, 6);
-  let out = esc(text);
-  for (const t of terms) {
-    const re = new RegExp(esc(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
-    out = out.replace(re, (m) => `<mark>${m}</mark>`);
-  }
-  return out;
+  return markTerms(text, queryTerms(query));
 }
 
 // ---------------------------------------------------------------- 캡처
@@ -571,7 +593,10 @@ function cardHTML(m) {
 }
 
 function bindCards() {
-  document.querySelectorAll(".card[data-id]").forEach((c) => (c.onclick = () => openMemo(+c.dataset.id)));
+  // 검색으로 나온 카드는 '어디가 걸렸는지'를 상세로 들고 간다.
+  document.querySelectorAll(".card[data-id]").forEach((c) => {
+    c.onclick = () => openMemo(+c.dataset.id, state.hits[+c.dataset.id] || null);
+  });
   // 빈 화면 안내의 '다른 앱에서 가져오기' 같은 이동 링크
   document.querySelectorAll("[data-go]").forEach((a) => {
     a.onclick = (e) => { e.preventDefault(); goTab(a.dataset.go); };
@@ -584,6 +609,10 @@ async function renderFeed() {
     ? await api("/api/search?" + qs({ q: state.q, limit: 30, tags: tagArg }))
     : await api("/api/memos?" + qs({ limit: 40, tags: tagArg }));
   const items = data.items || [];
+  state.hits = {};
+  if (state.q.trim()) {
+    for (const m of items) state.hits[m.id] = { q: state.q, chunk: m.matched_chunk || "" };
+  }
   // 조사(이/가)는 태그 이름의 받침에 따라 달라진다 — 가운뎃점으로 피한다.
   const filtered = state.tags.length
     ? `<div class="status" style="margin-bottom:10px">${state.tags.map((t) => "#" + esc(t)).join(" + ")}
@@ -763,7 +792,9 @@ function renderPlanPanel() {
             <div><b>[M${s.id}]</b> ${esc(s.title)} <span class="meta">${s.created_at.slice(0, 10)}</span></div>
             <div class="meta">일치 질의: ${s.matched_queries.map(esc).join(" / ")}</div>
           </div>
-          <button class="btn ghost" data-openmemo="${s.id}" style="padding:3px 9px;font-size:13.5px">열기</button>
+          <button class="btn ghost" data-openmemo="${s.id}"
+                  data-q="${esc((s.matched_queries || []).join(" "))}"
+                  style="padding:3px 9px;font-size:13.5px">열기</button>
         </div>`).join("") || `<div class="status">관련 메모를 찾지 못했습니다. 질의를 바꿔보세요.</div>`}
       </div>
       <div class="row" style="margin:14px 0 0">
@@ -777,7 +808,10 @@ function renderPlanPanel() {
   document.querySelectorAll("[data-delq]").forEach((b) => {
     b.onclick = () => { gen.queries.splice(+b.dataset.delq, 1); planWithQueries(); };
   });
-  document.querySelectorAll("[data-openmemo]").forEach((b) => (b.onclick = () => openMemo(+b.dataset.openmemo)));
+  // 근거로 쓰인 메모도 '어느 질의에 걸렸는지' 를 들고 열린다
+  document.querySelectorAll("[data-openmemo]").forEach((b) => {
+    b.onclick = () => openMemo(+b.dataset.openmemo, b.dataset.q ? { q: b.dataset.q, chunk: "" } : null);
+  });
   $("#addQ").onkeydown = (e) => {
     if (e.key !== "Enter" || !e.target.value.trim()) return;
     gen.queries.push(e.target.value.trim());
@@ -1662,12 +1696,112 @@ async function renderSettings() {
 }
 
 // ---------------------------------------------------------------- 상세
-async function openMemo(id) {
+// 검색 결과에서 열면 '왜 걸렸는지'를 본문 안에서 바로 보여준다.
+// 두 가지를 표시한다 — 검색어와 글자가 같은 곳(mark), 그리고 뜻으로 걸린
+// 대목(passage). 후자가 필요한 이유는 의미 검색이라 글자가 하나도 안 겹쳐도
+// 걸릴 수 있기 때문이다. 그때 표시가 하나도 없으면 "왜 이게 나왔지" 가 된다.
+
+function queryTerms(query) {
+  return [...new Set(String(query || "").split(/\s+/)
+    .map((t) => t.replace(/^[#@]/, "").trim())
+    .filter((t) => t.length >= 2))].slice(0, 8);
+}
+
+const reEsc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// 원문에서 위치를 찾고 조각마다 이스케이프한다. 이스케이프한 HTML 위에서
+// 매칭하면 '&amp;' 같은 실체 참조 안쪽이 걸려 표시가 깨질 수 있다.
+function markTerms(text, terms) {
+  if (!terms.length) return esc(text);
+  const re = new RegExp("(" + terms.map(reEsc).join("|") + ")", "gi");
+  let out = "", last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index === re.lastIndex) { re.lastIndex++; continue; }  // 빈 매치 방어
+    out += esc(text.slice(last, m.index)) + "<mark>" + esc(m[0]) + "</mark>";
+    last = m.index + m[0].length;
+  }
+  return out + esc(text.slice(last));
+}
+
+// 뜻으로 걸린 대목이 본문 어디인지 찾는다.
+// 그냥 indexOf 로는 거의 못 찾는다 — 청크는 문단을 줄바꿈 하나로 이어 붙여
+// 저장돼서, 글자는 같아도 빈 줄이 접혀 있기 때문이다. 공백만 느슨하게 본다.
+function findPassage(body, chunk) {
+  if (!chunk || chunk.length < 20) return null;
+  const at = body.indexOf(chunk);
+  if (at >= 0) return [at, at + chunk.length];
+  const pattern = chunk.trim().split(/\s+/).map(reEsc).join("\\s+");
+  let m = null;
+  try { m = body.match(new RegExp(pattern)); } catch { return null; }
+  return m ? [m.index, m.index + m[0].length] : null;
+}
+
+function docHTML(body, query, chunk) {
+  const terms = queryTerms(query);
+  const span = findPassage(body, chunk);
+  // 못 찾으면 조용히 건너뛴다 — 엉뚱한 데를 칠하느니 안 칠하는 게 낫다.
+  if (!span) return markTerms(body, terms);
+  const [from, to] = span;
+  return markTerms(body.slice(0, from), terms)
+    + `<span class="passage">${markTerms(body.slice(from, to), terms)}</span>`
+    + markTerms(body.slice(to), terms);
+}
+
+let hitIndex = 0;
+
+function paintDoc(m, hit) {
+  const view = $("#dView");
+  const query = hit ? hit.q : "";
+  view.innerHTML = docHTML(m.body, query, hit && hit.chunk);
+  const marks = [...view.querySelectorAll("mark")];
+  const passage = view.querySelector(".passage");
+  const bar = $("#dHits");
+
+  if (!marks.length && !passage) { bar.hidden = true; return; }
+  bar.hidden = false;
+  bar.innerHTML = marks.length
+    ? `<button class="btn" id="hPrev">‹</button>
+       <span class="meta" id="hAt"></span>
+       <button class="btn" id="hNext">›</button>
+       <span class="meta">검색어 '${esc(query)}' — 글자가 같은 곳</span>
+       ${passage ? `<span class="badge why">뜻으로 걸린 대목도 표시했습니다</span>` : ""}`
+    : `<span class="meta">검색어와 <b>글자가 같은 곳은 없습니다</b> —
+         뜻이 비슷해서 걸렸습니다. 아래 표시한 대목이 그 이유입니다.</span>`;
+
+  if (!marks.length) { scrollTo(passage); return; }
+  hitIndex = 0;
+  const show = () => {
+    marks.forEach((el, i) => el.classList.toggle("on", i === hitIndex));
+    $("#hAt").textContent = `${hitIndex + 1} / ${marks.length}`;
+    scrollToHit(marks[hitIndex]);
+  };
+  $("#hPrev").onclick = () => { hitIndex = (hitIndex - 1 + marks.length) % marks.length; show(); };
+  $("#hNext").onclick = () => { hitIndex = (hitIndex + 1) % marks.length; show(); };
+  show();
+}
+
+function scrollToHit(el) {
+  if (!el) return;
+  // 스크롤 대상은 본문 상자다. dialog 안이라 scrollIntoView 는 창까지 움직인다.
+  const box = $(".dlg-b");
+  box.scrollTop = Math.max(0, el.offsetTop - box.clientHeight / 3);
+}
+
+function setEditing(on) {
+  $("#dBody").hidden = !on;
+  $("#dView").hidden = on;
+  $("#dSave").hidden = !on;
+  $("#dEdit").hidden = on;
+  if (on) { $("#dHits").hidden = true; $("#dBody").focus(); }
+}
+
+async function openMemo(id, hit = null) {
   const m = await api(`/api/memos/${id}`);
   state.memo = m;
   $("#dTitle").textContent = m.title;
   $("#dMeta").textContent = fmt(m.created_at);
   $("#dBody").value = m.body;
+  setEditing(false);
   const f = m.facets || {};
   $("#dBadges").innerHTML = [
     ...(f.tag || []).map((t) => `<span class="badge tag">#${esc(t)}</span>`),
@@ -1680,9 +1814,12 @@ async function openMemo(id) {
     : "";
   $("#dSimilar").querySelectorAll("[data-memo]").forEach((li) => (li.onclick = () => openMemo(+li.dataset.memo)));
   $("#detail").showModal();
+  // 창이 열린 뒤라야 위치를 잴 수 있다 — 닫혀 있으면 높이가 전부 0 이라 안 움직인다.
+  paintDoc(m, hit);
 }
 
 $("#dClose").onclick = () => $("#detail").close();
+$("#dEdit").onclick = () => setEditing(true);
 $("#dSave").onclick = async () => {
   await api(`/api/memos/${state.memo.id}`, { method: "PUT", body: { body: $("#dBody").value } });
   $("#detail").close();
