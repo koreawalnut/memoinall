@@ -344,6 +344,8 @@
         <div class="tagrow" id="dTagChoices"></div>
       </details>
     </section>
+    <div class="hitbar" id="dHits" hidden></div>
+    <div class="doc" id="dView" hidden></div>
     <textarea id="dBody" aria-label="메모 본문 편집"></textarea>
     <div class="badges" id="dBadges" style="margin-top:10px"></div>
     <div id="dSimilar" style="margin-top:14px"></div>
@@ -363,8 +365,9 @@
 <script>
 const $ = (s) => document.querySelector(s);
 // tags 는 조회 조건(AND). tag 하나만 쓰던 시절의 사이드바 클릭도 여기로 모은다.
+// hits: 이번 검색에서 메모마다 '어디가 왜 걸렸는지'. 상세를 열 때 넘겨준다.
 const state = { tab: "feed", q: "", tags: [], person: null, since: "", until: "", memo: null,
-  offset: 0, selecting: false, filtersOpen: false, selected: new Map(), feedItems: [] };
+  offset: 0, selecting: false, filtersOpen: false, selected: new Map(), feedItems: [], hits: {} };
 let renderVersion = 0;
 // 정해 둔 태그 목록. 적을 때·조회할 때·내보낼 때 같은 목록을 쓴다.
 let myTags = [];
@@ -739,10 +742,12 @@ function cardHTML(m) {
 }
 
 function bindCards() {
+  // 검색으로 나온 카드는 '어디가 걸렸는지'를 상세로 들고 간다.
   document.querySelectorAll(".card[data-id]").forEach((c) => {
-    c.onclick = (e) => { if (!e.target.closest("[data-select]")) openMemo(+c.dataset.id); };
+    const open = () => openMemo(+c.dataset.id, state.hits[+c.dataset.id] || null);
+    c.onclick = (e) => { if (!e.target.closest("[data-select]")) open(); };
     c.onkeydown = (e) => {
-      if (e.target === c && ["Enter", " "].includes(e.key)) { e.preventDefault(); openMemo(+c.dataset.id); }
+      if (e.target === c && ["Enter", " "].includes(e.key)) { e.preventDefault(); open(); }
     };
   });
   document.querySelectorAll("[data-select]").forEach((c) => {
@@ -829,6 +834,10 @@ async function renderFeed(version = renderVersion) {
     : await api("/api/memos?" + qs({ limit: 40, offset }));
   if (version !== renderVersion) return;
   const items = state.feedItems = data.items || [];
+  state.hits = {};
+  if (state.q.trim()) {
+    for (const m of items) state.hits[m.id] = { q: state.q, chunk: m.matched_chunk || "" };
+  }
   const filtered = state.q.trim() || state.tags.length || state.person || state.since || state.until;
   $("#view").innerHTML = items.length
     ? `<div class="status" style="margin-bottom:10px">${offset + 1}–${offset + items.length}번째 메모${state.q.trim() ? " · 뜻이 비슷한 메모까지 함께 찾았습니다" : " · 최근 작성순"}</div>` + items.map(cardHTML).join("")
@@ -2200,10 +2209,13 @@ function paintDetailTags() {
       const name = button.dataset.detailRemove;
       const pattern = new RegExp(`(^|\\s)#${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![${TAG_CHARS}])`, "g");
       $("#dBody").value = $("#dBody").value.replace(pattern, "$1");
+      setEditing(true);
       $("#dTagMessage").textContent = `#${name} 제거됨 · 저장하면 반영됩니다`;
       paintDetailTags();
     };
   });
+  // 읽기 화면에서 태그를 바꿔도 저장 버튼이 보여야 한다
+  if (state.memo && $("#dBody").value !== state.memo.body) setEditing(true);
   $("#dTagPicker").hidden = !choices.length;
   $("#dTagChoices").innerHTML = choices.map((tag) => {
     const selected = names.some((name) => name.toLowerCase() === tag.name.toLowerCase());
@@ -2225,6 +2237,7 @@ function addDetailTag(raw = $("#dTagInput").value) {
   if (!exists) {
     const body = $("#dBody").value;
     $("#dBody").value = body + (body && !/\s$/.test(body) ? "\n" : "") + "#" + name;
+    setEditing(true);
   }
   if (raw === $("#dTagInput").value) $("#dTagInput").value = "";
   $("#dTagMessage").textContent = exists ? `#${name} 태그가 이미 있습니다.` : `#${name} 추가됨 · 저장하면 반영됩니다`;
@@ -2240,8 +2253,111 @@ function closeDetail() {
   $("#detail").close();
   return true;
 }
+// 검색 결과에서 열면 '왜 걸렸는지'를 본문 안에서 바로 보여준다.
+// 두 가지를 표시한다 — 검색어와 글자가 같은 곳(mark), 그리고 뜻으로 걸린
+// 대목(passage). 후자가 필요한 이유는 의미 검색이라 글자가 하나도 안 겹쳐도
+// 걸릴 수 있기 때문이다. 그때 표시가 하나도 없으면 "왜 이게 나왔지" 가 된다.
+
+function queryTerms(query) {
+  return [...new Set(String(query || "").split(/\s+/)
+    .map((t) => t.replace(/^[#@]/, "").trim())
+    .filter((t) => t.length >= 2))].slice(0, 8);
+}
+
+const reEsc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// 원문에서 위치를 찾고 조각마다 이스케이프한다. 이스케이프한 HTML 위에서
+// 매칭하면 '&amp;' 같은 실체 참조 안쪽이 걸려 표시가 깨질 수 있다.
+function markTerms(text, terms) {
+  text = String(text ?? "");
+  if (!terms.length) return esc(text);
+  const re = new RegExp("(" + terms.map(reEsc).join("|") + ")", "gi");
+  let out = "", last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index === re.lastIndex) { re.lastIndex++; continue; }  // 빈 매치 방어
+    out += esc(text.slice(last, m.index)) + "<mark>" + esc(m[0]) + "</mark>";
+    last = m.index + m[0].length;
+  }
+  return out + esc(text.slice(last));
+}
+
+// 뜻으로 걸린 대목이 본문 어디인지 찾는다.
+// 그냥 indexOf 로는 거의 못 찾는다 — 청크는 문단을 줄바꿈 하나로 이어 붙여
+// 저장돼서, 글자는 같아도 빈 줄이 접혀 있기 때문이다. 공백만 느슨하게 본다.
+function findPassage(body, chunk) {
+  if (!chunk || chunk.length < 20) return null;
+  const at = body.indexOf(chunk);
+  if (at >= 0) return [at, at + chunk.length];
+  const pattern = chunk.trim().split(/\s+/).map(reEsc).join("\\s+");
+  let m = null;
+  try { m = body.match(new RegExp(pattern)); } catch { return null; }
+  return m ? [m.index, m.index + m[0].length] : null;
+}
+
+function docHTML(body, query, chunk) {
+  const terms = queryTerms(query);
+  const span = findPassage(body, chunk);
+  // 못 찾으면 조용히 건너뛴다 — 엉뚱한 데를 칠하느니 안 칠하는 게 낫다.
+  if (!span) return markTerms(body, terms);
+  const [from, to] = span;
+  return markTerms(body.slice(0, from), terms)
+    + `<span class="passage">${markTerms(body.slice(from, to), terms)}</span>`
+    + markTerms(body.slice(to), terms);
+}
+
+let hitIndex = 0;
+
+// 표시할 곳이 있으면 읽기 화면으로, 없으면 지금처럼 바로 고치는 화면으로 연다.
+function paintDoc(m, hit) {
+  const view = $("#dView");
+  const query = hit ? hit.q : "";
+  view.innerHTML = hit ? docHTML(m.body, query, hit.chunk) : "";
+  const marks = [...view.querySelectorAll("mark")];
+  const passage = view.querySelector(".passage");
+  const bar = $("#dHits");
+
+  if (!marks.length && !passage) { setEditing(true, false); return; }
+  setEditing(false);
+  bar.hidden = false;
+  bar.innerHTML = marks.length
+    ? `<button class="btn" id="hPrev" aria-label="이전 표시">‹</button>
+       <span class="meta" id="hAt"></span>
+       <button class="btn" id="hNext" aria-label="다음 표시">›</button>
+       <span class="meta">검색어 '${esc(query)}' — 글자가 같은 곳</span>
+       ${passage ? `<span class="badge why">뜻으로 걸린 대목도 표시했습니다</span>` : ""}`
+    : `<span class="meta">검색어와 <b>글자가 같은 곳은 없습니다</b> —
+         뜻이 비슷해서 걸렸습니다. 아래 표시한 대목이 그 이유입니다.</span>`;
+
+  if (!marks.length) { scrollToHit(passage); return; }
+  hitIndex = 0;
+  const show = () => {
+    marks.forEach((el, i) => el.classList.toggle("on", i === hitIndex));
+    $("#hAt").textContent = `${hitIndex + 1} / ${marks.length}`;
+    scrollToHit(marks[hitIndex]);
+  };
+  $("#hPrev").onclick = () => { hitIndex = (hitIndex - 1 + marks.length) % marks.length; show(); };
+  $("#hNext").onclick = () => { hitIndex = (hitIndex + 1) % marks.length; show(); };
+  show();
+}
+
+function scrollToHit(el) {
+  if (!el) return;
+  // 스크롤 대상은 본문 상자다. dialog 안이라 scrollIntoView 는 창까지 움직인다.
+  const box = $(".dlg-b");
+  box.scrollTop = Math.max(0, el.offsetTop - box.clientHeight / 3);
+}
+
+function setEditing(on, focus = false) {
+  $("#dBody").hidden = !on;
+  $("#dView").hidden = on;
+  $("#dSave").hidden = !on;
+  $("#dEdit").hidden = on;
+  if (on) $("#dHits").hidden = true;
+  if (on && focus) $("#dBody").focus();
+}
+
 let memoRequest = 0;
-async function openMemo(id) {
+async function openMemo(id, hit = null) {
   if (detailDirty() && !confirm("현재 수정한 내용을 버리고 다른 메모를 열까요?")) return;
   const request = ++memoRequest;
   let m;
@@ -2267,9 +2383,12 @@ async function openMemo(id) {
     : "";
   $("#dSimilar").querySelectorAll("[data-memo]").forEach((li) => (li.onclick = () => openMemo(+li.dataset.memo)));
   if (!$("#detail").open) $("#detail").showModal();
+  // 창이 열린 뒤라야 위치를 잴 수 있다 — 닫혀 있으면 높이가 전부 0 이라 안 움직인다.
+  paintDoc(m, hit);
 }
 
 $("#dClose").onclick = closeDetail;
+$("#dEdit").onclick = () => setEditing(true, true);
 $("#dBody").addEventListener("input", paintDetailTags);
 $("#dTagAdd").onclick = () => { if (addDetailTag()) $("#dTagInput").focus(); };
 $("#dTagInput").addEventListener("keydown", (e) => {
