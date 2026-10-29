@@ -12,6 +12,7 @@ import tempfile
 import time
 import warnings
 from pathlib import Path
+from unittest.mock import patch
 
 warnings.filterwarnings("ignore")
 
@@ -23,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from fastapi.testclient import TestClient  # noqa: E402
 
 from memoinall.api import app  # noqa: E402
+from memoinall import db, store  # noqa: E402
 
 PASS = FAIL = 0
 
@@ -60,6 +62,25 @@ def main() -> int:
         check("백그라운드 보강 완료", wait_idle(c))
 
         check("GET /api/memos", len(c.get("/api/memos").json()["items"]) == 3)
+        page1 = c.get("/api/memos", params={"limit": 2}).json()
+        page2 = c.get("/api/memos", params={"limit": 2, "offset": page1["next_offset"]}).json()
+        check("목록 다음 페이지", page1["has_more"] and not page2["has_more"]
+              and len({m["id"] for m in page1["items"] + page2["items"]}) == 3)
+        check("잘못된 페이지 크기 거부", c.get("/api/memos", params={"limit": 0}).status_code == 422)
+        check("초안 초기값", c.get("/api/draft").json()["body"] == "")
+        draft = "  아직 작성 중인 초안\n"
+        c.put("/api/draft", json={"body": draft})
+        check("초안 공백 보존", c.get("/api/draft").json()["body"] == draft)
+        check("초안은 검색 메모에 미포함", len(c.get("/api/memos").json()["items"]) == 3)
+        check("잘못된 초안 거부", c.put("/api/draft", json={"body": []}).status_code == 400)
+        saved_draft = c.post("/api/memos", json={"body": draft, "draft_body": draft}).json()
+        check("메모 저장 시 해당 초안 정리", c.get("/api/draft").json()["body"] == "")
+        c.put("/api/draft", json={"body": "저장 중에 새로 작성한 내용"})
+        older = c.post("/api/memos", json={"body": draft, "draft_body": draft}).json()
+        check("새 초안은 이전 메모 저장으로 지워지지 않음", c.get("/api/draft").json()["body"] == "저장 중에 새로 작성한 내용")
+        c.delete(f"/api/memos/{saved_draft['id']}")
+        c.delete(f"/api/memos/{older['id']}")
+        c.put("/api/draft", json={"body": ""})
         d = c.get(f"/api/memos/{mid}").json()
         check("파셋 추출", "결제" in d["facets"].get("tag", []), d["facets"].get("tag"))
         check("similar 포함", "similar" in d)
@@ -68,6 +89,9 @@ def main() -> int:
         s = c.get("/api/search", params={"q": "결제 지연"}).json()
         check("GET /api/search", s["count"] > 0, s["count"])
         check("why 배지", s["items"][0].get("why"), s["items"][0].get("why"))
+        search1 = c.get("/api/search", params={"q": "결제", "limit": 1}).json()
+        search2 = c.get("/api/search", params={"q": "결제", "limit": 1, "offset": 1}).json()
+        check("검색 다음 페이지", search1["has_more"] and search1["items"][0]["id"] != search2["items"][0]["id"])
 
         ctx = c.get("/api/context", params={"q": "결제 뭐가 문제였지", "budget": 800}).json()
         check("GET /api/context", len(ctx["sources"]) > 0 and ctx["used_tokens"] <= 800, ctx["used_tokens"])
@@ -153,6 +177,27 @@ def main() -> int:
 
         check("PUT /api/memos", c.put(f"/api/memos/{mid}", json={"body": "수정됨 #결제"}).status_code == 200)
         check("PUT 빈 본문 400", c.put(f"/api/memos/{mid}", json={"body": "  "}).status_code == 400)
+        # 태그 편집은 보강 워커가 아직 실행되지 않아도 조회·검색·공유에 반영된다.
+        editable = store.add_memo("단일 메모 태그 편집 #이전 #이전/유지", enqueue_enrich=False)
+        untouched = store.add_memo("다른 메모의 태그 유지 #이전", enqueue_enrich=False)
+        store.enrich(editable["id"])
+        store.enrich(untouched["id"])
+        with patch("memoinall.store.enqueue"):
+            changed = c.put(f"/api/memos/{editable['id']}", json={
+                "body": "단일 메모 태그 편집 #새분류 #새분류 #이전/유지",
+            }).json()
+            check("태그 변경 즉시 반환·중복 제거", set(changed["facets"]["tag"]) == {"새분류", "이전/유지"})
+            check("새 태그로 즉시 목록 조회", [m["id"] for m in c.get("/api/memos", params={"tag": "새분류"}).json()["items"]] == [editable["id"]])
+            check("옛 태그는 해당 메모에서만 제거", [m["id"] for m in c.get("/api/memos", params={"tag": "이전"}).json()["items"]] == [untouched["id"]])
+            check("새 태그로 즉시 검색", any(m["id"] == editable["id"] for m in c.get("/api/search", params={"q": "단일", "tag": "새분류"}).json()["items"]))
+            check("새 태그로 즉시 공유", c.post("/api/export/preview", json={"tags": ["새분류"]}).json()["count"] == 1)
+            cleared = c.put(f"/api/memos/{editable['id']}", json={"body": "단일 메모 태그 편집"}).json()
+            check("모든 태그 제거 즉시 반영", not cleared["facets"].get("tag") and c.get("/api/memos", params={"tag": "새분류"}).json()["items"] == [])
+            check("태그 수정은 다른 메모 본문 보존", c.get(f"/api/memos/{untouched['id']}").json()["body"] == untouched["body"])
+            check("없는 메모 수정 거부", c.put("/api/memos/999999", json={"body": "유령 #잘못된태그"}).status_code == 400)
+            check("없는 메모 수정은 검색 항목 생성 안 함", db.one("SELECT rowid FROM memo_fts WHERE rowid=999999") is None)
+        c.delete(f"/api/memos/{editable['id']}")
+        c.delete(f"/api/memos/{untouched['id']}")
         check("PATCH pinned", c.patch(f"/api/memos/{mid}", json={"pinned": True}).json()["pinned"] == 1)
         check("POST /api/reindex", "queued" in c.post("/api/reindex", json={"all": True}).json())
         check("DELETE", c.delete(f"/api/memos/{mid}").status_code == 200)
@@ -238,6 +283,8 @@ def main() -> int:
         narrow = c.post("/api/export/preview", json={"tag": "결제"}).json()
         check("태그로 좁히기", 0 < narrow["count"] < pv["count"], (narrow["count"], pv["count"]))
         check("맞는 게 없으면 0건", c.post("/api/export/preview", json={"tag": "없는태그"}).json()["count"] == 0)
+        check("빈 선택은 전체 내보내기로 확대되지 않음", c.post("/api/export/preview", json={"ids": []}).json()["count"] == 0)
+        check("잘못된 선택 ID 거부", c.post("/api/export/preview", json={"ids": ["all"]}).status_code == 400)
 
         ex = c.post("/api/export", json={"path": str(out), "note": "공유합니다"}).json()
         check("POST /api/export", ex["count"] == total_now and Path(ex["path"]).exists(), ex)
@@ -311,6 +358,17 @@ def main() -> int:
         check("POST /api/generate (키 없음 → 프롬프트)", gen["output"] is None and gen["prompt"])
         check("질의 지정 반영", c.post("/api/generate/plan",
               json={"instruction": "x", "queries": ["온보딩"]}).json()["queries"] == ["온보딩"])
+        chosen = c.get("/api/memos").json()["items"][0]["id"]
+        selected_payload = {"instruction": "인수인계 정리", "memo_ids": [chosen, chosen], "budget": 900, "format": "handoff"}
+        selected = c.post("/api/generate/plan", json=selected_payload).json()
+        check("AI 근거는 선택한 메모만", [s["id"] for s in selected["sources"]] == [chosen]
+              and selected["query_method"] == "selected", selected)
+        generated = c.post("/api/generate", json=selected_payload).json()
+        check("선택 생성도 같은 범위", [s["id"] for s in generated["sources"]] == [chosen])
+        check("인수인계 형식", "현재 상태" in selected["prompt"] and "남은 할 일" in selected["prompt"])
+        for ids in ([], [999999], ["all"], [True]):
+            check(f"잘못된 AI 선택 거부 {ids}", c.post("/api/generate/plan",
+                  json={"instruction": "정리", "memo_ids": ids}).status_code == 400)
 
         idx = c.get("/")
         check("GET / (웹 UI)", idx.status_code == 200 and "memoinall" in idx.text, idx.status_code)

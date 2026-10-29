@@ -9,6 +9,9 @@
 
 from __future__ import annotations
 
+import argparse
+import importlib.util
+import json
 import shutil
 import subprocess
 import sys
@@ -18,31 +21,70 @@ ROOT = Path(__file__).resolve().parent
 DIST = ROOT / "dist"
 BUILD = ROOT / "build"
 
-REQUIRED = ["webview", "onnxruntime", "tokenizers", "fastapi", "uvicorn", "numpy"]
+REQUIRED = ["webview", "onnxruntime", "tokenizers", "fastapi", "uvicorn", "numpy",
+            "pypdf", "openpyxl", "xlrd", "olefile", "defusedxml"]
 OPTIONAL = ["anthropic", "openai"]
 
 
-def check() -> bool:
-    import importlib.util
+def missing_packages() -> list[str]:
+    return [m for m in REQUIRED + ["PyInstaller"] if importlib.util.find_spec(m) is None]
 
+
+def project_python() -> Path | None:
+    candidate = ROOT / ".venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    if not candidate.is_file() or candidate.resolve() == Path(sys.executable).resolve():
+        return None
+    probe = (
+        "import importlib.util,json; "
+        f"modules={json.dumps(REQUIRED + ['PyInstaller'])}; "
+        "print(json.dumps([m for m in modules if importlib.util.find_spec(m) is None]))"
+    )
+    try:
+        result = subprocess.run([str(candidate), "-X", "utf8", "-c", probe], cwd=ROOT,
+                                capture_output=True, text=True, encoding="utf-8", timeout=30)
+        if result.returncode == 0 and json.loads(result.stdout) == []:
+            return candidate
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        pass
+    return None
+
+
+def check() -> bool:
     missing = [m for m in REQUIRED if importlib.util.find_spec(m) is None]
     if missing:
+        print("현재 Python:", sys.executable)
         print("필수 패키지가 없습니다:", ", ".join(missing))
-        print("  pip install pywebview onnxruntime tokenizers fastapi uvicorn numpy")
+        print("  python -X utf8 -m pip install pywebview onnxruntime tokenizers fastapi uvicorn numpy -r requirements-documents.txt")
         return False
     for m in OPTIONAL:
         state = "포함" if importlib.util.find_spec(m) else "없음(해당 프로바이더 비활성)"
         print(f"  선택 패키지 {m}: {state}")
     if importlib.util.find_spec("PyInstaller") is None:
-        print("PyInstaller 가 없습니다:  pip install pyinstaller")
+        print("PyInstaller 가 없습니다:  python -m pip install pyinstaller")
         return False
     return True
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="memoinall 단일 실행 파일 빌드")
+    parser.add_argument("--check", action="store_true", help="빌드 환경만 확인하고 파일을 만들지 않습니다")
+    arguments = sys.argv[1:] if argv is None else argv
+    args = parser.parse_args(arguments)
+    if missing_packages():
+        candidate = project_python()
+        if candidate is not None:
+            print("필수 패키지가 준비된 프로젝트 가상환경으로 전환합니다:", candidate, flush=True)
+            return subprocess.run([str(candidate), "-X", "utf8", str(ROOT / "build_exe.py"), *arguments], cwd=ROOT).returncode
     if not check():
         return 1
+    if args.check:
+        print("빌드 준비 완료:", sys.executable)
+        return 0
 
+    # 실제 경로까지 확인한 후 프로젝트의 빌드 산출물만 정리한다.
+    if any(path.resolve().parent != ROOT.resolve() for path in (DIST, BUILD)):
+        print("빌드 출력 경로가 프로젝트 밖을 가리킵니다. dist/build 경로를 확인하세요.")
+        return 1
     for path in (DIST, BUILD):
         if path.exists():
             print(f"이전 결과 삭제: {path}")

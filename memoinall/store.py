@@ -74,11 +74,26 @@ def update_memo(memo_id: int, body: str, *, enqueue_enrich: bool = True) -> dict
     body = (body or "").strip()
     if not body:
         raise ValueError("빈 메모는 저장할 수 없습니다.")
-    db.execute(
-        "UPDATE memos SET body=?, title=?, updated_at=?, enriched_at=NULL WHERE id=?",
-        (body, textutil.title_from(body), now_iso(), memo_id),
-    )
-    _index_fts(memo_id, body)
+    # 태그 필터는 저장 직후에도 맞아야 한다. 원문·FTS·태그를 함께 반영하고,
+    # 시간이 걸리는 임베딩과 나머지 추출만 뒤의 보강 작업에 맡긴다.
+    conn = db.connect()
+    with conn:
+        cur = conn.execute(
+            "UPDATE memos SET body=?, title=?, updated_at=?, enriched_at=NULL WHERE id=?",
+            (body, textutil.title_from(body), now_iso(), memo_id),
+        )
+        if not cur.rowcount:
+            raise KeyError(f"메모 {memo_id} 없음")
+        conn.execute("DELETE FROM memo_fts WHERE rowid=?", (memo_id,))
+        conn.execute(
+            "INSERT INTO memo_fts(rowid, grams, raw) VALUES(?,?,?)",
+            (memo_id, textutil.ngram_index_text(body), textutil.normalize(body).lower()),
+        )
+        conn.execute("DELETE FROM facets WHERE memo_id=? AND kind='tag'", (memo_id,))
+        conn.executemany(
+            "INSERT OR IGNORE INTO facets(memo_id, kind, value) VALUES(?, 'tag', ?)",
+            [(memo_id, name) for name in extract.TAG_RE.findall(body)],
+        )
     if enqueue_enrich:
         enqueue(memo_id)
     return get_memo(memo_id)
@@ -223,7 +238,7 @@ def list_memos(
     if until:
         sql.append("AND m.created_at <= ?")
         params.append(until + "T23:59:59" if len(until) == 10 else until)
-    sql.append("ORDER BY m.pinned DESC, m.created_at DESC LIMIT ? OFFSET ?")
+    sql.append("ORDER BY m.pinned DESC, m.created_at DESC, m.id DESC LIMIT ? OFFSET ?")
     params.extend([limit, offset])
 
     rows = db.query(" ".join(sql), params)
@@ -301,6 +316,9 @@ def enrich(memo_id: int) -> bool:
 
     conn = db.connect()
     with conn:  # 예외 시 자동 롤백
+        # SELECT 는 sqlite3 의 암시적 트랜잭션을 시작하지 않는다. 먼저 쓰기 잠금을
+        # 잡아야 존재 확인과 파생물 교체 사이에 다른 스레드가 메모를 지우지 못한다.
+        conn.execute("BEGIN IMMEDIATE")
         still_there = conn.execute("SELECT body FROM memos WHERE id=?", (memo_id,)).fetchone()
         if still_there is None or still_there["body"] != body:
             return False  # 삭제됐거나 그 사이 또 수정됨 — 뒤따르는 작업이 처리한다

@@ -56,6 +56,11 @@ FORMATS: dict[str, dict[str, str]] = {
         "label": "질문에 답하기",
         "hint": "질문에 직접 답하세요. 근거가 부족하면 부족하다고 먼저 밝히세요.",
     },
+    "handoff": {
+        "label": "인수인계서",
+        "hint": "업무 배경 · 현재 상태 · 결정 사항 · 남은 할 일 · 참고 자료 순으로 정리하세요. "
+                "담당자와 기한은 메모에 있을 때만 쓰고, 확인이 필요한 내용은 별도로 표시하세요.",
+    },
 }
 
 SYSTEM = (
@@ -264,17 +269,28 @@ def build_pack(
     since: str | None = None,
     until: str | None = None,
     full_body: bool = True,
+    memo_ids: list[int] | None = None,
 ) -> dict:
     """생성 직전까지 — 질의 도출, 검색, 프롬프트 조립. LLM 호출은 안 한다."""
     budget_tokens = budget_tokens or settings.get_int("gen.budget_tokens", 6000)
-    derived = {"queries": queries or [], "topic": "", "method": "manual"}
-    if not queries:
-        derived = derive_queries(instruction)
-
-    hits = multi_search(
-        derived["queries"], limit=limit, tag=tag, tags=tags, person=person,
-        since=since, until=until,
-    )
+    if memo_ids is not None:
+        if not memo_ids:
+            raise ValueError("근거로 쓸 메모를 하나 이상 선택하세요.")
+        derived = {"queries": [], "topic": "", "method": "selected"}
+        hits = []
+        for memo_id in dict.fromkeys(memo_ids):
+            try:
+                hits.append(store.get_memo(memo_id))
+            except KeyError:
+                raise ValueError(f"선택한 메모 M{memo_id}를 찾을 수 없습니다. 다시 선택하세요.")
+    else:
+        derived = {"queries": queries or [], "topic": "", "method": "manual"}
+        if not queries:
+            derived = derive_queries(instruction)
+        hits = multi_search(
+            derived["queries"], limit=limit, tag=tag, tags=tags, person=person,
+            since=since, until=until,
+        )
 
     included: list[dict] = []
     dropped: list[dict] = []
@@ -312,6 +328,7 @@ def build_pack(
         "queries": derived["queries"],
         "query_method": derived["method"],
         "topic": derived.get("topic", ""),
+        "memo_ids": list(dict.fromkeys(memo_ids)) if memo_ids is not None else None,
         "budget_tokens": budget_tokens,
         "used_tokens": used,
         "sources": included,

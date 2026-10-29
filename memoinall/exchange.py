@@ -57,7 +57,7 @@ def select(
     조건은 AND 로 겹친다 — '결제 관련 + 지난달' 처럼 좁혀 보낼 수 있어야 한다.
     태그를 여럿 주면 전부 달린 메모만 나간다.
     """
-    if ids:
+    if ids is not None:
         # 화면에서 직접 고른 경우. 순서는 고른 쪽이 아니라 시간순으로 맞춘다.
         rows = [store.get_memo(i, with_facets=False) for i in _existing(ids)]
         rows.sort(key=lambda m: m["created_at"] or "")

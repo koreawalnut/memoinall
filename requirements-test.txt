@@ -1,0 +1,5 @@
+# Install the app requirements first. Extra dependencies for the test suite.
+-r requirements-documents.txt
+httpx>=0.27
+playwright>=1.50
+xlwt==1.3.0

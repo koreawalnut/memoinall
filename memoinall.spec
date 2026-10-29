@@ -69,6 +69,11 @@ for optional in ("anthropic", "openai", "tokenizers"):
         if optional != "tokenizers":  # tokenizers 는 순수 확장모듈이라 데이터가 없다
             datas += collect_data_files(optional)
 
+# 문서 파서는 실행 중 선택적으로 import 하므로 단일 exe 에 명시적으로 포함한다.
+for parser in ("pypdf", "openpyxl", "xlrd", "olefile", "defusedxml"):
+    if has(parser):
+        hiddenimports += collect_submodules(parser)
+
 # 넣으면 크기만 커지고 쓰지 않는 것들.
 excludes = [
     "torch", "torchvision", "torchaudio",

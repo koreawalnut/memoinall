@@ -175,6 +175,33 @@ def main() -> int:
     check("보관 처리", store.set_flag(ids[5], archived=True)["archived"] == 1)
     check("보관 메모는 검색 제외", not any(h["id"] == ids[5] for h in search.search("이탈률")))
 
+    section("보강 중 삭제 경쟁")
+    import sqlite3
+
+    concurrent = store.add_memo("정리와 동시에 삭제할 메모", enqueue_enrich=False)
+    writer = sqlite3.connect(db.config.DB_PATH, timeout=0)
+    writer.execute("PRAGMA foreign_keys=ON")
+    blocked = []
+
+    def try_delete(statement):
+        if statement.startswith("DELETE FROM chunks WHERE memo_id=") and not blocked:
+            try:
+                writer.execute("DELETE FROM memos WHERE id=?", (concurrent["id"],))
+                writer.commit()
+                blocked.append(False)
+            except sqlite3.OperationalError as exc:
+                writer.rollback()
+                blocked.append("locked" in str(exc))
+
+    conn = db.connect()
+    conn.set_trace_callback(try_delete)
+    try:
+        check("파생물 교체 중 삭제 직렬화", store.enrich(concurrent["id"]) and blocked == [True], blocked)
+    finally:
+        conn.set_trace_callback(None)
+        writer.close()
+        store.delete_memo(concurrent["id"])
+
     if REAL and embed.status()["state"] == "ready":
         section("의미 검색 (어휘 무중복)")
         cases = [("사용자가 중간에 빠져나가는 문제", "온보딩"), ("멱등성 관련 걱정", "중복 승인")]

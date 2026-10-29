@@ -6,14 +6,16 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from . import (
     config,
     context,
     db,
+    documents,
     embed,
     exchange,
     generate,
@@ -55,15 +57,19 @@ def create_memo(payload: dict = Body(...)):
         # tags 로 넘어온 것은 본문 끝에 #태그 로 붙인다. 태그의 원본은 늘 본문이라야
         # 내보낸 파일을 받은 쪽에서도 태그가 살아난다.
         body = tags.append_to_body(payload.get("body", ""), payload.get("tags") or [])
-        return store.add_memo(body, payload.get("source", "web"))
+        memo = store.add_memo(body, payload.get("source", "web"))
+        if isinstance(payload.get("draft_body"), str):
+            db.execute("UPDATE meta SET value='' WHERE key='capture_draft' AND value=?",
+                       (payload["draft_body"],))
+        return memo
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
 
 @app.get("/api/memos")
 def list_memos(
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     tag: str | None = None,
     # 모듈 tags 를 가리지 않도록 이름을 달리 받는다 — 가려지면 이 함수 안에서
     # tags.xxx 가 조용히 문자열을 참조하게 된다.
@@ -73,12 +79,27 @@ def list_memos(
     until: str | None = None,
     archived: bool = False,
 ):
-    return {
-        "items": store.list_memos(
-            limit=limit, offset=offset, tag=tag, tags=_csv(tag_csv), person=person,
-            since=since, until=until, archived=archived,
-        )
-    }
+    items = store.list_memos(
+        limit=limit + 1, offset=offset, tag=tag, tags=_csv(tag_csv), person=person,
+        since=since, until=until, archived=archived,
+    )
+    return {"items": items[:limit], "has_more": len(items) > limit,
+            "next_offset": offset + min(len(items), limit)}
+
+
+@app.get("/api/draft")
+def read_draft():
+    # 데스크톱은 실행마다 포트가 달라 localStorage 만으로는 초안을 복원할 수 없다.
+    return {"body": db.get_meta("capture_draft", "")}
+
+
+@app.put("/api/draft")
+def write_draft(payload: dict = Body(...)):
+    body = payload.get("body")
+    if not isinstance(body, str):
+        raise HTTPException(400, "초안 본문은 문자열이어야 합니다.")
+    db.set_meta("capture_draft", body)
+    return {"ok": True}
 
 
 def _csv(value: str | None) -> list[str]:
@@ -124,16 +145,20 @@ def remove_memo(memo_id: int):
 @app.get("/api/search")
 def do_search(
     q: str = Query(""),
-    limit: int = 20,
+    limit: int = Query(20, ge=1, le=200),
+    offset: int = Query(0, ge=0, le=10000),
     tag: str | None = None,
     tag_csv: str | None = Query(None, alias="tags"),
     person: str | None = None,
     since: str | None = None,
     until: str | None = None,
 ):
-    hits = search.search(q, limit=limit, tag=tag, tags=_csv(tag_csv), person=person,
-                         since=since, until=until)
-    return {"query": q, "count": len(hits), "items": hits}
+    end = offset + limit
+    hits = search.search(q, limit=end + 1, pool=max(120, end + 1),
+                         tag=tag, tags=_csv(tag_csv), person=person, since=since, until=until)
+    items = hits[offset:end]
+    return {"query": q, "count": len(items), "items": items,
+            "has_more": len(hits) > end, "next_offset": offset + len(items)}
 
 
 @app.get("/api/context")
@@ -345,10 +370,19 @@ def _redmine_opts(payload: dict) -> dict:
 # --------------------------------------------------------------------------- 내보내기
 
 
+def _memo_ids(value) -> list[int] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list) or len(value) > 1000 or any(
+        not isinstance(i, int) or isinstance(i, bool) or i <= 0 for i in value
+    ):
+        raise HTTPException(400, "메모는 양의 정수 ID 목록으로 최대 1000건까지 선택하세요.")
+    return list(dict.fromkeys(value))
+
+
 def _export_filters(payload: dict) -> dict:
-    ids = payload.get("ids")
     return {
-        "ids": [int(i) for i in ids] if isinstance(ids, list) else None,
+        "ids": _memo_ids(payload.get("ids")),
         "q": str(payload.get("q") or ""),
         "tag": payload.get("tag") or None,
         "tags": [str(t).lstrip("#") for t in (payload.get("tags") or []) if str(t).strip()],
@@ -502,6 +536,32 @@ def import_run(payload: dict = Body(default={})):
     return _run_imports(payload, dry_run=False)
 
 
+# --------------------------------------------------------------------------- 문서 파일 업로드
+
+
+@app.post("/api/import/documents/preview")
+async def document_preview(request: Request, filename: str = Query(..., max_length=300)):
+    """파일은 스트림으로 제한해 읽고, 파싱은 별도 스레드에서 수행한다. 저장하지 않는다."""
+    chunks, size = [], 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > documents.MAX_BYTES:
+            raise HTTPException(413, "20MB 이하의 파일을 선택하세요.")
+        chunks.append(chunk)
+    try:
+        return await run_in_threadpool(documents.extract, filename, b"".join(chunks))
+    except documents.DocumentError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/import/documents/save")
+def document_save(payload: dict = Body(...)):
+    try:
+        return documents.save(payload.get("filename"), payload.get("parts"))
+    except documents.DocumentError as exc:
+        raise HTTPException(400, str(exc))
+
+
 # --------------------------------------------------------------------------- 설정
 
 
@@ -581,8 +641,11 @@ def generate_plan(payload: dict = Body(...)):
     instruction = (payload.get("instruction") or "").strip()
     if not instruction:
         raise HTTPException(400, "instruction 이 필요합니다.")
-    return generate.build_pack(
-        instruction,
+    return _generate_request(payload, instruction)
+
+
+def _generate_request(payload: dict, instruction: str, *, run: bool = False):
+    options = dict(
         queries=payload.get("queries") or None,
         budget_tokens=payload.get("budget"),
         fmt=payload.get("format", "auto"),
@@ -591,7 +654,14 @@ def generate_plan(payload: dict = Body(...)):
         person=payload.get("person"),
         since=payload.get("since"),
         until=payload.get("until"),
+        memo_ids=_memo_ids(payload.get("memo_ids")),
     )
+    try:
+        if run:
+            return generate.generate(instruction, effort=payload.get("effort"), **options)
+        return generate.build_pack(instruction, **options)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
 
 
 @app.post("/api/generate")
@@ -599,18 +669,7 @@ def do_generate(payload: dict = Body(...)):
     instruction = (payload.get("instruction") or "").strip()
     if not instruction:
         raise HTTPException(400, "instruction 이 필요합니다.")
-    return generate.generate(
-        instruction,
-        queries=payload.get("queries") or None,
-        budget_tokens=payload.get("budget"),
-        fmt=payload.get("format", "auto"),
-        tag=payload.get("tag"),
-        tags=[str(t) for t in (payload.get("tags") or [])],
-        person=payload.get("person"),
-        since=payload.get("since"),
-        until=payload.get("until"),
-        effort=payload.get("effort"),
-    )
+    return _generate_request(payload, instruction, run=True)
 
 
 # --------------------------------------------------------------------------- 시스템

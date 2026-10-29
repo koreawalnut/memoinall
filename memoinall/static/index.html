@@ -18,13 +18,14 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body {
     margin: 0; background: var(--bg); color: var(--fg);
     font: 15.5px/1.65 "Pretendard", -apple-system, "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
   }
   button, input, textarea, select { font: inherit; color: inherit; }
   .app { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
-  @media (max-width: 860px) { .app { grid-template-columns: 1fr; } aside { display: none; } }
+  @media (max-width: 860px) { .app { grid-template-columns: 1fr; } .app > aside { display: none; } }
 
   aside {
     background: var(--panel); border-right: 1px solid var(--line);
@@ -52,6 +53,12 @@
   .tagchip.on { background: var(--tc); border-color: var(--tc); color: #fff; }
   .tagchip .n { opacity: .6; font-size: 12.5px; }
   .tagrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .detail-tags { margin-bottom: 14px; }
+  .detail-tags .tagrow { margin-top: 7px; }
+  .detail-tags .tagchip { max-width: 100%; overflow-wrap: anywhere; }
+  .detail-tag-input { display: flex; gap: 6px; margin-top: 9px; }
+  .detail-tag-input input { min-width: 0; flex: 1; background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; }
+  #dTagChoices { max-height: 130px; overflow-y: auto; padding: 3px; }
   .t-slate  { --tc: #8792a8; }
   .t-blue   { --tc: #4c86e8; }
   .t-green  { --tc: #3fa15c; }
@@ -84,6 +91,27 @@
     border-radius: var(--radius); padding: 10px 14px; outline: none;
   }
   .searchbar input:focus { border-color: var(--accent); }
+  .searchbar input { min-width: 0; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .feed-tools .row { margin-bottom: 8px; }
+  .selection-bar { padding: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  .feed-heading { display: flex; align-items: center; gap: 8px; margin: 18px 0 8px; }
+  .feed-heading h3 { margin: 0; font-size: 15px; font-weight: 600; }
+  .filter-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+  .filter-panel .row:last-child { margin-bottom: 0; }
+  .capture-options { margin-top: 6px; font-size: 13.5px; color: var(--dim); }
+  summary { cursor: pointer; }
+  .card:has(.memo-select:checked) { border-color: var(--accent); }
+  .memo-select { accent-color: var(--accent); width: 18px; height: 18px; }
+  @media (max-width: 600px) {
+    main { padding: 14px 12px 40px; }
+    .searchbar { flex-wrap: wrap; }
+    .searchbar input { flex-basis: 100%; }
+    .field { grid-template-columns: 1fr; gap: 4px; }
+    .field .note { grid-column: 1; }
+    .card-h { flex-wrap: wrap; }
+    .dlg-f { flex-wrap: wrap; }
+  }
 
   .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 14px; flex-wrap: wrap; }
   .tab {
@@ -92,22 +120,23 @@
   }
   .tab.on { color: var(--fg); border-bottom-color: var(--accent); }
 
-  /* 주 메뉴 — 8개를 작은 글씨로 늘어놓으니 뭐가 뭔지 안 보였다.
-     아이콘 + 큰 글씨 + 한 줄 설명으로 바꾸고, 성격이 다른 '관리' 항목은 떼어 놓는다. */
-  .nav { display: flex; gap: 6px; flex-wrap: wrap; align-items: stretch; margin: 0 0 18px; }
-  .nav .sep { width: 1px; background: var(--line); margin: 4px 8px; }
+  /* 항상 보이는 메뉴는 주요 사용 목적 세 가지. 보조 기능은 더 보기에서 연다. */
+  .nav { display: flex; gap: 4px; align-items: center; margin: 0 0 24px; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
   .nav .tab {
-    display: flex; flex-direction: column; gap: 1px; align-items: flex-start;
-    border: 1px solid transparent; border-radius: 10px; padding: 9px 14px;
-    background: var(--panel); min-width: 104px; line-height: 1.3;
+    border: 1px solid transparent; border-radius: 7px; padding: 8px 12px;
+    background: transparent; line-height: 1.4; font-size: 14px; white-space: nowrap;
   }
-  .nav .tab .t { font-size: 15px; font-weight: 600; color: var(--fg); display: flex; gap: 7px; align-items: center; }
-  .nav .tab .s { font-size: 12.5px; color: var(--dim); }
   .nav .tab:hover { border-color: var(--accent); }
-  .nav .tab.on { background: var(--accent); border-color: var(--accent); }
-  .nav .tab.on .t, .nav .tab.on .s { color: #0b0e14; }
-  .nav .tab.on .s { opacity: .75; }
-  @media (max-width: 1100px) { .nav .tab .s { display: none; } .nav .tab { min-width: 0; } }
+  .nav .tab.on { background: var(--panel); border-color: var(--line); color: var(--accent); font-weight: 600; }
+  .nav-more { position: relative; margin-left: auto; }
+  .nav-more > summary { list-style: none; color: var(--dim); }
+  .nav-more > summary::-webkit-details-marker { display: none; }
+  .more-items { position: absolute; top: calc(100% + 8px); right: 0; min-width: 200px;
+    padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
+    box-shadow: 0 10px 30px #0002; z-index: 20; }
+  .more-items .tab { display: block; text-align: left; width: 100%; }
+  .more-items .tab:last-child { margin-top: 5px; border-top: 1px solid var(--line); border-radius: 0; }
+  @media (max-width: 600px) { .nav { gap: 0; } .nav .tab { padding: 8px 7px; font-size: 13px; } }
 
   /* 화면마다 뭘 하는 곳인지 한 줄로 알려준다 */
   .lead { margin: 0 0 16px; }
@@ -233,21 +262,39 @@
   </aside>
 
   <main>
-    <nav class="nav" id="tabs"></nav>
+    <nav class="nav" id="tabs" aria-label="주 메뉴"></nav>
     <div class="lead" id="lead"></div>
     <div class="capture">
-      <textarea id="capture" placeholder="생각나는 대로 적으세요.  #태그  @사람  [ ] 할일  결정: ...  은 자동으로 뽑힙니다."></textarea>
-      <div id="capTags" class="tagrow" style="margin:9px 0 2px"></div>
+      <textarea id="capture" aria-label="새 메모" disabled placeholder="회의 내용, 할 일, 떠오른 생각… 자유롭게 적어두세요."></textarea>
+      <details id="captureTags" class="capture-options" hidden>
+        <summary>태그 추가 (선택)</summary>
+        <div id="capTags" class="tagrow" style="margin:9px 0 2px"></div>
+      </details>
       <div class="capture-bar">
         <span class="hint" id="captureHint">Ctrl+Enter 저장 · 형식은 신경 쓰지 마세요</span>
-        <button class="btn primary" id="save">저장</button>
+        <button class="btn primary" id="save" disabled>메모 저장</button>
       </div>
     </div>
 
     <div class="searchbar">
-      <input id="q" placeholder="의미로 검색…  (예: 결제 모듈 관련해서 걱정했던 거)" />
-      <button class="btn ghost" id="exportHits" title="지금 조건에 걸리는 메모를 파일로 내보냅니다">내보내기</button>
-      <button class="btn ghost" id="clear">지우기</button>
+      <input id="q" aria-label="메모 검색" placeholder="기억나는 단어나 내용으로 메모 찾기" />
+      <button class="btn ghost" id="toggleFilters" aria-expanded="false" aria-controls="feedFilters">상세 검색</button>
+      <button class="btn ghost" id="clear" hidden>초기화</button>
+    </div>
+    <div class="feed-tools">
+      <div id="feedFilters" class="filter-panel" hidden>
+        <div class="row">
+          <label for="filterSince">작성일</label><input id="filterSince" type="date" aria-label="작성 시작일" />
+          <label for="filterUntil">부터</label><input id="filterUntil" type="date" aria-label="작성 종료일" />
+          <span class="meta">까지</span>
+        </div>
+        <div class="row"><button class="btn ghost" id="exportHits">이 조건의 메모 공유하기</button></div>
+      </div>
+      <div id="activeFilters" class="tagrow" hidden></div>
+      <div class="feed-heading"><h3>저장한 메모</h3><span class="spacer"></span>
+        <button class="btn ghost" id="toggleSelection" aria-pressed="false">메모 선택</button>
+      </div>
+      <div id="selectionBar"></div>
     </div>
 
     <div id="view"></div>
@@ -260,7 +307,21 @@
     <span class="meta" id="dMeta"></span>
   </div>
   <div class="dlg-b">
-    <textarea id="dBody"></textarea>
+    <section class="detail-tags" aria-labelledby="dTagLabel">
+      <strong id="dTagLabel">태그</strong>
+      <span class="hint">이 메모에만 적용 · 저장하면 반영됩니다</span>
+      <div class="tagrow" id="dTags"></div>
+      <div class="detail-tag-input">
+        <input id="dTagInput" aria-label="추가할 태그" placeholder="새 태그 입력 (예: 인수인계)" aria-describedby="dTagMessage" />
+        <button type="button" class="btn" id="dTagAdd">추가</button>
+      </div>
+      <div class="hint" id="dTagMessage" role="status" aria-live="polite"></div>
+      <details id="dTagPicker" class="capture-options">
+        <summary>사용한 태그에서 선택</summary>
+        <div class="tagrow" id="dTagChoices"></div>
+      </details>
+    </section>
+    <textarea id="dBody" aria-label="메모 본문 편집"></textarea>
     <div class="badges" id="dBadges" style="margin-top:10px"></div>
     <div id="dSimilar" style="margin-top:14px"></div>
   </div>
@@ -273,20 +334,23 @@
   </div>
 </dialog>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
 const $ = (s) => document.querySelector(s);
 // tags 는 조회 조건(AND). tag 하나만 쓰던 시절의 사이드바 클릭도 여기로 모은다.
-const state = { tab: "feed", q: "", tag: null, tags: [], person: null, memo: null };
+const state = { tab: "feed", q: "", tags: [], person: null, since: "", until: "", memo: null,
+  offset: 0, selecting: false, filtersOpen: false, selected: new Map(), feedItems: [] };
+let renderVersion = 0;
 // 정해 둔 태그 목록. 적을 때·조회할 때·내보낼 때 같은 목록을 쓴다.
 let myTags = [];
 
 const api = async (path, opts = {}) => {
+  const { rawBody, ...options } = opts;
   const res = await fetch(path, {
     headers: { "Content-Type": "application/json" },
-    ...opts,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    ...options,
+    body: rawBody !== undefined ? rawBody : opts.body ? JSON.stringify(opts.body) : undefined,
   });
   // FastAPI 는 오류를 {"detail":"..."} 로 준다. 그대로 보여주면 사용자가
   // 중괄호와 따옴표까지 읽게 된다 — 안내 문장만 꺼내 쓴다.
@@ -327,20 +391,72 @@ function highlight(text, query) {
 }
 
 // ---------------------------------------------------------------- 캡처
+const DRAFT_KEY = "memoinall.capture";
+let draftTimer, draftQueue = Promise.resolve(), draftSaved = "", captureSaving = false;
+function localDraft(body) {
+  try { if (body) localStorage.setItem(DRAFT_KEY, body); else localStorage.removeItem(DRAFT_KEY); } catch { /* 서버 초안으로 보관 */ }
+}
+function persistDraft() {
+  clearTimeout(draftTimer);
+  const body = $("#capture").value;
+  localDraft(body);
+  draftQueue = draftQueue.catch(() => {}).then(async () => {
+    await api("/api/draft", { method: "PUT", body: { body } });
+    draftSaved = body;
+    if ($("#capture").value === body) $("#captureHint").textContent = body ? "초안 보관됨 · Ctrl+Enter로 메모 저장" : "Ctrl+Enter 저장 · 형식은 신경 쓰지 마세요";
+  });
+  return draftQueue;
+}
+function captureChanged() {
+  paintTagRows();
+  localDraft($("#capture").value);
+  $("#captureHint").textContent = "초안 보관 중…";
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => persistDraft().catch(() => {
+    $("#captureHint").textContent = "초안 보관 실패 · 연결을 확인하고 메모를 저장하세요";
+  }), 300);
+}
+async function restoreDraft() {
+  let backup = "";
+  try { backup = localStorage.getItem(DRAFT_KEY) || ""; } catch { /* 저장소 제한 */ }
+  try {
+    const r = await api("/api/draft");
+    draftSaved = r.body || "";
+    $("#capture").value = backup || draftSaved;
+    if ($("#capture").value) {
+      $("#captureHint").textContent = "작성 중이던 초안을 복원했습니다 · Ctrl+Enter로 메모 저장";
+      if ($("#capture").value !== draftSaved) await persistDraft();
+    }
+  } catch {
+    $("#capture").value = backup;
+    $("#captureHint").textContent = "초안 연결 실패 · 작성 내용은 메모 저장으로 보관하세요";
+  } finally {
+    $("#capture").disabled = $("#save").disabled = false;
+    paintTagRows();
+    $("#capture").focus();
+  }
+}
 async function save() {
   const ta = $("#capture");
   const body = ta.value.trim();
-  if (!body) return;
+  if (!body || captureSaving || ta.disabled) return;
+  const snapshot = ta.value;
+  captureSaving = true;
   $("#save").disabled = true;
   try {
-    await api("/api/memos", { method: "POST", body: { body, source: "web" } });
-    ta.value = "";
-    paintTagRows();   // 골라 둔 태그도 함께 비운다
+    clearTimeout(draftTimer);
+    await draftQueue.catch(() => {});
+    await api("/api/memos", { method: "POST", body: { body, source: "web", draft_body: snapshot } });
+    if (ta.value === snapshot) ta.value = "";
+    await persistDraft().catch(() => { toast("메모는 저장됐지만 초안 보관을 갱신하지 못했습니다"); });
+    paintTagRows();
     toast("저장했습니다 — 정리는 백그라운드에서 진행됩니다");
-    await Promise.all([render(), loadSidebar(), loadTags()]);
+    state.offset = 0;
+    await Promise.allSettled([render(), loadSidebar(), loadTags()]);
   } catch (e) {
     toast("저장 실패: " + e.message);
   } finally {
+    captureSaving = false;
     $("#save").disabled = false;
     ta.focus();
   }
@@ -348,60 +464,90 @@ async function save() {
 
 $("#save").onclick = save;
 $("#capture").addEventListener("keydown", (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); save(); }
+  if (!e.isComposing && (e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); save(); }
 });
 // 직접 #태그 를 쳐도 칩이 눌린 상태로 보여야 한다 — 본문이 원본이기 때문이다.
-$("#capture").addEventListener("input", paintTagRows);
+$("#capture").addEventListener("input", captureChanged);
 
 let searchTimer;
 $("#q").addEventListener("input", (e) => {
   state.q = e.target.value;
+  state.offset = 0;
+  state.selected.clear();
+  state.selecting = false;
+  // 이미 진행 중인 검색도 새 입력 시점에 무효화한다.
+  renderVersion++;
   clearTimeout(searchTimer);
   searchTimer = setTimeout(render, 220);
 });
-$("#clear").onclick = () => { state.q = ""; state.tags = []; state.person = null; $("#q").value = ""; loadSidebar(); render(); };
+$("#clear").onclick = () => {
+  state.q = ""; state.tags = []; state.person = null; state.since = state.until = "";
+  $("#q").value = $("#filterSince").value = $("#filterUntil").value = "";
+  resetFeed(); loadSidebar();
+};
+function resetFeed() {
+  clearTimeout(searchTimer);
+  state.offset = 0; state.selected.clear(); state.selecting = false;
+  return render();
+}
+$("#toggleFilters").onclick = () => { state.filtersOpen = !state.filtersOpen; paintFeedTools(); };
+$("#toggleSelection").onclick = () => {
+  state.selecting = !state.selecting;
+  if (!state.selecting) state.selected.clear();
+  paintFeedTools();
+};
+for (const [id, key] of [["filterSince", "since"], ["filterUntil", "until"]]) {
+  $("#" + id).onchange = (e) => { state[key] = e.target.value; resetFeed(); };
+}
 
 // 검색으로 좁힌 그대로 내보내기. 조건을 주고받기 화면에 옮겨 담고 목록부터 보여준다 —
 // 남에게 보내는 파일이라 무엇이 나가는지 확인 없이 저장되면 안 된다.
-$("#exportHits").onclick = async () => {
-  exp.q = state.q || "";
-  exp.tags = [...state.tags];
+async function prepareExport(selected = false) {
+  imp.section = "share";
+  Object.assign(exp, { ids: selected ? [...state.selected.keys()] : null,
+    q: selected ? "" : state.q, tags: selected ? [] : [...state.tags], tag: "",
+    person: selected ? null : state.person, since: selected ? "" : state.since,
+    until: selected ? "" : state.until, archived: false });
   await goTab("import");
-  if ($("#expPreview")) doExportPreview();
-};
+  if ($("#expPreview")) await doExportPreview();
+}
+$("#exportHits").onclick = () => prepareExport();
 
 // 메뉴 정의 — 이름만 보고 뭘 하는 곳인지 알 수 있어야 한다.
 // 예전 이름(주제/브리핑/생성/컨텍스트 팩)은 내부 용어라 처음 보면 뜻을 알 수 없었다.
 const TABS = [
-  { id: "feed", icon: "📝", name: "메모", sub: "적고 찾기",
-    title: "메모", lead: "생각나는 대로 적어두고, 의미로 찾습니다. 형식은 신경 쓰지 마세요." },
+  { id: "feed", primary: true, icon: "📝", name: "내 메모",
+    title: "무엇이든 적어두세요", lead: "나중에 검색해서 찾고, 필요한 메모로 AI 문서나 인수인계 자료를 만들 수 있어요." },
   { id: "todos", icon: "✅", name: "할 일", sub: "자동 추출",
     title: "할 일", lead: "메모에서 자동으로 뽑아낸 할 일입니다. 체크하면 목록에서 사라집니다." },
   { id: "clusters", icon: "🧩", name: "주제별", sub: "자동 묶음",
     title: "주제별 묶음", lead: "비슷한 내용끼리 자동으로 묶었습니다. 태그를 달지 않아도 주제가 드러납니다." },
   { id: "rollup", icon: "📅", name: "기간 요약", sub: "일·주·월",
     title: "기간 요약", lead: "고른 기간의 메모에서 결정·할 일·열린 질문을 모아 보여줍니다." },
-  { id: "generate", icon: "✨", name: "AI 문서", sub: "메모로 만들기",
+  { id: "generate", primary: true, icon: "✨", name: "AI로 정리",
     title: "메모로 문서 만들기", lead: "지시사항을 적으면 관련 메모를 찾아 근거로 삼고 결과물을 씁니다." },
-  { sep: true },
-  { id: "import", icon: "📥", name: "주고받기", sub: "가져오기·내보내기",
-    title: "메모 주고받기",
-    lead: "동료에게 파일로 보내거나 받고, 스티커 메모·Samsung Notes·Redmine·텍스트 폴더에서 가져옵니다." },
+  { id: "import", primary: true, icon: "📥", name: "가져오기·공유",
+    title: "메모 가져오기·공유", lead: "다른 앱에 적은 메모를 가져오거나, 필요한 기록을 동료에게 전달하세요." },
   { id: "settings", icon: "⚙️", name: "설정", sub: "AI·검색",
     title: "설정", lead: "어떤 AI 를 쓸지, 검색용 임베딩은 어떤 상태인지 여기서 봅니다." },
 ];
 const TAB_BY_ID = Object.fromEntries(TABS.filter((t) => t.id).map((t) => [t.id, t]));
 
 function renderTabs() {
-  $("#tabs").innerHTML = TABS.map((t) => t.sep
-    ? '<div class="sep"></div>'
-    : `<button class="tab ${state.tab === t.id ? "on" : ""}" data-tab="${t.id}" title="${esc(t.lead)}">
-         <span class="t">${t.icon} ${esc(t.name)}</span><span class="s">${esc(t.sub)}</span>
-       </button>`).join("");
+  const button = (t) => `<button class="tab ${state.tab === t.id ? "on" : ""}" data-tab="${t.id}"${state.tab === t.id ? ' aria-current="page"' : ""}>${esc(t.name)}</button>`;
+  const secondary = TABS.find((t) => !t.primary && t.id === state.tab);
+  $("#tabs").innerHTML = TABS.filter((t) => t.primary).map(button).join("")
+    + `<details class="nav-more" id="moreMenu"><summary class="tab ${secondary ? "on" : ""}">${secondary ? esc(secondary.name) : "더 보기"} <span aria-hidden="true">⌄</span></summary>
+         <div class="more-items">${TABS.filter((t) => !t.primary).map(button).join("")}</div></details>`;
   $("#tabs").querySelectorAll("[data-tab]").forEach((b) => {
     b.onclick = () => { goTab(b.dataset.tab); };
   });
 }
+document.addEventListener("click", (e) => {
+  const menu = $("#moreMenu");
+  if (menu?.open && !menu.contains(e.target)) menu.open = false;
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("#moreMenu")) $("#moreMenu").open = false; });
 
 function goTab(id) {
   state.tab = id;
@@ -413,13 +559,16 @@ function goTab(id) {
 // 태그의 원본은 언제나 메모 본문의 `#태그` 다. 칩은 그 본문을 고치는 손잡이일 뿐이라
 // 사용자는 저장 전에 무엇이 들어갈지 글로 직접 확인할 수 있다.
 const TAG_CHARS = "0-9A-Za-z가-힣_/\\-";
+let tagSuggestions = [];
 
 async function loadTags() {
   try {
     const r = await api("/api/tags");
     myTags = r.items || [];
-  } catch { myTags = []; }
+    tagSuggestions = (r.suggested || []).map((t) => ({ name: t.value, count: t.count, color: "slate" }));
+  } catch { myTags = []; tagSuggestions = []; }
   paintTagRows();
+  if ($("#detail").open) paintDetailTags();
 }
 
 function bodyTags(text) {
@@ -437,12 +586,8 @@ function tagChip(t, active, attrs = "") {
 function paintTagRows() {
   const row = $("#capTags");
   if (!row) return;
-  if (!myTags.length) {
-    row.innerHTML = `<span class="hint">자주 쓰는 태그를 정해 두면 여기서 눌러 넣을 수 있습니다 —
-      <a href="#" data-go="settings" style="color:var(--accent)">설정에서 만들기</a></span>`;
-    row.querySelector("[data-go]").onclick = (e) => { e.preventDefault(); goTab("settings"); };
-    return;
-  }
+  $("#captureTags").hidden = !myTags.length;
+  if (!myTags.length) { row.innerHTML = ""; return; }
   const inBody = new Set(bodyTags($("#capture").value).map((t) => t.toLowerCase()));
   row.innerHTML = myTags.map((t) => tagChip(t, inBody.has(t.name.toLowerCase()))).join("")
     + `<span class="hint" style="margin-left:4px">눌러서 태그 넣기</span>`;
@@ -460,7 +605,7 @@ function toggleTagInCapture(name) {
     box.value = (box.value.trim() ? box.value.replace(/\s+$/, "") + " " : "") + "#" + name + " ";
   }
   box.focus();
-  paintTagRows();
+  captureChanged();
 }
 
 function toggleTagFilter(name) {
@@ -468,7 +613,7 @@ function toggleTagFilter(name) {
     ? state.tags.filter((t) => t !== name)
     : [...state.tags, name];
   loadSidebar();
-  render();
+  resetFeed();
 }
 
 // ---------------------------------------------------------------- 사이드바
@@ -485,7 +630,7 @@ async function loadSidebar() {
   document.querySelectorAll(".chip").forEach((c) => {
     c.onclick = () => {
       if (c.dataset.k === "tag") toggleTagFilter(c.dataset.v);
-      else { state.person = state.person === c.dataset.v ? null : c.dataset.v; loadSidebar(); render(); }
+      else { state.person = state.person === c.dataset.v ? null : c.dataset.v; loadSidebar(); resetFeed(); }
     };
   });
 
@@ -518,12 +663,14 @@ async function loadSidebar() {
 
 // ---------------------------------------------------------------- 렌더
 async function render() {
+  const version = ++renderVersion;
   const view = $("#view");
   // 메모 입력창과 검색창은 '메모' 화면 전용이다. 다른 화면에서는 검색어가 아예
   // 쓰이지 않는데도 검색창이 떠 있어서 "쳐도 아무 일이 없는" 상태였다.
   const onFeed = state.tab === "feed";
   document.querySelector(".searchbar").style.display = onFeed ? "flex" : "none";
   document.querySelector(".capture").style.display = onFeed ? "block" : "none";
+  document.querySelector(".feed-tools").style.display = onFeed ? "block" : "none";
 
   // 화면마다 제목 + 한 줄 설명. 탭 이름만으로 뭘 하는 곳인지 모르겠다는 게 문제였다.
   const t = TAB_BY_ID[state.tab];
@@ -541,9 +688,9 @@ async function render() {
       feed: renderFeed, todos: renderTodos, clusters: renderClusters, rollup: renderRollup,
       generate: renderGenerate, import: renderImport, settings: renderSettings,
     };
-    await (views[state.tab] || renderFeed)();
+    await (views[state.tab] || renderFeed)(version);
   } catch (e) {
-    view.innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`;
+    if (version === renderVersion) view.innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`;
   }
 }
 
@@ -551,6 +698,8 @@ function qs(extra = {}) {
   const p = new URLSearchParams();
   if (state.tags.length) p.set("tags", state.tags.join(","));
   if (state.person) p.set("person", state.person);
+  if (state.since) p.set("since", state.since);
+  if (state.until) p.set("until", state.until);
   for (const [k, v] of Object.entries(extra)) if (v !== null && v !== undefined && v !== "") p.set(k, v);
   return p.toString();
 }
@@ -563,47 +712,126 @@ function cardHTML(m) {
     ...(f.person || []).slice(0, 3).map((p) => `<span class="badge person">@${esc(p)}</span>`),
     (m.todos || []).some((t) => !t.done) ? `<span class="badge">할일 ${m.todos.filter((t) => !t.done).length}</span>` : "",
   ].filter(Boolean).join("");
-  return `<div class="card" data-id="${m.id}">
-    <div class="card-h"><span class="card-title">${esc(m.title)}</span><span class="meta">${fmt(m.created_at)}</span></div>
+  return `<div class="card" data-id="${m.id}" tabindex="0" role="button" aria-label="${esc(m.title)} 열기">
+    <div class="card-h">${state.tab === "feed" ? `<input type="checkbox" class="memo-select" data-select="${m.id}" aria-label="${esc(m.title)} 선택" ${state.selected.has(m.id) ? "checked" : ""} ${state.selecting ? "" : "hidden"} />` : ""}<span class="card-title">${esc(m.title)}</span><span class="meta">${fmt(m.created_at)}</span></div>
     <div class="snip">${highlight(m.snippet || m.body.slice(0, 200), state.q)}</div>
     <div class="badges">${badges}</div>
   </div>`;
 }
 
 function bindCards() {
-  document.querySelectorAll(".card[data-id]").forEach((c) => (c.onclick = () => openMemo(+c.dataset.id)));
+  document.querySelectorAll(".card[data-id]").forEach((c) => {
+    c.onclick = (e) => { if (!e.target.closest("[data-select]")) openMemo(+c.dataset.id); };
+    c.onkeydown = (e) => {
+      if (e.target === c && ["Enter", " "].includes(e.key)) { e.preventDefault(); openMemo(+c.dataset.id); }
+    };
+  });
+  document.querySelectorAll("[data-select]").forEach((c) => {
+    c.onchange = () => {
+      const id = +c.dataset.select;
+      if (c.checked) state.selected.set(id, state.feedItems.find((m) => m.id === id)?.title || `M${id}`);
+      else state.selected.delete(id);
+      paintFeedTools();
+    };
+  });
   // 빈 화면 안내의 '다른 앱에서 가져오기' 같은 이동 링크
   document.querySelectorAll("[data-go]").forEach((a) => {
     a.onclick = (e) => { e.preventDefault(); goTab(a.dataset.go); };
   });
 }
 
-async function renderFeed() {
-  const tagArg = state.tags.join(",");
+function paintFeedTools() {
+  const filters = [
+    ...state.tags.map((t) => ({ label: "#" + t, key: "tag", value: t })),
+    ...(state.person ? [{ label: "@" + state.person, key: "person" }] : []),
+    ...(state.since ? [{ label: state.since + "부터", key: "since" }] : []),
+    ...(state.until ? [{ label: state.until + "까지", key: "until" }] : []),
+  ];
+  $("#feedFilters").hidden = !state.filtersOpen;
+  $("#toggleFilters").setAttribute("aria-expanded", String(state.filtersOpen));
+  $("#toggleFilters").textContent = "상세 검색" + (filters.length ? ` (${filters.length})` : "");
+  $("#clear").hidden = !state.q.trim() && !filters.length;
+  $("#activeFilters").hidden = !filters.length;
+  $("#activeFilters").innerHTML = filters.map((f, i) =>
+    `<button class="chip on" data-removefilter="${i}" aria-label="${esc(f.label)} 조건 해제">${esc(f.label)} ×</button>`).join("");
+  $("#activeFilters").querySelectorAll("button").forEach((b) => {
+    b.onclick = () => {
+      const f = filters[+b.dataset.removefilter];
+      if (f.key === "tag") state.tags = state.tags.filter((t) => t !== f.value);
+      else if (f.key === "person") state.person = null;
+      else {
+        state[f.key] = "";
+        $(f.key === "since" ? "#filterSince" : "#filterUntil").value = "";
+      }
+      resetFeed(); loadSidebar();
+    };
+  });
+  const n = state.selected.size;
+  $("#selectionBar").hidden = !state.selecting;
+  $("#toggleSelection").textContent = state.selecting ? "선택 마치기" : "메모 선택";
+  $("#toggleSelection").disabled = !state.feedItems.length && !state.selecting;
+  $("#toggleSelection").setAttribute("aria-pressed", String(state.selecting));
+  document.querySelectorAll("[data-select]").forEach((c) => {
+    c.hidden = !state.selecting;
+    c.checked = state.selected.has(+c.dataset.select);
+  });
+  $("#selectionBar").innerHTML = `<div class="row selection-bar">
+    <button class="btn ghost" id="selectPage" ${state.feedItems.length ? "" : "disabled"}>이 페이지 선택</button>
+    <span class="status">${n ? `${n}건 선택 · 다른 페이지의 선택 포함` : "활용할 메모를 체크하세요"}</span>
+    <span class="spacer"></span>
+    <button class="btn ghost" id="clearSelection" ${n ? "" : "hidden"}>선택 해제</button>
+    <button class="btn" id="generateSelection" ${n ? "" : "hidden"}>AI로 정리</button>
+    <button class="btn primary" id="exportSelection" ${n ? "" : "hidden"}>공유·인수인계</button>
+  </div>`;
+  $("#selectPage").onclick = () => {
+    state.feedItems.forEach((m) => state.selected.set(m.id, m.title));
+    document.querySelectorAll("[data-select]").forEach((c) => { c.checked = true; });
+    paintFeedTools();
+  };
+  $("#clearSelection").onclick = () => {
+    state.selected.clear();
+    document.querySelectorAll("[data-select]").forEach((c) => { c.checked = false; });
+    paintFeedTools();
+  };
+  $("#generateSelection").onclick = () => startGenerate([...state.selected.keys()], "선택한 메모를 바탕으로 업무 내용을 정리해줘");
+  $("#exportSelection").onclick = () => prepareExport(true);
+}
+
+async function renderFeed(version = renderVersion) {
+  state.feedItems = [];
+  paintFeedTools();
+  if (state.since && state.until && state.since > state.until) {
+    $("#view").innerHTML = `<div class="empty">작성 시작일을 종료일보다 앞서도록 선택하세요.</div>`;
+    return;
+  }
+  const offset = state.offset;
   const data = state.q.trim()
-    ? await api("/api/search?" + qs({ q: state.q, limit: 30, tags: tagArg }))
-    : await api("/api/memos?" + qs({ limit: 40, tags: tagArg }));
-  const items = data.items || [];
-  // 조사(이/가)는 태그 이름의 받침에 따라 달라진다 — 가운뎃점으로 피한다.
-  const filtered = state.tags.length
-    ? `<div class="status" style="margin-bottom:10px">${state.tags.map((t) => "#" + esc(t)).join(" + ")}
-         · ${state.tags.length > 1 ? "모두 달린 " : ""}메모 ${items.length}건 —
-         <a href="#" id="clearTagFilter" style="color:var(--accent)">조건 해제</a></div>`
-    : "";
+    ? await api("/api/search?" + qs({ q: state.q, limit: 40, offset }))
+    : await api("/api/memos?" + qs({ limit: 40, offset }));
+  if (version !== renderVersion) return;
+  const items = state.feedItems = data.items || [];
+  const filtered = state.q.trim() || state.tags.length || state.person || state.since || state.until;
   $("#view").innerHTML = items.length
-    ? filtered + (state.q.trim() ? `<div class="status" style="margin-bottom:10px">${items.length}건 — 뜻이 비슷한 메모까지 함께 찾았습니다</div>` : "") + items.map(cardHTML).join("")
-    : filtered + `<div class="empty">${state.q || state.tags.length
-        ? `조건에 맞는 메모가 없습니다.<br/><span style="font-size:14px">태그를 하나만 남기거나, 다른 말로 바꿔 보세요 —
-           정확한 단어가 아니어도 뜻이 비슷하면 찾습니다.</span>`
+    ? `<div class="status" style="margin-bottom:10px">${offset + 1}–${offset + items.length}번째 메모${state.q.trim() ? " · 뜻이 비슷한 메모까지 함께 찾았습니다" : " · 최근 작성순"}</div>` + items.map(cardHTML).join("")
+    : `<div class="empty">${filtered
+        ? `조건에 맞는 메모가 없습니다.<br/><span style="font-size:14px">검색어·태그·사람·작성일 조건을 줄여 보세요.</span>`
+        : offset ? "이 페이지에 메모가 없습니다. 이전 페이지로 돌아가세요."
         : `아직 메모가 없습니다.<br/><span style="font-size:14px">위 칸에 아무거나 적고 <b>Ctrl+Enter</b> 를 누르거나,
            <a href="#" data-go="import" style="color:var(--accent)">다른 앱에서 가져오기</a> 로 시작하세요.</span>`}</div>`;
-  const clearBtn = $("#clearTagFilter");
-  if (clearBtn) clearBtn.onclick = (e) => { e.preventDefault(); state.tags = []; paintTagRows(); render(); };
+  if (offset || data.has_more) {
+    $("#view").insertAdjacentHTML("beforeend", `<div class="row" style="margin-top:16px">
+      <button class="btn" id="prevPage" ${offset ? "" : "disabled"}>이전 40건</button>
+      <span class="spacer"></span><button class="btn" id="nextPage" ${data.has_more ? "" : "disabled"}>다음 40건</button></div>`);
+    $("#prevPage").onclick = () => { state.offset = Math.max(0, offset - 40); render(); };
+    $("#nextPage").onclick = () => { state.offset = data.next_offset; render(); };
+  }
+  paintFeedTools();
   bindCards();
 }
 
-async function renderTodos() {
+async function renderTodos(version = renderVersion) {
   const { items } = await api("/api/todos?limit=200");
+  if (version !== renderVersion) return;
   if (!items.length) {
     $("#view").innerHTML = `<div class="empty">아직 할 일이 없습니다.<br/>
       <span style="font-size:14px">메모에 <b>[ ]</b> 를 쓰거나 "~해야 함", "~할 것" 처럼 적으면 자동으로 잡힙니다.</span></div>`;
@@ -625,8 +853,9 @@ async function renderTodos() {
   });
 }
 
-async function renderClusters() {
+async function renderClusters(version = renderVersion) {
   const { clusters } = await api("/api/clusters");
+  if (version !== renderVersion) return;
   if (!clusters.length) {
     $("#view").innerHTML = `<div class="empty">묶을 메모가 아직 없습니다.<br/>
       <span style="font-size:14px">메모가 몇 개 쌓이면 비슷한 것끼리 자동으로 묶입니다.
@@ -641,9 +870,10 @@ async function renderClusters() {
   document.querySelectorAll("[data-memo]").forEach((li) => (li.onclick = () => openMemo(+li.dataset.memo)));
 }
 
-async function renderRollup() {
+async function renderRollup(version = renderVersion) {
   const period = state.period || "week";
   const d = await api(`/api/rollup?period=${period}`);
+  if (version !== renderVersion) return;
   const list = (title, arr, fn) => arr.length ? `<div class="cluster"><h3>${title} <span class="meta">${arr.length}</span></h3><ul>${arr.map(fn).join("")}</ul></div>` : "";
   $("#view").innerHTML = `
     <div class="row">
@@ -682,65 +912,123 @@ async function renderRollup() {
 // 지시사항 → (검색 질의 도출) → 근거 검색 → 결과물.
 // 중간의 '검색 질의'를 감추지 않고 보여주고 고칠 수 있게 한 게 핵심이다.
 // 왜 그 근거가 뽑혔는지 안 보이면 결과물을 믿을 수 없기 때문.
-const gen = { instruction: "", format: "auto", queries: null, plan: null, output: null, busy: false };
+const gen = { instruction: "", format: "auto", budget: 6000, queries: null, plan: null, output: null,
+  busy: false, memoIds: null, scope: null };
 
-async function renderGenerate() {
+function startGenerate(ids, instruction) {
+  if (gen.busy) { toast("진행 중인 생성이 끝난 뒤 다시 선택하세요"); return; }
+  Object.assign(gen, { instruction, memoIds: ids, scope: null, queries: null, plan: null, output: null });
+  goTab("generate");
+}
+
+function genScopeLabel() {
+  if (gen.memoIds !== null) return `직접 선택한 메모 ${gen.memoIds.length}건만 사용`;
+  const s = gen.scope;
+  if (!s) return "전체 메모에서 관련 자료 자동 검색";
+  const parts = [...s.tags.map((t) => "#" + t), s.person ? "@" + s.person : "",
+    s.since ? s.since + "부터" : "", s.until ? s.until + "까지" : ""].filter(Boolean);
+  return parts.length ? "검색 범위: " + parts.join(" · ") : "전체 메모에서 관련 자료 자동 검색";
+}
+
+async function renderGenerate(version = renderVersion) {
   const { formats, llm_ready, provider } = await api("/api/generate/formats");
+  if (version !== renderVersion) return;
   const fmtOptions = formats.map((f) => `<option value="${f.key}"${gen.format === f.key ? " selected" : ""}>${esc(f.label)}</option>`).join("");
 
   $("#view").innerHTML = `
     <div class="panel">
       <h3>무엇을 만들까요?</h3>
       <div class="desc">
-        관련 메모를 <b>여러 각도로 검색</b>해 근거로 삼습니다.
-        어떤 말로 검색했는지 아래에 그대로 보여주니, 엉뚱하면 직접 고치세요.
+        원하는 결과를 적어주세요. 메모를 찾아 요약이나 문서로 정리합니다.
         ${llm_ready
-          ? `<br/><span class="meta">생성 엔진: ${esc(provider)}</span>`
-          : `<br/><span style="color:var(--warn)">${esc(provider)} 설정이 없어 프롬프트까지만 만듭니다 — 설정 탭에서 등록하거나 복사해서 쓰세요.</span>`}
+          ? ""
+          : `<br/><span style="color:var(--warn)">AI를 연결하면 바로 결과를 만들 수 있어요. 연결 전에는 다른 AI에 붙여넣을 요청문을 만듭니다.</span> <a href="#" id="genSettings" style="color:var(--accent)">AI 연결하기</a>`}
       </div>
       <textarea class="gen-input" id="genInput" placeholder="예) 연수원 AX 세미나 내용으로 교육과정 기획안 초안 써줘&#10;예) 이번 분기에 결정된 것만 모아서 팀 공유용으로 정리해줘">${esc(gen.instruction)}</textarea>
+      <div class="status" id="genScope" style="margin-top:8px">${esc(genScopeLabel())}</div>
       <div class="row" style="margin:10px 0 0">
         <label>형식</label>
         <select id="genFormat" style="min-width:130px">${fmtOptions}</select>
-        <label>근거 예산</label>
-        <input type="number" id="genBudget" value="${gen.plan?.budget_tokens || 6000}" min="500" step="500" style="width:95px" />
         <span class="spacer"></span>
         <button class="btn" id="genPlan">근거 먼저 보기</button>
-        <button class="btn primary" id="genRun">${llm_ready ? "생성" : "프롬프트 만들기"}</button>
+        <button class="btn primary" id="genRun">${llm_ready ? "정리하기" : "요청문 만들기"}</button>
       </div>
+      <details class="capture-options" style="margin-top:14px">
+        <summary>자료 범위·상세 설정</summary>
+        <div class="row" style="margin:10px 0">
+          <button class="btn ghost" id="genAll">전체 메모에서 찾기</button>
+          <button class="btn ghost" id="genFiltered">현재 검색 조건으로 찾기</button>
+        </div>
+        <div class="row"><label for="genBudget">자료 분량 (토큰)</label>
+          <input type="number" id="genBudget" value="${gen.budget}" min="500" step="500" style="width:95px" />
+        </div>
+      </details>
     </div>
     <div id="genPlanOut"></div>
     <div id="genOut"></div>`;
 
-  $("#genInput").oninput = (e) => { gen.instruction = e.target.value; };
+  $("#genInput").oninput = (e) => { gen.instruction = e.target.value; invalidatePlan(true); };
   $("#genInput").onkeydown = (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); runGenerate(); } };
-  $("#genFormat").onchange = (e) => { gen.format = e.target.value; };
+  $("#genFormat").onchange = (e) => { gen.format = e.target.value; invalidatePlan(); };
+  $("#genBudget").oninput = (e) => { gen.budget = +e.target.value; invalidatePlan(); };
+  $("#genAll").onclick = () => { gen.memoIds = gen.scope = null; invalidatePlan(true); $("#genScope").textContent = genScopeLabel(); };
+  $("#genFiltered").onclick = () => {
+    gen.memoIds = null;
+    gen.scope = { tags: [...state.tags], person: state.person, since: state.since, until: state.until };
+    invalidatePlan(true); $("#genScope").textContent = genScopeLabel();
+  };
   $("#genPlan").onclick = () => planGenerate();
   $("#genRun").onclick = () => runGenerate();
+  if ($("#genSettings")) $("#genSettings").onclick = (e) => { e.preventDefault(); goTab("settings"); };
 
   if (gen.plan) renderPlanPanel();
   if (gen.output !== null) renderGenOutput();
+  setGenBusy(gen.busy);
+}
+
+function setGenBusy(busy) {
+  document.querySelectorAll("#genInput, #genFormat, #genBudget, #genPlan, #genRun, #genAll, #genFiltered, #genRun2, #addQ, [data-delq]")
+    .forEach((el) => { el.disabled = busy || (el.id === "genRun2" && !gen.plan?.sources.length); });
+}
+
+function invalidatePlan(resetQueries = false) {
+  gen.plan = null;
+  if (resetQueries) gen.queries = null;
+  if ($("#genPlanOut")) $("#genPlanOut").innerHTML = "";
 }
 
 function genPayload() {
   return {
     instruction: gen.instruction.trim(),
     format: gen.format,
-    budget: +($("#genBudget")?.value || 6000),
+    budget: gen.budget,
     queries: gen.queries,
-    tags: state.tags, person: state.person,
+    memo_ids: gen.memoIds,
+    ...(gen.scope || {}),
   };
 }
 
 async function planGenerate() {
   if (!gen.instruction.trim()) { toast("지시사항을 먼저 적어주세요"); return; }
-  $("#genPlanOut").innerHTML = `<div class="status">근거 찾는 중…</div>`;
-  gen.plan = await api("/api/generate/plan", { method: "POST", body: genPayload() });
-  gen.queries = gen.plan.queries.slice();
-  renderPlanPanel();
+  if (gen.busy) return;
+  gen.busy = true;
+  setGenBusy(true);
+  const payload = genPayload();
+  const target = $("#genPlanOut");
+  target.innerHTML = `<div class="status">근거 찾는 중…</div>`;
+  try {
+    const plan = await api("/api/generate/plan", { method: "POST", body: payload });
+    if (JSON.stringify(payload) !== JSON.stringify(genPayload())) { target.textContent = "입력이 바뀌었습니다. 근거를 다시 확인하세요."; return; }
+    gen.plan = plan;
+    gen.queries = plan.queries.slice();
+    if (state.tab === "generate") renderPlanPanel();
+  } catch (e) {
+    if (target.isConnected) target.textContent = "근거 검색 실패: " + e.message;
+  } finally { gen.busy = false; setGenBusy(false); }
 }
 
 function renderPlanPanel() {
+  if (!$("#genPlanOut")) return;
   const p = gen.plan;
   const pct = Math.min(100, Math.round((p.used_tokens / p.budget_tokens) * 100));
   const chips = (gen.queries || []).map((q, i) =>
@@ -748,8 +1036,8 @@ function renderPlanPanel() {
 
   $("#genPlanOut").innerHTML = `
     <div class="panel">
-      <h3>검색 질의 <span class="meta">${p.query_method === "llm" ? "AI가 도출" : p.query_method === "manual" ? "직접 지정" : "규칙으로 도출"}</span></h3>
-      <div class="qchips">${chips || '<span class="status">질의 없음</span>'}
+      <h3>${p.query_method === "selected" ? "직접 선택한 근거" : "검색 질의"} <span class="meta">${p.query_method === "selected" ? "선택 범위 안에서만 생성" : p.query_method === "llm" ? "AI가 도출" : p.query_method === "manual" ? "직접 지정" : "규칙으로 도출"}</span></h3>
+      <div class="qchips" ${p.query_method === "selected" ? "hidden" : ""}>${chips || '<span class="status">질의 없음</span>'}
         <input id="addQ" placeholder="+ 질의 추가 후 Enter" style="background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:3px 11px;outline:none;width:200px" />
       </div>
       <div class="desc" style="margin:12px 0 6px">
@@ -761,7 +1049,7 @@ function renderPlanPanel() {
         ${p.sources.map((s) => `<div class="src">
           <div class="src-body">
             <div><b>[M${s.id}]</b> ${esc(s.title)} <span class="meta">${s.created_at.slice(0, 10)}</span></div>
-            <div class="meta">일치 질의: ${s.matched_queries.map(esc).join(" / ")}</div>
+            <div class="meta">${p.query_method === "selected" ? "직접 선택" : "일치 질의: " + s.matched_queries.map(esc).join(" / ")}${s.included_as !== "full" ? " · 일부 내용만 포함" : ""}</div>
           </div>
           <button class="btn ghost" data-openmemo="${s.id}" style="padding:3px 9px;font-size:13.5px">열기</button>
         </div>`).join("") || `<div class="status">관련 메모를 찾지 못했습니다. 질의를 바꿔보세요.</div>`}
@@ -769,7 +1057,7 @@ function renderPlanPanel() {
       <div class="row" style="margin:14px 0 0">
         <button class="btn" id="copyGenPrompt">프롬프트 복사</button>
         <span class="spacer"></span>
-        <button class="btn primary" id="genRun2">이 근거로 생성</button>
+        <button class="btn primary" id="genRun2" ${p.sources.length ? "" : "disabled"}>이 근거로 생성</button>
       </div>
       <details style="margin-top:10px"><summary class="status" style="cursor:pointer">조립된 프롬프트 보기</summary><pre class="pack">${esc(p.prompt)}</pre></details>
     </div>`;
@@ -785,37 +1073,42 @@ function renderPlanPanel() {
     planWithQueries();
   };
   $("#copyGenPrompt").onclick = () => { navigator.clipboard.writeText(p.prompt); toast("프롬프트를 복사했습니다"); };
-  $("#genRun2").onclick = () => runGenerate();
+  $("#genRun2").onclick = () => runGenerate(true);
 }
 
 async function planWithQueries() {
-  $("#genPlanOut").innerHTML = `<div class="status">다시 검색 중…</div>`;
-  gen.plan = await api("/api/generate/plan", { method: "POST", body: genPayload() });
-  renderPlanPanel();
+  return planGenerate();
 }
 
-async function runGenerate() {
+async function runGenerate(usePlan = false) {
   if (!gen.instruction.trim()) { toast("지시사항을 먼저 적어주세요"); return; }
   if (gen.busy) return;
   gen.busy = true;
-  $("#genOut").innerHTML = `<div class="panel"><div class="status">생성 중… 근거를 모으고 쓰는 중입니다.</div></div>`;
+  setGenBusy(true);
+  const target = $("#genOut");
+  const payload = genPayload();
+  if (usePlan && gen.plan) payload.memo_ids = gen.plan.sources.map((s) => s.id);
+  target.innerHTML = `<div class="panel"><div class="status">생성 중… 근거를 모으고 쓰는 중입니다.</div></div>`;
   try {
-    const r = await api("/api/generate", { method: "POST", body: genPayload() });
+    const r = await api("/api/generate", { method: "POST", body: payload });
     gen.plan = r;
     gen.queries = r.queries.slice();
     gen.output = r;
-    renderPlanPanel();
-    renderGenOutput();
+    if (state.tab === "generate") { renderPlanPanel(); renderGenOutput(); }
   } catch (e) {
-    $("#genOut").innerHTML = `<div class="panel"><div class="status">실패: ${esc(e.message)}</div></div>`;
+    if (target.isConnected) target.textContent = "생성 실패: " + e.message;
   } finally {
     gen.busy = false;
+    setGenBusy(false);
   }
 }
 
 function renderGenOutput() {
   const r = gen.output;
   if (r.output) {
+    const sourceIds = new Set(r.sources.map((s) => s.id));
+    const outputHTML = esc(r.output).replace(/\[M(\d+)\]/g, (text, id) => sourceIds.has(+id)
+      ? `<a href="#" data-output-source="${id}" style="color:var(--accent)" title="출처 메모 열기">${text}</a>` : text);
     $("#genOut").innerHTML = `
       <div class="panel">
         <div class="row" style="margin:0 0 10px">
@@ -825,8 +1118,11 @@ function renderGenOutput() {
           <button class="btn" id="copyOut">복사</button>
           <button class="btn ghost" id="dlOut">파일로</button>
         </div>
-        <pre class="pack" style="border-color:var(--accent);max-height:none">${esc(r.output)}</pre>
+        <pre class="pack" style="border-color:var(--accent);max-height:none">${outputHTML}</pre>
       </div>`;
+    document.querySelectorAll("[data-output-source]").forEach((a) => {
+      a.onclick = (e) => { e.preventDefault(); openMemo(+a.dataset.outputSource); };
+    });
     $("#copyOut").onclick = () => { navigator.clipboard.writeText(r.output); toast("복사했습니다"); };
     $("#dlOut").onclick = async () => {
       const name = `memoinall-${r.instruction.slice(0, 20).replace(/[^\w가-힣]+/g, "_")}.md`;
@@ -850,9 +1146,10 @@ function renderGenOutput() {
 
 // ---------------------------------------------------------------- 가져오기
 // 소스별 결과를 각자 자리에 남긴다. 하나를 가져와도 다른 소스의 결과가 지워지지 않는다.
-const imp = { path: "", sharedPath: "", minChars: 0, update: false, tags: [], results: {} };
+const imp = { section: "import", path: "", sharedPath: "", sharedContent: "", sharedName: "", minChars: 0, update: false, tags: [], results: {}, busy: false };
+const docImport = { preview: null, selected: new Set(), edits: new Map(), busy: false, saving: false, dirty: false, error: "", result: null };
 // 내보내기 조건. 조건들은 AND 로 겹친다 — '결제 + 지난달' 처럼 좁혀 보낼 수 있어야 한다.
-const exp = { q: "", tag: "", tags: [], since: "", until: "", archived: false, note: "" };
+const exp = { ids: null, q: "", tag: "", tags: [], person: null, since: "", until: "", archived: false, note: "" };
 const RM_KINDS = { issues: "이슈", wiki: "위키", documents: "문서", news: "공지" };
 
 // 소스 한 칸: 상태 + 자기 버튼 + 자기 결과. '일괄'도 같은 칸에 결과를 흘려보낸다.
@@ -927,7 +1224,7 @@ async function doReset(name, el) {
   }
 }
 
-async function renderImport() {
+async function renderImport(version = renderVersion) {
   const qs = new URLSearchParams();
   if (imp.path) qs.set("path", imp.path);
   if (imp.sharedPath) qs.set("shared", imp.sharedPath);
@@ -935,10 +1232,15 @@ async function renderImport() {
     api("/api/import/sources" + (qs.toString() ? `?${qs}` : "")),
     api("/api/settings"),
   ]);
+  if (version !== renderVersion) return;
+  if (imp.sharedContent) {
+    const shared = sources.find((x) => x.name === "shared");
+    Object.assign(shared, { available: true, path: imp.sharedName });
+  }
   const s = cfg.settings;
   const kinds = (s["import.redmine.kinds"].value || "").split(",").map((k) => k.trim());
   const byName = Object.fromEntries(sources.map((x) => [x.name, x]));
-  const usable = sources.filter((x) => x.available).length;
+  const usable = sources.filter((x) => x.name !== "shared" && x.available).length;
 
   // 텍스트 폴더는 경로 입력이 칸 안에 있어야 한다 — 다른 데 있으면 뭘 가져올지 안 보인다.
   const filesExtra = `
@@ -950,19 +1252,43 @@ async function renderImport() {
   // 받은 파일은 파일 하나를 고르는 것이라 경로 입력이 칸 안에 있어야 한다.
   const sharedExtra = `
     <div class="field" style="margin:9px 0 0;grid-template-columns:80px 1fr">
-      <label>파일</label>
+      <label for="sharedFile">찾아보기</label>
+      <input id="sharedFile" type="file" accept=".json,application/json" />
+      <div class="note" id="sharedFileStatus">${imp.sharedName ? "선택한 파일: " + esc(imp.sharedName) : "받은 .json 파일을 선택하면 내용을 미리 보여줍니다."}</div>
+    </div>
+    <div class="field" style="margin:9px 0 0;grid-template-columns:80px 1fr">
+      <label>또는 경로</label>
       <input id="impShared" value="${esc(imp.sharedPath)}" placeholder="예) C:\\Users\\나\\Downloads\\memoinall-20260901-1200-12건.json" />
       <div class="note">동료가 <b>내보내기</b>로 만든 .json 파일. 이미 갖고 있는 내용은 알아서 건너뜁니다.</div>
     </div>`;
 
   $("#view").innerHTML = `
-    <div class="panel">
+    <nav class="tabs" aria-label="가져오기와 공유">
+      <button class="tab" data-exchange-tab="import">다른 앱에서 가져오기</button>
+      <button class="tab" data-exchange-tab="share">동료와 주고받기</button>
+    </nav>
+    <div class="panel" data-exchange-section="import" id="documentPanel">
+      <h3>파일을 메모로 가져오기</h3>
+      <div class="desc">엑셀·PDF·한글 파일의 텍스트를 읽습니다. 내용을 확인하고 필요한 부분만 메모로 저장하세요.</div>
+      <label for="documentFile" class="status">문서 선택 (파일당 20MB 이하)</label>
+      <div style="margin:8px 0"><button class="btn" type="button" id="chooseDocument">파일 선택</button></div>
+      <input id="documentFile" type="file" accept=".xlsx,.xlsm,.xls,.pdf,.hwp,.hwpx,.txt,.md" hidden />
+      <div id="documentPreview" aria-live="polite"></div>
+    </div>
+    <div class="panel" data-exchange-section="share">
       <h3>메모 내보내기</h3>
       <div class="desc">
         고른 메모를 <b>파일 하나</b>로 만듭니다. 그 파일만 건네면 상대방이 자기 memoinall 에 넣을 수 있습니다.
         <b>본문·작성시각·태그만</b> 담기고 API 키·설정·임베딩은 들어가지 않습니다.
-        조건을 비우면 전체입니다.
+        ${exp.ids !== null ? "직접 선택한 메모만 보냅니다." : "조건을 비우면 전체입니다."}
       </div>
+      <div class="row" id="exportScope">
+        <span class="status">${exp.ids !== null ? `직접 선택한 메모 ${exp.ids.length}건 · 아래 검색 조건은 적용하지 않습니다` : exp.person ? "사람 조건: @" + esc(exp.person) : "조건에 맞는 메모 전체"}</span>
+        ${exp.ids !== null || exp.person ? '<button class="btn ghost" id="expClearScope">선택·사람 조건 해제</button>' : ""}
+      </div>
+      <details class="capture-options" ${exp.ids !== null ? "hidden" : ""}>
+        <summary>검색·태그·기간으로 좁히기</summary>
+        <div style="margin-top:12px">
       <div class="field">
         <label>검색어</label>
         <input id="expQ" value="${esc(exp.q)}" placeholder="비우면 전체 · 의미로 찾아 고릅니다" />
@@ -985,17 +1311,19 @@ async function renderImport() {
       <div class="field">
         <label>기간</label>
         <div class="row" style="gap:8px">
-          <input id="expSince" value="${esc(exp.since)}" placeholder="YYYY-MM-DD 부터" style="flex:1" />
-          <input id="expUntil" value="${esc(exp.until)}" placeholder="YYYY-MM-DD 까지" style="flex:1" />
+        <input id="expSince" type="date" aria-label="내보낼 작성 시작일" value="${esc(exp.since)}" style="flex:1" />
+          <input id="expUntil" type="date" aria-label="내보낼 작성 종료일" value="${esc(exp.until)}" style="flex:1" />
         </div>
       </div>
+      <label style="color:var(--dim);font-size:13.5px;cursor:pointer">
+        <input type="checkbox" id="expArchived" ${exp.archived ? "checked" : ""} style="margin-right:6px"/>보관한 메모도 포함</label>
+        </div>
+      </details>
       <div class="field">
         <label>메모 남기기</label>
         <input id="expNote" value="${esc(exp.note)}" placeholder="받는 사람에게 한 줄 (선택)" />
       </div>
       <div class="row" style="margin:12px 0 0">
-        <label style="color:var(--dim);font-size:13.5px;cursor:pointer">
-          <input type="checkbox" id="expArchived" ${exp.archived ? "checked" : ""} style="margin-right:6px"/>보관한 메모도 포함</label>
         <span class="spacer"></span>
         <button class="btn" id="expPreview">무엇이 나가는지 보기</button>
         <button class="btn" id="expCopy">내용 복사</button>
@@ -1004,13 +1332,14 @@ async function renderImport() {
       <div id="expOut"></div>
     </div>
 
-    <div class="panel">
+    <div class="panel" data-exchange-section="share">
       <h3>받은 메모 파일 넣기</h3>
       ${sourceCard(byName.shared, sharedExtra)}
     </div>
 
-    <div class="panel">
-      <h3>공통 설정</h3>
+    <details class="panel" id="importOptions">
+      <summary>가져오기 옵션 (선택)</summary>
+      <div style="margin-top:12px">
       <div class="desc">
         원본은 <b>읽기만</b> 합니다(앱이 켜져 있어도 안전). 원래 작성 시각을 유지하고
         같은 메모가 두 번 들어가지 않습니다. <b>먼저 미리보기</b>로 확인한 뒤 실행하세요.
@@ -1036,23 +1365,26 @@ async function renderImport() {
             나중에 <b>'어디서 온 메모였는지' 골라내는 손잡이</b>가 됩니다. 본문에 이미 있으면 안 붙입니다.</div>
         </div>
       </div>` : ""}
-      <div class="row" style="margin:12px 0 0">
-        <span class="meta">사용 가능한 소스 ${usable} / ${sources.length}</span>
+      <div class="row" data-exchange-section="import" style="margin:12px 0 0">
+        <span class="meta">사용 가능한 소스 ${usable} / ${sources.length - 1}</span>
         <span class="spacer"></span>
         <button class="btn" id="impPreviewAll" ${usable ? "" : "disabled"}>전체 미리보기</button>
         <button class="btn primary" id="impRunAll" ${usable ? "" : "disabled"}>전체 가져오기</button>
       </div>
-    </div>
+      </div>
+    </details>
 
-    <div class="panel">
-      <h3>항목별로 가져오기</h3>
+    <div class="panel" data-exchange-section="import">
+      <h3>어디에 적어두셨나요?</h3>
+      <div class="desc">가져올 앱을 골라 미리보기로 확인하세요. 원본은 그대로 유지됩니다.</div>
       ${sourceCard(byName.sticky)}
       ${sourceCard(byName.samsung)}
       ${sourceCard(byName.files, filesExtra)}
     </div>
 
-    <div class="panel">
-      <h3>Redmine <span class="meta">${s["import.redmine.url"].value ? "● 주소 설정됨" : "○ 미설정"}</span></h3>
+    <details class="panel" data-exchange-section="import">
+      <summary>Redmine에서 가져오기 <span class="meta">${s["import.redmine.url"].value ? "● 주소 설정됨" : "○ 미설정"}</span></summary>
+      <div style="margin-top:12px">
       <div class="desc">
         REST API 로 이슈·위키·문서·공지를 가져옵니다. API 키는 Redmine 의
         <b>[내 계정]</b> 화면 오른쪽에서 확인할 수 있습니다.
@@ -1103,10 +1435,44 @@ async function renderImport() {
       <div id="rmOut" style="margin-top:10px"></div>
       ${resetRow(byName.redmine)}
       <div id="impOut-redmine"></div>
-    </div>`;
+      </div>
+    </details>`;
+  $("#view").appendChild($("#importOptions"));
+  document.querySelectorAll("[data-exchange-tab]").forEach((b) => {
+    b.onclick = () => { imp.section = b.dataset.exchangeTab; paintExchangeSection(); };
+  });
+  paintExchangeSection();
+  $("#documentFile").onchange = (e) => { if (e.target.files[0]) previewDocument(e.target.files[0]); };
+  $("#chooseDocument").onclick = () => $("#documentFile").click();
+  paintDocumentPreview();
 
   $("#impPath").onchange = (e) => { imp.path = e.target.value.trim(); render(); };
-  $("#impShared").onchange = (e) => { imp.sharedPath = e.target.value.trim(); render(); };
+  $("#impShared").onchange = (e) => {
+    imp.sharedPath = e.target.value.trim(); imp.sharedContent = imp.sharedName = "";
+    delete imp.results.shared; render();
+  };
+  $("#sharedFile").onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const status = $("#sharedFileStatus");
+    try {
+      if (file.size > 50000000) throw new Error("50MB 이하의 메모 파일을 선택하세요.");
+      const content = (await file.text()).replace(/^\uFEFF/, "");
+      const info = await api("/api/import/shared/describe", { method: "POST", body: { content } });
+      imp.sharedContent = content; imp.sharedName = file.name; imp.sharedPath = "";
+      delete imp.results.shared;
+      toast(`${file.name} · 메모 ${info.count}건${info.note ? " · " + info.note : ""}`);
+      if (status.isConnected) { await render(); await doImport(true, "shared"); }
+    } catch (err) {
+      e.target.value = "";
+      if (status.isConnected) status.textContent = "파일 확인 실패: " + err.message;
+    }
+  };
+  if ($("#expClearScope")) $("#expClearScope").onclick = () => { exportPayload(); exp.ids = exp.person = null; render(); };
+  if (exp.ids !== null) {
+    ["expQ", "expTag", "expSince", "expUntil", "expArchived"].forEach((id) => { $("#" + id).disabled = true; });
+    document.querySelectorAll("#expTagRow button").forEach((b) => { b.disabled = true; });
+  }
   $("#expQ").onchange = (e) => { exp.q = e.target.value.trim(); };
   document.querySelectorAll("#expTagRow [data-tag]").forEach((b) => {
     b.onclick = () => {
@@ -1182,6 +1548,124 @@ async function renderImport() {
   };
 }
 
+function paintExchangeSection() {
+  document.querySelectorAll("[data-exchange-section]").forEach((el) => {
+    el.hidden = el.dataset.exchangeSection !== imp.section;
+  });
+  document.querySelectorAll("[data-exchange-tab]").forEach((b) => {
+    const active = b.dataset.exchangeTab === imp.section;
+    b.classList.toggle("on", active);
+    b.setAttribute("aria-pressed", String(active));
+  });
+}
+
+async function previewDocument(file) {
+  if (docImport.busy) return;
+  if (docImport.dirty && !confirm("미리보기에서 수정한 내용을 버리고 새 파일을 열까요?")) {
+    if ($("#documentFile")) $("#documentFile").value = "";
+    return;
+  }
+  Object.assign(docImport, { preview: null, selected: new Set(), edits: new Map(), result: null, dirty: false, error: "", busy: true });
+  paintDocumentPreview();
+  try {
+    if (file.size > 20000000) throw new Error("20MB 이하의 파일을 선택하세요.");
+    const p = await api("/api/import/documents/preview?" + new URLSearchParams({ filename: file.name }), {
+      method: "POST", headers: { "Content-Type": "application/octet-stream" }, rawBody: file,
+    });
+    docImport.preview = p;
+    docImport.selected = new Set(p.parts.map((part) => part.key));
+  } catch (e) { docImport.error = e.message; }
+  finally { docImport.busy = false; paintDocumentPreview(); }
+}
+
+function documentParts() {
+  return (docImport.preview?.parts || []).filter((p) => docImport.selected.has(p.key)).map((p) => ({
+    ...p, text: docImport.edits.has(p.key) ? docImport.edits.get(p.key) : p.text,
+  }));
+}
+
+function updateDocumentSave() {
+  const button = $("#documentSave");
+  if (!button) return;
+  const parts = documentParts();
+  button.textContent = docImport.saving ? "저장 중…" : `선택한 ${parts.length}개를 메모로 저장`;
+  button.disabled = docImport.busy || !parts.length || parts.some((p) => !p.text.trim());
+}
+
+function paintDocumentPreview() {
+  const target = $("#documentPreview");
+  if (!target) return;
+  $("#documentFile").disabled = docImport.busy;
+  $("#chooseDocument").disabled = docImport.busy;
+  $("#chooseDocument").textContent = docImport.preview ? "다른 파일 선택" : "파일 선택";
+  if (docImport.busy && !docImport.preview) { target.innerHTML = '<div class="status">파일에서 텍스트를 읽는 중…</div>'; return; }
+  const p = docImport.preview;
+  if (!p) {
+    target.innerHTML = `<div class="status">${docImport.error ? esc(docImport.error) : "지원: 엑셀(XLSX·XLSM·XLS), PDF, 한글(HWP·HWPX), TXT·MD. 스캔·이미지 문서는 OCR이 필요합니다."}</div>`;
+    return;
+  }
+  target.innerHTML = `<div style="margin-top:12px">
+    <div><b>${esc(p.filename)}</b> <span class="meta">· ${p.parts.length}개 부분 · ${p.chars.toLocaleString()}자</span></div>
+    <div class="status">미리보기입니다. 필요한 부분을 고르고 내용을 확인한 뒤 메모로 저장하세요.</div>
+    ${p.warnings.map((w) => `<div class="status" style="color:var(--warn);margin-top:4px">${esc(w)}</div>`).join("")}
+    <div class="row" style="margin-top:10px">
+      <button class="btn ghost" id="documentAll" ${docImport.busy ? "disabled" : ""}>모두 선택</button>
+      <button class="btn ghost" id="documentNone" ${docImport.busy ? "disabled" : ""}>선택 해제</button>
+    </div>
+    <div style="max-height:420px;overflow:auto">
+      ${p.parts.map((part, i) => `<details class="cluster" ${i === 0 ? "open" : ""}>
+        <summary><label><input type="checkbox" data-document-part="${i}" ${docImport.selected.has(part.key) ? "checked" : ""} ${docImport.busy ? "disabled" : ""} /> ${esc(part.label)}</label></summary>
+        <textarea class="gen-input" data-document-text="${i}" aria-label="${esc(part.label)} 추출 텍스트" ${docImport.busy ? "disabled" : ""} style="margin-top:8px;min-height:120px">${esc(docImport.edits.has(part.key) ? docImport.edits.get(part.key) : part.text)}</textarea>
+      </details>`).join("")}
+    </div>
+    ${docImport.error ? `<div class="status" style="color:var(--danger)">${esc(docImport.error)}</div>` : ""}
+    <div class="row" style="margin:12px 0 0"><span class="spacer"></span><button class="btn primary" id="documentSave"></button></div>
+    <div id="documentResult" style="margin-top:10px"></div>
+  </div>`;
+  target.querySelectorAll("[data-document-part]").forEach((c) => {
+    c.closest("label").onclick = (e) => e.stopPropagation();
+    c.onchange = () => {
+      const key = p.parts[+c.dataset.documentPart].key;
+      if (c.checked) docImport.selected.add(key); else docImport.selected.delete(key);
+      updateDocumentSave();
+    };
+  });
+  target.querySelectorAll("[data-document-text]").forEach((ta) => {
+    ta.oninput = () => { docImport.edits.set(p.parts[+ta.dataset.documentText].key, ta.value); docImport.dirty = true; updateDocumentSave(); };
+  });
+  $("#documentAll").onclick = () => { docImport.selected = new Set(p.parts.map((part) => part.key)); paintDocumentPreview(); };
+  $("#documentNone").onclick = () => { docImport.selected.clear(); paintDocumentPreview(); };
+  $("#documentSave").onclick = saveDocument;
+  updateDocumentSave();
+  if (docImport.result) paintDocumentResult();
+}
+
+async function saveDocument() {
+  if (docImport.busy || !docImport.preview) return;
+  const parts = documentParts();
+  if (!parts.length || parts.some((p) => !p.text.trim())) { toast("저장할 부분을 고르고 내용을 입력하세요"); return; }
+  docImport.busy = docImport.saving = true;
+  docImport.error = "";
+  paintDocumentPreview();
+  try {
+    docImport.result = await api("/api/import/documents/save", { method: "POST", body: { filename: docImport.preview.filename, parts } });
+    docImport.dirty = false;
+    await Promise.allSettled([loadSidebar(), loadTags()]);
+  } catch (e) { docImport.error = "저장 실패: " + e.message; }
+  finally { docImport.busy = docImport.saving = false; paintDocumentPreview(); }
+}
+
+function paintDocumentResult() {
+  const target = $("#documentResult"), r = docImport.result;
+  if (!target || !r) return;
+  target.innerHTML = `<div class="status">${r.imported}개 메모를 저장했습니다${r.skipped_duplicate ? ` · 이미 저장된 내용 ${r.skipped_duplicate}개는 건너뛰었습니다` : ""}. 검색과 AI 활용이 가능합니다.</div>
+    <div class="row" style="margin-top:8px"><button class="btn" id="documentGenerate">이 자료를 AI로 정리</button></div>
+    <details><summary class="status">저장한 메모 확인</summary>${r.memos.map((m) =>
+      `<button class="btn ghost" data-document-memo="${m.id}" style="display:block;text-align:left;white-space:normal">${esc(m.title)}</button>`).join("")}</details>`;
+  $("#documentGenerate").onclick = () => startGenerate(r.memos.map((m) => m.id), "가져온 문서를 바탕으로 핵심 내용과 할 일을 정리해줘");
+  target.querySelectorAll("[data-document-memo]").forEach((b) => { b.onclick = () => openMemo(+b.dataset.documentMemo); });
+}
+
 // ---------------------------------------------------------------- 내보내기
 // 입력칸에서 바로 읽는다 — 타이핑 직후 눌러도 방금 친 값이 반영돼야 한다.
 function exportPayload() {
@@ -1195,6 +1679,7 @@ function exportPayload() {
   exp.note = $("#expNote").value;
   exp.archived = $("#expArchived").checked;
   const all = [...new Set([...exp.tags, ...typed])];
+  if (exp.since && exp.until && exp.since > exp.until) throw new Error("작성 시작일은 종료일보다 앞서야 합니다.");
   return { ...exp, tag: null, tags: all };
 }
 
@@ -1265,25 +1750,36 @@ function redminePayload() {
 }
 
 async function doImport(dry, source = "all") {
+  if (imp.busy) { toast("진행 중인 가져오기가 끝날 때까지 기다려주세요"); return; }
+  imp.busy = true;
+  const buttons = [...document.querySelectorAll("[data-src-run], [data-src-preview], #impRunAll, #impPreviewAll")];
+  const disabledBefore = buttons.map((b) => b.disabled);
+  buttons.forEach((b) => { b.disabled = true; });
   const targets = source === "all"
-    ? [...document.querySelectorAll("[id^='impOut-']")].map((d) => d.id.slice(8))
+    ? (imp.section === "share" ? ["shared"] : ["sticky", "samsung", "files", "redmine"])
     : [source];
+  const completed = new Set();
   const busy = `<div class="status" style="margin-top:8px">${dry ? "확인" : "가져오기"} 중…</div>`;
   targets.forEach((n) => { const el = $(`#impOut-${n}`); if (el) el.innerHTML = busy; });
 
   const body = {
-    source, path: imp.path || null, shared_path: imp.sharedPath || null,
+    source, path: imp.path || null, shared_path: imp.sharedPath || null, shared_content: imp.sharedContent || null,
     min_chars: imp.minChars, update_existing: imp.update, tags: imp.tags,
     redmine: redminePayload(),
   };
   try {
-    const r = await api(dry ? "/api/import/preview" : "/api/import/run", { method: "POST", body });
-    targets.forEach((n) => { const el = $(`#impOut-${n}`); if (el) el.innerHTML = ""; });
-    r.results.forEach((x) => {
-      const res = { ...x, dry_run: r.dry_run };
-      imp.results[x.source] = res;
-      paintResult(x.source, res);
-    });
+    const r = { total: 0, total_updated: 0 };
+    for (const name of targets) {
+      const part = await api(dry ? "/api/import/preview" : "/api/import/run", { method: "POST", body: { ...body, source: name } });
+      part.results.forEach((x) => {
+        const res = { ...x, dry_run: part.dry_run };
+        imp.results[x.source] = res;
+        paintResult(x.source, res);
+        completed.add(x.source);
+      });
+      r.total += part.total;
+      r.total_updated += part.total_updated;
+    }
     if (!dry) {
       const parts = [r.total ? `${r.total}건 가져옴` : "", r.total_updated ? `${r.total_updated}건 갱신` : ""].filter(Boolean);
       toast(parts.length ? `${parts.join(" · ")} — 정리는 백그라운드에서 진행됩니다` : "새로 가져오거나 바뀐 메모가 없습니다");
@@ -1292,9 +1788,13 @@ async function doImport(dry, source = "all") {
     }
   } catch (err) {
     targets.forEach((n) => {
+      if (completed.has(n)) return;
       const el = $(`#impOut-${n}`);
       if (el) el.innerHTML = `<div class="status" style="color:var(--danger);margin-top:8px">${esc(err.message)}</div>`;
     });
+  } finally {
+    imp.busy = false;
+    buttons.forEach((b, i) => { if (b.isConnected) b.disabled = disabledBefore[i]; });
   }
 }
 
@@ -1438,7 +1938,7 @@ function askDeleteTag(name, count) {
 const TAG_COLORS = ["slate", "blue", "green", "amber", "red", "purple", "teal", "pink"];
 let settingsProvider = null; // 화면에서 편집 중인 프로바이더 (저장 전엔 전환만)
 
-async function renderSettings() {
+async function renderSettings(version = renderVersion) {
   const cfg = await api("/api/settings");
   const s = cfg.settings;
   const active = settingsProvider || cfg.provider;
@@ -1453,6 +1953,7 @@ async function renderSettings() {
     </button>`).join("");
 
   const tg = await api("/api/tags");
+  if (version !== renderVersion) return;
   myTags = tg.items;
 
   $("#view").innerHTML = `
@@ -1662,59 +2163,146 @@ async function renderSettings() {
 }
 
 // ---------------------------------------------------------------- 상세
+function paintDetailTags() {
+  const names = [...new Set(bodyTags($("#dBody").value))];
+  const choices = [...new Map([...myTags, ...tagSuggestions].map((t) => [t.name, t])).values()];
+  $("#dTags").innerHTML = names.length ? names.map((name) => {
+    const tag = myTags.find((t) => t.name === name);
+    return `<button type="button" class="tagchip on t-${esc(tag?.color || "slate")}" data-detail-remove="${esc(name)}"
+      aria-label="#${esc(name)} 태그 제거" title="이 메모에서 태그 제거">#${esc(name)} <span aria-hidden="true">×</span></button>`;
+  }).join("") : `<span class="hint">태그가 없습니다. 아래에서 추가하세요.</span>`;
+  $("#dTags").querySelectorAll("[data-detail-remove]").forEach((button) => {
+    button.onclick = () => {
+      const name = button.dataset.detailRemove;
+      const pattern = new RegExp(`(^|\\s)#${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![${TAG_CHARS}])`, "g");
+      $("#dBody").value = $("#dBody").value.replace(pattern, "$1");
+      $("#dTagMessage").textContent = `#${name} 제거됨 · 저장하면 반영됩니다`;
+      paintDetailTags();
+    };
+  });
+  $("#dTagPicker").hidden = !choices.length;
+  $("#dTagChoices").innerHTML = choices.map((tag) => {
+    const selected = names.some((name) => name.toLowerCase() === tag.name.toLowerCase());
+    return tagChip(tag, selected, `data-detail-add="${esc(tag.name)}" ${selected ? "disabled" : ""}`);
+  }).join("");
+  $("#dTagChoices").querySelectorAll("[data-detail-add]").forEach((button) => {
+    button.onclick = () => addDetailTag(button.dataset.detailAdd);
+  });
+}
+
+function addDetailTag(raw = $("#dTagInput").value) {
+  const name = String(raw).trim().replace(/^#+/, "").trim().replace(/\s+/g, "_");
+  if (!new RegExp(`^[${TAG_CHARS}]{1,40}$`).test(name)) {
+    $("#dTagMessage").textContent = "태그는 1~40자의 한글·영문·숫자·_·-·/로 입력하세요. 공백은 _로 바뀝니다.";
+    $("#dTagInput").focus();
+    return false;
+  }
+  const exists = bodyTags($("#dBody").value).some((tag) => tag.toLowerCase() === name.toLowerCase());
+  if (!exists) {
+    const body = $("#dBody").value;
+    $("#dBody").value = body + (body && !/\s$/.test(body) ? "\n" : "") + "#" + name;
+  }
+  if (raw === $("#dTagInput").value) $("#dTagInput").value = "";
+  $("#dTagMessage").textContent = exists ? `#${name} 태그가 이미 있습니다.` : `#${name} 추가됨 · 저장하면 반영됩니다`;
+  paintDetailTags();
+  return true;
+}
+
+function detailDirty() {
+  return $("#detail").open && state.memo && ($("#dBody").value !== state.memo.body || $("#dTagInput").value.trim());
+}
+function closeDetail() {
+  if (detailDirty() && !confirm("수정한 내용이 아직 저장되지 않았습니다. 변경 내용을 버리고 닫을까요?")) return false;
+  $("#detail").close();
+  return true;
+}
+let memoRequest = 0;
 async function openMemo(id) {
-  const m = await api(`/api/memos/${id}`);
+  if (detailDirty() && !confirm("현재 수정한 내용을 버리고 다른 메모를 열까요?")) return;
+  const request = ++memoRequest;
+  let m;
+  try { m = await api(`/api/memos/${id}`); }
+  catch (e) { toast("메모를 열지 못했습니다: " + e.message); return; }
+  if (request !== memoRequest) return;
   state.memo = m;
   $("#dTitle").textContent = m.title;
   $("#dMeta").textContent = fmt(m.created_at);
   $("#dBody").value = m.body;
+  $("#dTagInput").value = "";
+  $("#dTagMessage").textContent = "";
+  $("#dTagPicker").open = false;
+  paintDetailTags();
   const f = m.facets || {};
   $("#dBadges").innerHTML = [
-    ...(f.tag || []).map((t) => `<span class="badge tag">#${esc(t)}</span>`),
     ...(f.person || []).map((p) => `<span class="badge person">@${esc(p)}</span>`),
     ...(f.date || []).map((d) => `<span class="badge">${esc(d)}</span>`),
     ...(f.decision || []).map((d) => `<span class="badge">결정: ${esc(d.slice(0, 40))}</span>`),
-  ].join("") || `<span class="status">추출된 항목 없음 (보강 대기 중일 수 있습니다)</span>`;
+  ].join("");
   $("#dSimilar").innerHTML = m.similar?.length
     ? `<div class="side-h">비슷한 메모</div><ul style="padding:0">${m.similar.map((s) => `<li data-memo="${s.id}" style="list-style:none;color:var(--dim);cursor:pointer;padding:2px 0">· ${esc(s.title)} <span class="meta">${fmt(s.created_at)}</span></li>`).join("")}</ul>`
     : "";
   $("#dSimilar").querySelectorAll("[data-memo]").forEach((li) => (li.onclick = () => openMemo(+li.dataset.memo)));
-  $("#detail").showModal();
+  if (!$("#detail").open) $("#detail").showModal();
 }
 
-$("#dClose").onclick = () => $("#detail").close();
+$("#dClose").onclick = closeDetail;
+$("#dBody").addEventListener("input", paintDetailTags);
+$("#dTagAdd").onclick = () => { if (addDetailTag()) $("#dTagInput").focus(); };
+$("#dTagInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); addDetailTag(); }
+});
+$("#detail").addEventListener("cancel", (e) => { e.preventDefault(); closeDetail(); });
 $("#dSave").onclick = async () => {
-  await api(`/api/memos/${state.memo.id}`, { method: "PUT", body: { body: $("#dBody").value } });
-  $("#detail").close();
-  toast("수정했습니다");
-  render(); loadSidebar();
+  if ($("#dSave").disabled) return;
+  if ($("#dTagInput").value.trim() && !addDetailTag()) return;
+  const id = state.memo.id, body = $("#dBody").value;
+  $("#dSave").disabled = $("#dDelete").disabled = $("#dPack").disabled = true;
+  try {
+    const memo = await api(`/api/memos/${id}`, { method: "PUT", body: { body } });
+    if (state.memo.id === id) {
+      state.memo = memo;
+      if ($("#dBody").value === body && !$("#dTagInput").value.trim()) $("#detail").close();
+    }
+    toast("수정했습니다");
+    render(); loadSidebar(); loadTags();
+  } catch (e) { toast("수정 실패: " + e.message); }
+  finally { $("#dSave").disabled = $("#dDelete").disabled = $("#dPack").disabled = false; }
 };
 $("#dDelete").onclick = async () => {
   if (!confirm("이 메모를 삭제할까요?")) return;
-  await api(`/api/memos/${state.memo.id}`, { method: "DELETE" });
-  $("#detail").close();
-  toast("삭제했습니다");
-  render(); loadSidebar();
+  try {
+    await api(`/api/memos/${state.memo.id}`, { method: "DELETE" });
+    state.selected.delete(state.memo.id);
+    $("#detail").close();
+    toast("삭제했습니다");
+    render(); loadSidebar(); loadTags();
+  } catch (e) { toast("삭제 실패: " + e.message); }
 };
 $("#dPack").onclick = () => {
-  gen.instruction = `"${state.memo.title}" 관련 내용을 정리해줘`;
-  gen.plan = gen.output = null;
-  $("#detail").close();
-  goTab("generate");
+  if (gen.busy) { toast("진행 중인 생성이 끝난 뒤 다시 시도하세요"); return; }
+  const m = state.memo;
+  if (closeDetail()) startGenerate([m.id], `"${m.title}" 내용을 정리해줘`);
 };
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "/" && document.activeElement.tagName !== "TEXTAREA" && document.activeElement.tagName !== "INPUT") {
-    e.preventDefault(); $("#q").focus();
+  if (e.key === "/" && !$("#detail").open && !["TEXTAREA", "INPUT", "SELECT"].includes(document.activeElement.tagName)) {
+    e.preventDefault();
+    goTab("feed"); $("#q").focus();
+  }
+});
+window.addEventListener("beforeunload", (e) => {
+  localDraft($("#capture").value);
+  if (detailDirty() || docImport.dirty || docImport.saving || $("#capture").value !== draftSaved || captureSaving) {
+    e.preventDefault(); e.returnValue = "";
   }
 });
 
 renderTabs();
-loadSidebar();
+loadSidebar().catch((e) => toast("상태를 불러오지 못했습니다: " + e.message));
 loadTags();
 render();
-setInterval(loadSidebar, 6000);
-$("#capture").focus();
+restoreDraft();
+setInterval(() => loadSidebar().catch(() => {}), 6000);
 </script>
 </body>
 </html>
