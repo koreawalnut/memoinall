@@ -226,6 +226,29 @@
     width: 100%; min-height: 220px; background: var(--panel-2); border: 1px solid var(--line);
     border-radius: 8px; padding: 11px; outline: none; resize: vertical; line-height: 1.7;
   }
+  /* 검색으로 연 메모는 어디가 걸린 건지 눈에 띄어야 한다. textarea 로는
+     글자에 표시를 못 달아서, 읽기 화면을 따로 두고 고칠 때만 textarea 로 바꾼다. */
+  .doc {
+    white-space: pre-wrap; word-break: break-word; line-height: 1.75;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 8px; padding: 11px; min-height: 220px;
+  }
+  .doc mark {
+    background: color-mix(in srgb, var(--accent) 26%, transparent);
+    color: var(--fg); border-radius: 3px; padding: 0 1px;
+  }
+  /* 지금 보고 있는 한 곳. 나머지 표시와 확실히 구분돼야 넘겨보는 맛이 난다. */
+  .doc mark.on { background: var(--accent); color: #fff; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
+  /* 뜻으로 걸린 대목 — 검색어가 글자로는 없어도 여기가 이유다 */
+  .doc .passage {
+    display: inline; background: color-mix(in srgb, var(--accent-2) 13%, transparent);
+    box-shadow: -4px 0 0 var(--accent-2); border-radius: 2px;
+  }
+  .hitbar { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; flex-wrap: wrap; }
+  .hitbar .btn { padding: 3px 10px; }
+  /* display 를 정한 요소는 hidden 속성만으론 안 숨는다 */
+  [hidden] { display: none !important; }
+
   .dlg-f { display: flex; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--line); }
   .spacer { flex: 1; }
   .status { font-size: 13.5px; color: var(--dim); line-height: 1.6; }
@@ -326,7 +349,8 @@
     <div id="dSimilar" style="margin-top:14px"></div>
   </div>
   <div class="dlg-f">
-    <button class="btn" id="dSave">저장</button>
+    <button class="btn" id="dEdit">고치기</button>
+    <button class="btn primary" id="dSave" hidden>저장</button>
     <button class="btn ghost" id="dPack">이 메모로 문서 만들기</button>
     <span class="spacer"></span>
     <button class="btn ghost" id="dDelete" style="color:var(--danger)">삭제</button>
@@ -379,15 +403,10 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.classList.remove("show"), 1800);
 }
 
+// 카드 미리보기와 상세 본문이 같은 규칙으로 표시돼야 한다 —
+// 카드에서 본 곳이 상세에서 안 칠해져 있으면 찾다가 헷갈린다.
 function highlight(text, query) {
-  if (!query) return esc(text);
-  const terms = query.split(/\s+/).filter((t) => t.length >= 2).slice(0, 6);
-  let out = esc(text);
-  for (const t of terms) {
-    const re = new RegExp(esc(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
-    out = out.replace(re, (m) => `<mark>${m}</mark>`);
-  }
-  return out;
+  return markTerms(text, queryTerms(query));
 }
 
 // ---------------------------------------------------------------- 캡처
@@ -1051,7 +1070,9 @@ function renderPlanPanel() {
             <div><b>[M${s.id}]</b> ${esc(s.title)} <span class="meta">${s.created_at.slice(0, 10)}</span></div>
             <div class="meta">${p.query_method === "selected" ? "직접 선택" : "일치 질의: " + s.matched_queries.map(esc).join(" / ")}${s.included_as !== "full" ? " · 일부 내용만 포함" : ""}</div>
           </div>
-          <button class="btn ghost" data-openmemo="${s.id}" style="padding:3px 9px;font-size:13.5px">열기</button>
+          <button class="btn ghost" data-openmemo="${s.id}"
+                  data-q="${esc((s.matched_queries || []).join(" "))}"
+                  style="padding:3px 9px;font-size:13.5px">열기</button>
         </div>`).join("") || `<div class="status">관련 메모를 찾지 못했습니다. 질의를 바꿔보세요.</div>`}
       </div>
       <div class="row" style="margin:14px 0 0">
@@ -1065,7 +1086,10 @@ function renderPlanPanel() {
   document.querySelectorAll("[data-delq]").forEach((b) => {
     b.onclick = () => { gen.queries.splice(+b.dataset.delq, 1); planWithQueries(); };
   });
-  document.querySelectorAll("[data-openmemo]").forEach((b) => (b.onclick = () => openMemo(+b.dataset.openmemo)));
+  // 근거로 쓰인 메모도 '어느 질의에 걸렸는지' 를 들고 열린다
+  document.querySelectorAll("[data-openmemo]").forEach((b) => {
+    b.onclick = () => openMemo(+b.dataset.openmemo, b.dataset.q ? { q: b.dataset.q, chunk: "" } : null);
+  });
   $("#addQ").onkeydown = (e) => {
     if (e.key !== "Enter" || !e.target.value.trim()) return;
     gen.queries.push(e.target.value.trim());
