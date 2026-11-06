@@ -16,9 +16,11 @@ CUDA 스텁까지 딸려와 1GB 를 넘고, onefile 은 실행할 때마다 그�
 """
 
 import importlib.util
+import os
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
 block_cipher = None
+onedir = os.environ.get("MEMOINALL_BUILD_ONEDIR") == "1"
 
 
 def has(mod: str) -> bool:
@@ -74,6 +76,10 @@ for parser in ("pypdf", "openpyxl", "xlrd", "olefile", "defusedxml"):
     if has(parser):
         hiddenimports += collect_submodules(parser)
 
+# 주고받기 파일 암호화. 쓸 때만 import 하므로 명시해야 exe 에 들어간다.
+if has("cryptography"):
+    hiddenimports += ["cryptography.hazmat.primitives.ciphers.aead"]
+
 # 넣으면 크기만 커지고 쓰지 않는 것들.
 excludes = [
     "torch", "torchvision", "torchaudio",
@@ -104,10 +110,9 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
+    *([] if onedir else [a.binaries, a.zipfiles, a.datas]),
     [],
+    exclude_binaries=onedir,
     name="memoinall",
     debug=False,
     bootloader_ignore_signals=False,
@@ -123,3 +128,7 @@ exe = EXE(
     entitlements_file=None,
     icon=None,
 )
+
+if onedir:
+    coll = COLLECT(exe, a.binaries, a.zipfiles, a.datas,
+                   strip=False, upx=False, name="memoinall")

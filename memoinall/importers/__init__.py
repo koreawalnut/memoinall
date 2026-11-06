@@ -154,9 +154,11 @@ def run_import(
     except Exception as exc:
         # 우리가 직접 만든 오류는 이미 사용자용 문장이다 — 클래스 이름을 덧붙이면
         # "RedmineError: API 키가 올바르지 않습니다" 처럼 지저분해진다.
+        from ..exchange import ExchangeError
         from .redmine import RedmineError
 
-        result.error = str(exc) if isinstance(exc, RedmineError) else f"{type(exc).__name__}: {exc}"
+        ours = isinstance(exc, (RedmineError, ExchangeError))
+        result.error = str(exc) if ours else f"{type(exc).__name__}: {exc}"
         return result
 
     result.found = len(notes)
@@ -274,6 +276,7 @@ def build_shared(**kwargs):
     return SharedFileImporter(
         path=kwargs.get("shared_path") or "",
         content=kwargs.get("shared_content") or "",
+        password=kwargs.get("shared_password") or "",
     )
 
 

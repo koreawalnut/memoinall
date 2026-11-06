@@ -120,6 +120,14 @@ def init() -> None:
     connect()
 
 
+def close() -> None:
+    """현재 스레드의 커넥션만 닫는다."""
+    conn = getattr(_local, "conn", None)
+    if conn is not None:
+        conn.close()
+        del _local.conn
+
+
 def query(sql: str, params: Iterable[Any] = ()) -> list[sqlite3.Row]:
     return list(connect().execute(sql, tuple(params)))
 

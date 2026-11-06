@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -68,6 +69,7 @@ def check() -> bool:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="memoinall 단일 실행 파일 빌드")
     parser.add_argument("--check", action="store_true", help="빌드 환경만 확인하고 파일을 만들지 않습니다")
+    parser.add_argument("--onedir", action="store_true", help="실행 시 압축 해제가 없는 폴더 배포판을 만듭니다")
     arguments = sys.argv[1:] if argv is None else argv
     args = parser.parse_args(arguments)
     if missing_packages():
@@ -81,29 +83,41 @@ def main(argv: list[str] | None = None) -> int:
         print("빌드 준비 완료:", sys.executable)
         return 0
 
-    # 실제 경로까지 확인한 후 프로젝트의 빌드 산출물만 정리한다.
-    if any(path.resolve().parent != ROOT.resolve() for path in (DIST, BUILD)):
+    output = DIST / ("memoinall" if args.onedir else "memoinall.exe")
+    work = BUILD / ("onedir" if args.onedir else "onefile")
+    # 다른 배포 형식은 남겨두고 이번 빌드 대상만 정리한다.
+    if (any(path.resolve().parent != ROOT.resolve() for path in (DIST, BUILD))
+            or output.resolve().parent != DIST.resolve()
+            or work.resolve().parent != BUILD.resolve()):
         print("빌드 출력 경로가 프로젝트 밖을 가리킵니다. dist/build 경로를 확인하세요.")
         return 1
-    for path in (DIST, BUILD):
+    for path in (output, work):
         if path.exists():
             print(f"이전 결과 삭제: {path}")
-            shutil.rmtree(path, ignore_errors=True)
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
 
-    cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", str(ROOT / "memoinall.spec")]
+    cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
+           "--distpath", str(DIST), "--workpath", str(work), str(ROOT / "memoinall.spec")]
+    build_env = os.environ.copy()
+    build_env["MEMOINALL_BUILD_ONEDIR"] = "1" if args.onedir else "0"
     print("\n빌드 시작 (수 분 걸립니다)…\n  " + " ".join(cmd))
-    result = subprocess.run(cmd, cwd=ROOT)
+    result = subprocess.run(cmd, cwd=ROOT, env=build_env)
     if result.returncode != 0:
         print("\n빌드 실패")
         return result.returncode
 
-    exe = DIST / "memoinall.exe"
+    exe = output / "memoinall.exe" if args.onedir else output
     if not exe.exists():
         print("\nexe 가 생성되지 않았습니다.")
         return 1
 
     size = exe.stat().st_size / (1024 * 1024)
     print(f"\n완료: {exe}  ({size:.0f} MB)")
+    if args.onedir:
+        print("배포할 때는 dist/memoinall 폴더 전체를 전달하세요. exe 파일만 옮기면 실행되지 않습니다.")
     print("첫 실행 때 임베딩 모델 약 450MB 를 내려받습니다(한 번만).")
     return 0
 

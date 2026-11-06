@@ -354,6 +354,11 @@ def enrich(memo_id: int) -> bool:
         conn.execute("UPDATE memos SET enriched_at=? WHERE id=?", (now_iso(), memo_id))
 
     _search_cache.invalidate()
+    # 인코딩 도중 실제 모델이 준비되면 업그레이드 조회가 이 작업을 놓칠 수 있다.
+    # 방금 저장한 임시 벡터도 새 모델로 처리되도록 다시 예약한다.
+    current_model = embed.current().name
+    if model_name != current_model and current_model != embed.HASH_MODEL:
+        enqueue(memo_id)
     return True
 
 
@@ -389,13 +394,14 @@ def queue_size() -> int:
 
 
 def reindex_pending() -> int:
-    """미보강 메모 + 모델이 바뀐 청크를 다시 큐에 넣는다."""
+    """미보강 메모를 복구하고, 실제 모델이 준비된 뒤에만 기존 벡터를 교체한다."""
     model = embed.current().name
     rows = db.query(
-        "SELECT DISTINCT m.id FROM memos m "
-        "LEFT JOIN chunks c ON c.memo_id=m.id "
-        "WHERE m.enriched_at IS NULL OR c.id IS NULL OR c.model IS NOT ? ",
-        (model,),
+        "SELECT m.id FROM memos m WHERE m.enriched_at IS NULL "
+        "OR NOT EXISTS (SELECT 1 FROM chunks c WHERE c.memo_id=m.id) "
+        "OR (? != ? AND EXISTS (SELECT 1 FROM chunks c "
+        "WHERE c.memo_id=m.id AND c.model IS NOT ?))",
+        (model, embed.HASH_MODEL, model),
     )
     for row in rows:
         _jobs.put(row["id"])

@@ -659,8 +659,8 @@ async function loadSidebar() {
   const e = stats.embedder;
   const cls = e.state === "ready" ? "ok" : e.state === "failed" ? "err" : "warn";
   const label = {
-    ready: "의미 검색 활성", loading: "모델 로딩 중…", downloading: "모델 내려받는 중",
-    fallback: "폴백 임베더", failed: "폴백 임베더(모델 실패)",
+    ready: "의미 검색 활성", loading: "의미 검색 준비 중…", downloading: "의미 검색 준비 중 · 모델 내려받는 중",
+    fallback: "기본 검색 사용 중", failed: "기본 검색 사용 중 · 의미 검색 준비 실패",
   }[e.state] || e.state;
   // 첫 실행 때 약 450MB 를 받는다. 진행률을 안 보여주면 멈춘 것처럼 보인다.
   const dl = e.state === "downloading" && e.progress?.total
@@ -674,6 +674,7 @@ async function loadSidebar() {
     <div class="line"></div>
     <div><span class="dot ${cls}"></span>${label}${busy}</div>
     ${dl}
+    ${e.state !== "ready" ? '<div class="sub">메모 작성·저장과 키워드 검색은 바로 사용할 수 있습니다.</div>' : ""}
     <div class="sub">검색 엔진 ${esc(e.model)}</div>
     <div class="sub">AI ${stats.llm_enabled
       ? `${esc(stats.llm_provider)} · ${esc(stats.llm_model)}`
@@ -1179,10 +1180,12 @@ function renderGenOutput() {
 
 // ---------------------------------------------------------------- 가져오기
 // 소스별 결과를 각자 자리에 남긴다. 하나를 가져와도 다른 소스의 결과가 지워지지 않는다.
-const imp = { section: "import", path: "", sharedPath: "", sharedContent: "", sharedName: "", minChars: 0, update: false, tags: [], results: {}, busy: false };
+const imp = { section: "import", path: "", sharedPath: "", sharedContent: "", sharedName: "", sharedPassword: "", sharedLocked: false, minChars: 0, update: false, tags: [], results: {}, busy: false };
 const docImport = { preview: null, selected: new Set(), edits: new Map(), busy: false, saving: false, dirty: false, error: "", result: null };
 // 내보내기 조건. 조건들은 AND 로 겹친다 — '결제 + 지난달' 처럼 좁혀 보낼 수 있어야 한다.
 const exp = { ids: null, q: "", tag: "", tags: [], person: null, since: "", until: "", archived: false, note: "" };
+// 내보낼 파일을 잠글 비밀번호. exp 에 두면 exportPayload 가 미리보기 요청에도 실어 보내므로 따로 둔다.
+const expSecret = { password: "", confirm: "" };
 const RM_KINDS = { issues: "이슈", wiki: "위키", documents: "문서", news: "공지" };
 
 // 소스 한 칸: 상태 + 자기 버튼 + 자기 결과. '일괄'도 같은 칸에 결과를 흘려보낸다.
@@ -1287,12 +1290,19 @@ async function renderImport(version = renderVersion) {
     <div class="field" style="margin:9px 0 0;grid-template-columns:80px 1fr">
       <label for="sharedFile">찾아보기</label>
       <input id="sharedFile" type="file" accept=".json,application/json" />
-      <div class="note" id="sharedFileStatus">${imp.sharedName ? "선택한 파일: " + esc(imp.sharedName) : "받은 .json 파일을 선택하면 내용을 미리 보여줍니다."}</div>
+      <div class="note" id="sharedFileStatus">${imp.sharedName
+        ? "선택한 파일: " + esc(imp.sharedName) + (imp.sharedLocked ? " — 암호화된 파일입니다. 아래에 비밀번호를 입력하세요." : "")
+        : "받은 .json 파일을 선택하면 내용을 미리 보여줍니다."}</div>
     </div>
     <div class="field" style="margin:9px 0 0;grid-template-columns:80px 1fr">
       <label>또는 경로</label>
       <input id="impShared" value="${esc(imp.sharedPath)}" placeholder="예) C:\\Users\\나\\Downloads\\memoinall-20260901-1200-12건.json" />
       <div class="note">동료가 <b>내보내기</b>로 만든 .json 파일. 이미 갖고 있는 내용은 알아서 건너뜁니다.</div>
+    </div>
+    <div class="field" style="margin:9px 0 0;grid-template-columns:80px 1fr">
+      <label for="impSharedPw">비밀번호</label>
+      <input id="impSharedPw" type="password" autocomplete="off" placeholder="암호화된 파일이면 보낸 사람에게 받은 비밀번호" />
+      <div class="note">입력 후 Enter. 암호를 푼 내용만 저장되고 비밀번호는 어디에도 남지 않습니다.</div>
     </div>`;
 
   $("#view").innerHTML = `
@@ -1355,6 +1365,17 @@ async function renderImport(version = renderVersion) {
       <div class="field">
         <label>메모 남기기</label>
         <input id="expNote" value="${esc(exp.note)}" placeholder="받는 사람에게 한 줄 (선택)" />
+      </div>
+      <div class="field">
+        <label>비밀번호</label>
+        <div>
+          <div class="row" style="gap:8px">
+            <input id="expPw" type="password" autocomplete="new-password" aria-label="파일을 잠글 비밀번호" placeholder="파일을 잠글 비밀번호" style="flex:1" />
+            <input id="expPw2" type="password" autocomplete="new-password" aria-label="비밀번호 확인" placeholder="한 번 더" style="flex:1" />
+          </div>
+          <div class="note">받는 사람도 같은 비밀번호를 넣어야 열 수 있습니다.
+            비밀번호는 파일과 <b>다른 경로</b>(전화·별도 메시지)로 알려주세요.</div>
+        </div>
       </div>
       <div class="row" style="margin:12px 0 0">
         <span class="spacer"></span>
@@ -1482,6 +1503,7 @@ async function renderImport(version = renderVersion) {
   $("#impPath").onchange = (e) => { imp.path = e.target.value.trim(); render(); };
   $("#impShared").onchange = (e) => {
     imp.sharedPath = e.target.value.trim(); imp.sharedContent = imp.sharedName = "";
+    imp.sharedLocked = false;
     delete imp.results.shared; render();
   };
   $("#sharedFile").onchange = async (e) => {
@@ -1491,16 +1513,25 @@ async function renderImport(version = renderVersion) {
     try {
       if (file.size > 50000000) throw new Error("50MB 이하의 메모 파일을 선택하세요.");
       const content = (await file.text()).replace(/^\uFEFF/, "");
-      const info = await api("/api/import/shared/describe", { method: "POST", body: { content } });
-      imp.sharedContent = content; imp.sharedName = file.name; imp.sharedPath = "";
-      delete imp.results.shared;
-      toast(`${file.name} · 메모 ${info.count}건${info.note ? " · " + info.note : ""}`);
-      if (status.isConnected) { await render(); await doImport(true, "shared"); }
+      await openShared(content, file.name, status);
     } catch (err) {
       e.target.value = "";
       if (status.isConnected) status.textContent = "파일 확인 실패: " + err.message;
     }
   };
+  $("#impSharedPw").value = imp.sharedPassword;
+  $("#impSharedPw").onchange = async (e) => {
+    imp.sharedPassword = e.target.value;
+    delete imp.results.shared;
+    if (!imp.sharedContent) return;   // 경로로 지정한 파일은 미리보기 버튼에서 같이 보낸다
+    const status = $("#sharedFileStatus");
+    try { await openShared(imp.sharedContent, imp.sharedName, status); }
+    catch (err) { if (status.isConnected) status.textContent = "파일 확인 실패: " + err.message; }
+  };
+  $("#expPw").value = expSecret.password;
+  $("#expPw2").value = expSecret.confirm;
+  $("#expPw").oninput = (e) => { expSecret.password = e.target.value; };
+  $("#expPw2").oninput = (e) => { expSecret.confirm = e.target.value; };
   if ($("#expClearScope")) $("#expClearScope").onclick = () => { exportPayload(); exp.ids = exp.person = null; render(); };
   if (exp.ids !== null) {
     ["expQ", "expTag", "expSince", "expUntil", "expArchived"].forEach((id) => { $("#" + id).disabled = true; });
@@ -1699,6 +1730,22 @@ function paintDocumentResult() {
   target.querySelectorAll("[data-document-memo]").forEach((b) => { b.onclick = () => openMemo(+b.dataset.documentMemo); });
 }
 
+// 고른 파일의 겉면을 확인하고 미리보기까지. 암호화된 파일이면 비밀번호를 받을 때까지 멈춘다.
+async function openShared(content, name, status) {
+  const info = await api("/api/import/shared/describe", {
+    method: "POST", body: { content, password: imp.sharedPassword || null },
+  });
+  Object.assign(imp, { sharedContent: content, sharedName: name, sharedPath: "", sharedLocked: !!info.needs_password });
+  delete imp.results.shared;
+  if (!info.needs_password) {
+    toast(`${name} · 메모 ${info.count}건${info.encrypted ? " · 암호 해제됨" : ""}${info.note ? " · " + info.note : ""}`);
+  }
+  if (!status.isConnected) return;
+  await render();
+  if (info.needs_password) { $("#impSharedPw")?.focus(); return; }
+  await doImport(true, "shared");
+}
+
 // ---------------------------------------------------------------- 내보내기
 // 입력칸에서 바로 읽는다 — 타이핑 직후 눌러도 방금 친 값이 반영돼야 한다.
 function exportPayload() {
@@ -1714,6 +1761,14 @@ function exportPayload() {
   const all = [...new Set([...exp.tags, ...typed])];
   if (exp.since && exp.until && exp.since > exp.until) throw new Error("작성 시작일은 종료일보다 앞서야 합니다.");
   return { ...exp, tag: null, tags: all };
+}
+
+// 비밀번호를 확인한다. 비워두면 평문이 나간다는 걸 알고 고르게 한다 — 취소하면 null.
+function exportPassword() {
+  const pw = $("#expPw").value, pw2 = $("#expPw2").value;
+  if (pw !== pw2) throw new Error("두 비밀번호가 다릅니다.");
+  if (!pw && !confirm("비밀번호 없이 내보내면 파일을 손에 넣은 누구나 내용을 그대로 읽을 수 있습니다.\n암호화하지 않고 내보낼까요?")) return null;
+  return pw;
 }
 
 function expBusy(msg) { $("#expOut").innerHTML = `<div class="status" style="margin-top:9px">${msg}</div>`; }
@@ -1741,15 +1796,23 @@ async function doExportPreview() {
   } catch (err) { expError(err.message); }
 }
 
+function exportLockNote(encrypted) {
+  return encrypted
+    ? "암호화된 파일입니다. 비밀번호는 파일과 <b>다른 경로</b>로 알려주세요."
+    : `<span style="color:var(--warn)">암호화하지 않은 파일입니다 — 받는 사람 외에는 전달되지 않게 주의하세요.</span>`;
+}
+
 async function doExportSave() {
-  expBusy("파일로 저장하는 중…");
   try {
-    const r = await api("/api/export", { method: "POST", body: exportPayload() });
+    const password = exportPassword();
+    if (password === null) return;
+    expBusy(password ? "암호화해서 저장하는 중…" : "파일로 저장하는 중…");
+    const r = await api("/api/export", { method: "POST", body: { ...exportPayload(), password } });
     $("#expOut").innerHTML = `<div style="margin-top:10px;padding:10px 12px;background:var(--panel-2);border-radius:8px">
       <div><b style="color:var(--accent-2)">메모 ${r.count}건을 내보냈습니다.</b></div>
       <div class="meta" style="margin-top:4px;word-break:break-all">${esc(r.path)} · ${(r.bytes / 1024).toFixed(1)}KB</div>
       <div class="note" style="margin-top:5px">이 파일을 그대로 전달하세요.
-        받는 쪽은 <b>받은 메모 파일 넣기</b>에 경로를 넣고 가져오면 됩니다.</div>
+        받는 쪽은 <b>받은 메모 파일 넣기</b>에 경로를 넣고 가져오면 됩니다.<br>${exportLockNote(r.encrypted)}</div>
       <div class="row" style="margin-top:8px"><span class="spacer"></span>
         <button class="btn" id="expCopyPath">경로 복사</button></div>
     </div>`;
@@ -1759,12 +1822,14 @@ async function doExportSave() {
 }
 
 async function doExportCopy() {
-  expBusy("만드는 중…");
   try {
-    const r = await api("/api/export/content", { method: "POST", body: exportPayload() });
+    const password = exportPassword();
+    if (password === null) return;
+    expBusy(password ? "암호화하는 중…" : "만드는 중…");
+    const r = await api("/api/export/content", { method: "POST", body: { ...exportPayload(), password } });
     await navigator.clipboard.writeText(r.content);
     $("#expOut").innerHTML = `<div class="status" style="margin-top:9px">메모 ${r.count}건을 복사했습니다 —
-      메신저에 붙여넣어 보내세요. 받는 쪽은 이 내용을 .json 파일로 저장하면 됩니다.</div>`;
+      메신저에 붙여넣어 보내세요. 받는 쪽은 이 내용을 .json 파일로 저장하면 됩니다.<br>${exportLockNote(r.encrypted)}</div>`;
     toast(`${r.count}건을 복사했습니다`);
   } catch (err) { expError(err.message); }
 }
@@ -1797,6 +1862,7 @@ async function doImport(dry, source = "all") {
 
   const body = {
     source, path: imp.path || null, shared_path: imp.sharedPath || null, shared_content: imp.sharedContent || null,
+    shared_password: imp.sharedPassword || null,
     min_chars: imp.minChars, update_existing: imp.update, tags: imp.tags,
     redmine: redminePayload(),
   };

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from contextlib import asynccontextmanager
+import time
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import Body, FastAPI, HTTPException, Query, Request
@@ -33,19 +35,55 @@ log = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
 
 
+def _prepare_search() -> None:
+    started = time.monotonic()
+    try:
+        embed.ensure_loaded_async()
+        count = store.reindex_pending()
+        log.info("검색 준비: 재색인 %d건 예약 (%.3fs)", count, time.monotonic() - started)
+    except Exception:
+        log.exception("검색 준비 실패 — 메모 읽기와 저장은 계속 사용할 수 있습니다")
+    finally:
+        db.close()
+
+
+async def _prepare_search_later() -> None:
+    # 첫 화면과 초안 요청에 먼저 응답한다. 전체 메모 조회도 이벤트 루프 밖에서 한다.
+    await asyncio.sleep(1.0)
+    await run_in_threadpool(_prepare_search)
+
+
+def _model_upgraded(name: str) -> None:
+    store.reindex_pending()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    started = time.monotonic()
     config.ensure_home()
     db.init()
     settings.migrate_legacy()
-    embed.on_upgrade(lambda name: store.reindex_pending())
-    embed.ensure_loaded_async()
+    embed.on_upgrade(_model_upgraded)
     store.start_worker()
-    store.reindex_pending()
-    yield
+    preparation = asyncio.create_task(_prepare_search_later())
+    log.info("메모 API 준비 완료 (%.3fs)", time.monotonic() - started)
+    try:
+        yield
+    finally:
+        preparation.cancel()
+        with suppress(asyncio.CancelledError):
+            await preparation
+        embed.off_upgrade(_model_upgraded)
+        db.close()
 
 
 app = FastAPI(title="memoinall", version="0.1.0", lifespan=lifespan)
+
+
+@app.get("/api/health")
+def health():
+    # 창 표시 여부는 모델/통계/벡터 인덱스에 의존하지 않는다.
+    return {"status": "ok"}
 
 
 # --------------------------------------------------------------------------- 메모
@@ -425,11 +463,15 @@ def export_run(payload: dict = Body(default={})):
         raise HTTPException(400, "내보낼 메모가 없습니다 — 조건을 확인하세요.")
     pack = exchange.build(rows, note=str(payload.get("note") or ""))
     target = str(payload.get("path") or "").strip() or exchange.export_dir()
+    password = str(payload.get("password") or "")
     try:
-        saved = exchange.save(pack, target)
+        saved = exchange.save(pack, target, password=password)
     except OSError as exc:
         raise HTTPException(400, f"파일을 저장하지 못했습니다: {exc}")
-    return {"path": str(saved), "count": pack["count"], "bytes": saved.stat().st_size}
+    except exchange.ExchangeError as exc:
+        raise HTTPException(400, str(exc))
+    return {"path": str(saved), "count": pack["count"], "bytes": saved.stat().st_size,
+            "encrypted": bool(password)}
 
 
 @app.post("/api/export/content")
@@ -439,10 +481,16 @@ def export_content(payload: dict = Body(default={})):
     if not rows:
         raise HTTPException(400, "내보낼 메모가 없습니다 — 조건을 확인하세요.")
     pack = exchange.build(rows, note=str(payload.get("note") or ""))
+    password = str(payload.get("password") or "")
+    try:
+        content = exchange.dumps(exchange.seal(pack, password))
+    except exchange.ExchangeError as exc:
+        raise HTTPException(400, str(exc))
     return {
-        "content": exchange.dumps(pack),
+        "content": content,
         "count": pack["count"],
         "filename": exchange.default_filename(pack["count"]),
+        "encrypted": bool(password),
     }
 
 
@@ -450,7 +498,8 @@ def export_content(payload: dict = Body(default={})):
 def shared_describe(payload: dict = Body(default={})):
     """넣기 전에 파일 겉면만 확인 — 언제 만든 몇 건짜리인지."""
     imp = importers.build_shared(
-        shared_path=payload.get("path"), shared_content=payload.get("content")
+        shared_path=payload.get("path"), shared_content=payload.get("content"),
+        shared_password=payload.get("password"),
     )
     if not imp.available():
         raise HTTPException(400, imp.unavailable_reason())
@@ -468,6 +517,7 @@ def _run_imports(payload: dict, *, dry_run: bool):
         "files_path": files_path,
         "shared_path": payload.get("shared_path"),
         "shared_content": payload.get("shared_content"),
+        "shared_password": payload.get("shared_password"),
         **_redmine_opts(payload.get("redmine") or {}),
     }
     try:

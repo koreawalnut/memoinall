@@ -118,6 +118,63 @@ def main() -> int:
     info = imp.describe()
     check("겉면 확인", info["count"] == 3 and info["note"] == "자료 공유합니다", info)
 
+    section("암호화")
+    locked = exchange.save(pack, out / "locked.json", password="동료와비밀")
+    raw = locked.read_text(encoding="utf-8")
+    sealed = json.loads(raw)
+    check("봉투 형식", sealed["format"] == exchange.SEALED_FORMAT and sealed["cipher"] == "AES-256-GCM",
+          sealed.get("format"))
+    # 남에게 가는 파일이다. 본문·제목·전할 말·태그가 평문으로 보이면 안 된다.
+    check("본문 안 보임", "결제 모듈" not in raw and "온보딩" not in raw)
+    check("전할 말 안 보임", "자료 공유합니다" not in raw)
+    check("태그 안 보임", "기획" not in raw)
+    check("겉에는 건수만", sealed["count"] == 3 and "memos" not in sealed and "note" not in sealed,
+          list(sealed))
+    again = exchange.save(pack, out / "locked2.json", password="동료와비밀")
+    check("매번 다른 암호문(salt·nonce)",
+          json.loads(again.read_text(encoding="utf-8"))["data"] != sealed["data"])
+
+    opened = SharedFileImporter(locked, password="동료와비밀").read()
+    check("맞는 비밀번호로 열림", len(opened) == 3 and opened[0].body.startswith("결제 모듈"))
+    check("uid 그대로", opened[0].external_id == first["uid"])
+    check("비밀번호 없으면 거부",
+          raises(lambda: SharedFileImporter(locked).read(), "비밀번호를 입력"))
+    check("틀린 비밀번호 거부",
+          raises(lambda: SharedFileImporter(locked, password="틀림").read(), "맞지 않"))
+    info = SharedFileImporter(locked).describe()
+    check("비밀번호 전엔 잠김만 알림", info["needs_password"] and info["count"] is None, info)
+    info = SharedFileImporter(locked, password="동료와비밀").describe()
+    check("연 뒤엔 겉면 확인", info["encrypted"] and info["count"] == 3
+          and info["note"] == "자료 공유합니다", info)
+    check("평문 파일은 비밀번호 줘도 읽힘", len(SharedFileImporter(saved, password="아무거나").read()) == 3)
+    check("평문 파일은 encrypted=False", SharedFileImporter(saved).describe()["encrypted"] is False)
+    check("붙여넣은 암호문도 열림",
+          len(SharedFileImporter(content=raw, password="동료와비밀").read()) == 3)
+    # 맥(NFD)과 윈도우(NFC)가 같은 한글 비밀번호를 다르게 넘겨도 열려야 한다
+    import unicodedata
+    check("한글 비밀번호 정규화",
+          len(SharedFileImporter(locked, password=unicodedata.normalize("NFD", "동료와비밀")).read()) == 3)
+
+    tampered = dict(sealed)
+    blob = bytearray(exchange._unb64(sealed["data"]))
+    blob[5] ^= 1
+    tampered["data"] = exchange._b64(bytes(blob))
+    bad_seal = out / "tampered.json"
+    bad_seal.write_text(json.dumps(tampered), encoding="utf-8")
+    check("변조 감지", raises(lambda: SharedFileImporter(bad_seal, password="동료와비밀").read(), "손상"))
+    greedy = dict(sealed, kdf=dict(sealed["kdf"], n=2**30))
+    greedy_file = out / "greedy.json"
+    greedy_file.write_text(json.dumps(greedy), encoding="utf-8")
+    check("과한 scrypt 비용 거부",
+          raises(lambda: SharedFileImporter(greedy_file, password="동료와비밀").read(), "손상"))
+    broken = out / "broken-seal.json"
+    broken.write_text(json.dumps({"format": exchange.SEALED_FORMAT, "version": 1}), encoding="utf-8")
+    check("빈 봉투 거부", raises(lambda: SharedFileImporter(broken, password="x").read(), "손상"))
+    future_seal = out / "future-seal.json"
+    future_seal.write_text(json.dumps(dict(sealed, version=99)), encoding="utf-8")
+    check("새 봉투 형식", raises(lambda: SharedFileImporter(future_seal, password="x").read(), "최신"))
+    check("빈 비밀번호는 평문", exchange.seal(pack, "") is pack)
+
     section("잘못된 파일")
     check("경로 미지정", not SharedFileImporter().available())
     check("미지정 사유", "지정" in SharedFileImporter().unavailable_reason())
@@ -163,6 +220,13 @@ def main() -> int:
     r2 = importers.run_import(SharedFileImporter(saved), dry_run=False, background_enrich=False)
     check("같은 파일 재실행 멱등", r2.imported == 0 and store.stats()["memos"] == 4,
           (r2.imported, store.stats()["memos"]))
+    # 같은 메모를 암호화해서 받아도 평문으로 받은 것과 같은 메모로 본다
+    r_locked = importers.run_import(SharedFileImporter(locked, password="동료와비밀"),
+                                    dry_run=False, background_enrich=False)
+    check("암호화본도 중복 안 됨", r_locked.imported == 0 and store.stats()["memos"] == 4,
+          (r_locked.imported, store.stats()["memos"]))
+    r_nopw = importers.run_import(SharedFileImporter(locked), dry_run=True, background_enrich=False)
+    check("비밀번호 없으면 오류로 보고", "비밀번호" in (r_nopw.error or ""), r_nopw.error)
 
     section("돌고 돌아온 내 메모")
     # 받은 쪽이 다시 내보내 원 주인에게 돌려주는 경우. 소스가 달라(shared vs web)

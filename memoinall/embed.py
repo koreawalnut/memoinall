@@ -92,7 +92,13 @@ def status() -> dict:
 
 def on_upgrade(callback) -> None:
     """모델이 교체되면 호출된다(재임베딩 트리거용)."""
-    _on_upgrade.append(callback)
+    if callback not in _on_upgrade:
+        _on_upgrade.append(callback)
+
+
+def off_upgrade(callback) -> None:
+    if callback in _on_upgrade:
+        _on_upgrade.remove(callback)
 
 
 def ensure_loaded_async() -> None:

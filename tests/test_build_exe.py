@@ -68,6 +68,37 @@ class BuildEnvironmentTests(unittest.TestCase):
                 self.assertIsNone(build_exe.project_python())
                 run.assert_not_called()
 
+    def test_build_modes_preserve_the_other_distribution(self):
+        for onedir in (False, True):
+            with self.subTest(onedir=onedir), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                dist, build = root / "dist", root / "build"
+                folder = dist / "memoinall"
+                folder.mkdir(parents=True)
+                (dist / "memoinall.exe").write_bytes(b"old single file")
+                (folder / "memoinall.exe").write_bytes(b"old folder exe")
+                mode = "onedir" if onedir else "onefile"
+                (build / mode).mkdir(parents=True)
+                artifact = folder / "memoinall.exe" if onedir else dist / "memoinall.exe"
+                other = dist / "memoinall.exe" if onedir else folder / "memoinall.exe"
+                preserved = other.read_bytes()
+
+                def compile_app(command, **kwargs):
+                    self.assertEqual(kwargs["env"]["MEMOINALL_BUILD_ONEDIR"], "1" if onedir else "0")
+                    self.assertIn(str(build / mode), command)
+                    self.assertFalse(artifact.exists())
+                    artifact.parent.mkdir(parents=True, exist_ok=True)
+                    artifact.write_bytes(b"new exe")
+                    return SimpleNamespace(returncode=0)
+
+                with patch.object(build_exe, "ROOT", root), patch.object(build_exe, "DIST", dist), \
+                     patch.object(build_exe, "BUILD", build), \
+                     patch.object(build_exe, "missing_packages", return_value=[]), \
+                     patch.object(build_exe, "check", return_value=True), \
+                     patch.object(build_exe.subprocess, "run", side_effect=compile_app):
+                    self.assertEqual(build_exe.main(["--onedir"] if onedir else []), 0)
+                self.assertEqual(other.read_bytes(), preserved)
+
 
 if __name__ == "__main__":
     unittest.main()

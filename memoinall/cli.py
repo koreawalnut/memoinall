@@ -11,7 +11,9 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
+import os
 import sys
 
 from . import (
@@ -293,12 +295,17 @@ def cmd_export(args) -> int:
         return 1
 
     pack = exchange.build(rows, note=args.note or "")
+    password = "" if args.plain else _ask_password(confirm=True)
+    if password is None:
+        return 1
     if args.stdout:
-        print(exchange.dumps(pack))
+        print(exchange.dumps(exchange.seal(pack, password)))
         return 0
 
-    saved = exchange.save(pack, args.out or exchange.export_dir())
-    print(f"메모 {pack['count']}건을 내보냈습니다.")
+    saved = exchange.save(pack, args.out or exchange.export_dir(), password=password)
+    print(f"메모 {pack['count']}건을 {'암호화해서 ' if password else '평문으로 '}내보냈습니다.")
+    if password:
+        print("  비밀번호는 파일과 다른 경로(전화·별도 메시지)로 알려주세요.")
     # 남에게 건네는 파일이다. 검색어로 고르면 느슨하게 걸리는 것까지 딸려오므로
     # 무엇이 들어갔는지 눈으로 확인할 수 있어야 한다.
     for m in pack["memos"][:10]:
@@ -309,6 +316,39 @@ def cmd_export(args) -> int:
     print("  받는 쪽에서:  python -m memoinall import --source shared "
           f"--shared-file \"{saved}\" --commit")
     return 0
+
+
+def _ask_password(*, confirm: bool) -> str | None:
+    """비밀번호를 받는다. 명령줄 인자로 받으면 셸 기록에 남으므로 묻거나 환경변수로만.
+
+    MEMOINALL_PASSWORD 가 있으면 그것을 쓴다(자동화용). 물을 수 없으면 None.
+    """
+    env = os.environ.get("MEMOINALL_PASSWORD")
+    if env:
+        return env
+    if not sys.stdin.isatty():
+        print("비밀번호를 물을 수 없습니다 — MEMOINALL_PASSWORD 환경변수로 주거나, "
+              "암호화 없이 내보내려면 --plain 을 붙이세요.", file=sys.stderr)
+        return None
+    password = getpass.getpass("비밀번호: ")
+    if not password:
+        print("비밀번호가 비었습니다. 암호화 없이 내보내려면 --plain 을 붙이세요.", file=sys.stderr)
+        return None
+    if confirm and getpass.getpass("비밀번호 확인: ") != password:
+        print("두 비밀번호가 다릅니다.", file=sys.stderr)
+        return None
+    return password
+
+
+def _shared_password(path: str | None) -> str | None:
+    """받은 파일이 암호화돼 있을 때만 비밀번호를 묻는다. 평문이면 빈 문자열."""
+    if not path:
+        return ""
+    try:
+        sealed = exchange.sealed_text(exchange.read_text(path))
+    except exchange.ExchangeError:
+        return ""  # 파일 문제는 임포터가 알맞은 문장으로 알려준다
+    return _ask_password(confirm=False) if sealed else ""
 
 
 def _reset_source(args) -> int:
@@ -348,9 +388,16 @@ def cmd_import(args) -> int:
     if args.reset:
         return _reset_source(args)
 
+    shared_password = (
+        _shared_password(args.shared_file) if args.source in ("all", "shared") else ""
+    )
+    if shared_password is None:
+        return 1
+
     opts = {
         "files_path": args.path,
         "shared_path": args.shared_file,
+        "shared_password": shared_password,
         "redmine_kinds": args.redmine_kinds,
         "redmine_projects": args.redmine_projects,
         "redmine_limit": args.redmine_limit,
@@ -543,6 +590,8 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--limit", type=int, default=10000, help="최대 건수")
     e.add_argument("--note", help="받는 사람에게 남길 한 줄")
     e.add_argument("--stdout", action="store_true", help="파일 대신 화면으로 (파이프용)")
+    e.add_argument("--plain", action="store_true",
+                   help="암호화하지 않고 평문으로 (기본은 비밀번호를 물어 암호화)")
     e.set_defaults(fn=cmd_export)
 
     i = sub.add_parser("import", help="외부 메모 앱·받은 파일에서 가져오기")

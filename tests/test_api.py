@@ -303,6 +303,29 @@ def main() -> int:
         check("깨진 파일 400", c.post("/api/import/shared/describe",
               json={"path": str(junk)}).status_code == 400)
 
+        # 암호화 내보내기 → 비밀번호 없이 확인 → 틀린 비밀번호 → 맞는 비밀번호로 가져오기
+        lx = c.post("/api/export", json={"path": str(out / "locked.json"), "note": "기밀",
+                                         "password": "pw-1234"}).json()
+        locked_text = Path(lx["path"]).read_text(encoding="utf-8")
+        check("암호화 내보내기", lx["encrypted"] is True
+              and _json.loads(locked_text)["format"] == "memoinall/sealed", lx)
+        check("암호문에 전할 말 없음", "기밀" not in locked_text)
+        check("평문 내보내기는 encrypted=False", ex.get("encrypted") is False, ex)
+        ld = c.post("/api/import/shared/describe", json={"path": lx["path"]}).json()
+        check("비밀번호 필요 알림", ld["needs_password"] is True and ld["count"] is None, ld)
+        check("틀린 비밀번호 400", c.post("/api/import/shared/describe",
+              json={"path": lx["path"], "password": "nope"}).status_code == 400)
+        ld = c.post("/api/import/shared/describe",
+                    json={"content": locked_text, "password": "pw-1234"}).json()
+        check("맞는 비밀번호로 겉면", ld["count"] == total_now and ld["note"] == "기밀", ld)
+        lr = c.post("/api/import/preview", json={"source": "shared", "shared_path": lx["path"]}).json()
+        check("비밀번호 없이 미리보기는 오류 보고", "비밀번호" in lr["results"][0]["error"], lr["results"][0])
+        lr = c.post("/api/import/preview", json={"source": "shared", "shared_path": lx["path"],
+                                                 "shared_password": "pw-1234"}).json()
+        check("비밀번호로 미리보기", lr["results"][0]["skipped_duplicate"] == total_now, lr["results"][0])
+        lc = c.post("/api/export/content", json={"limit": 1, "password": "pw-1234"}).json()
+        check("복사용 내용도 암호화", lc["encrypted"] and _json.loads(lc["content"])["format"] == "memoinall/sealed")
+
         # 자기 메모를 자기가 다시 받으면 전부 '같은 내용'으로 걸러져야 한다
         back = c.post("/api/import/run", json={"source": "shared", "shared_path": ex["path"]}).json()
         res = back["results"][0]

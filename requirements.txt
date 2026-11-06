@@ -2,6 +2,7 @@
 fastapi>=0.110
 uvicorn[standard]>=0.27
 numpy>=1.24
+cryptography>=42   # 동료와 주고받는 메모 파일 암호화
 -r requirements-documents.txt
 
 # 선택: 의미(시맨틱) 검색 품질용 로컬 임베딩 모델.

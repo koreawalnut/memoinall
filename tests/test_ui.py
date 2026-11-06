@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from fastapi.testclient import TestClient  # noqa: E402
 from playwright.sync_api import expect, sync_playwright  # noqa: E402
 
-from memoinall import store  # noqa: E402
+from memoinall import exchange, store  # noqa: E402
 from memoinall.api import app  # noqa: E402
 from document_fixtures import pdf_bytes, xlsx_bytes  # noqa: E402
 
@@ -173,6 +173,41 @@ def main():
         page.locator('[data-exchange-tab="share"]').click()
         expect(page.locator("#sharedFileStatus")).to_contain_text("handoff.json")
         print("OK import and sharing show separate tools; batch scope excludes hidden received file")
+
+        # 암호화된 파일: 고르면 비밀번호를 기다리고, 틀리면 알려주고, 맞으면 미리보기로 간다.
+        locked = exchange.seal({"format": "memoinall/memos", "version": 1, "count": 1, "memos": [
+            {"body": "암호화로 받은 인수인계 메모 #공유", "created_at": "2026-04-02T09:00:00"}]}, "같이쓰는암호")
+        page.locator("#sharedFile").set_input_files({
+            "name": "locked.json", "mimeType": "application/json",
+            "buffer": json.dumps(locked).encode("utf-8"),
+        })
+        expect(page.locator("#sharedFileStatus")).to_contain_text("암호화된 파일입니다")
+        expect(page.locator("#impSharedPw")).to_be_focused()
+        page.locator("#impSharedPw").fill("틀린암호")
+        page.locator("#impSharedPw").press("Enter")
+        expect(page.locator("#sharedFileStatus")).to_contain_text("비밀번호가 맞지 않")
+        page.locator("#impSharedPw").fill("같이쓰는암호")
+        page.locator("#impSharedPw").press("Enter")
+        expect(page.locator("#impOut-shared")).to_contain_text("아직 저장 안 함")
+        page.locator('[data-src-run="shared"]').click()
+        expect(page.locator("#impOut-shared")).to_contain_text("가져오기 완료")
+        assert store.count_by_source("shared")["memos"] == 2
+        print("OK encrypted shared file asks for password and imports")
+
+        # 내보내기 비밀번호가 서로 다르면 아무것도 만들지 않는다.
+        page.locator("#expPw").fill("하나")
+        page.locator("#expPw2").fill("둘")
+        page.locator("#expSave").click()
+        expect(page.locator("#expOut")).to_contain_text("두 비밀번호가 다릅니다")
+        # 비워두고 내보내려 하면 평문 경고를 띄우고, 취소하면 멈춘다.
+        page.locator("#expPw").fill("")
+        page.locator("#expPw2").fill("")
+        warned = []
+        page.once("dialog", lambda dialog: (warned.append(dialog.message), dialog.dismiss()))
+        page.locator("#expSave").click()
+        page.wait_for_timeout(200)
+        assert warned and "암호화하지 않고" in warned[0], warned
+        print("OK export password must match; plain export needs confirmation")
 
         page.locator('[data-exchange-tab="import"]').click()
         before_document = store.stats()["memos"]

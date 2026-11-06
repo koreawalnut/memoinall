@@ -44,15 +44,63 @@ def _single_instance_lock(home: Path):
         return None
 
 
-def _wait_until_up(port: int, timeout: float = 30.0) -> bool:
+def _wait_until_up(port: int, timeout: float = 30.0, *, closed=None, failed=None) -> bool:
+    import json
+    from urllib.request import ProxyHandler, build_opener
+
+    # 포트만 열고 즉시 끊는 탐침 대신 실제 HTTP 응답을 확인한다.
+    # 로컬 서버 요청이 회사 프록시로 우회하지 않게 한다.
+    opener = build_opener(ProxyHandler({}))
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        if (closed and closed.is_set()) or (failed and failed.is_set()):
+            return False
         try:
-            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
-                return True
-        except OSError:
+            remaining = max(0.01, deadline - time.monotonic())
+            with opener.open(f"http://127.0.0.1:{port}/api/health", timeout=min(1.0, remaining)) as response:
+                if response.status == 200 and json.loads(response.read(1024)) == {"status": "ok"}:
+                    return True
+        except (OSError, ValueError):
+            pass
+        if closed:
+            closed.wait(0.1)
+        else:
             time.sleep(0.1)
     return False
+
+
+def _startup_html(message: str = "메모장을 여는 중…") -> str:
+    from html import escape
+
+    return f"""<!doctype html><html lang="ko"><meta charset="utf-8">
+<title>memoinall</title><style>
+body {{ margin:0; background:#10151d; color:#e6eaf0; font:16px 'Segoe UI',sans-serif;
+display:grid; place-items:center; height:100vh; }}
+main {{ max-width:640px; padding:32px; }} h1 {{ font-size:26px; }}
+p {{ color:#aeb9c8; white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.7; }}
+</style><main><h1>memoinall</h1><p role="status">{escape(message)}</p></main></html>"""
+
+
+def _open_when_ready(window, port: int, closed, failed) -> None:
+    from . import config
+
+    started = time.monotonic()
+    ready = _wait_until_up(port, closed=closed, failed=failed)
+    if closed.is_set():
+        return
+    try:
+        if ready:
+            log.info("메모 화면 연결 (%.3fs)", time.monotonic() - started)
+            window.load_url(f"http://127.0.0.1:{port}/")
+        else:
+            log.error("서버가 뜨지 않았습니다.")
+            window.load_html(_startup_html(
+                "메모장을 열지 못했습니다. 창을 닫고 다시 실행해 주세요.\n"
+                "문제가 계속되면 다음 로그를 확인해 주세요.\n" + str(config.HOME / "desktop.log")
+            ))
+    except Exception:
+        if not closed.is_set():
+            log.exception("메모 화면 연결 실패")
 
 
 def run() -> int:
@@ -79,13 +127,10 @@ def run() -> int:
     port = free_port()
     log.info("내부 서버 포트: %s", port)
 
-    server = threading.Thread(target=_serve, args=(port,), daemon=True)
+    closed = threading.Event()
+    failed = threading.Event()
+    server = threading.Thread(target=_serve, args=(port, failed), daemon=True)
     server.start()
-
-    if not _wait_until_up(port):
-        log.error("서버가 뜨지 않았습니다.")
-        _notify("서버를 시작하지 못했습니다.\n로그: " + str(config.HOME / "desktop.log"))
-        return 1
 
     # 창이 안 뜨는 원인은 대개 GUI 백엔드 로딩 실패인데, 그게 어느 단계에서
     # 터지는지 로그가 없으면 알 수가 없다. 단계마다 남긴다.
@@ -105,21 +150,26 @@ def run() -> int:
         log.info("create_window…")
         window = webview.create_window(
             TITLE,
-            f"http://127.0.0.1:{port}/",
+            html=_startup_html(),
             width=1180,
             height=820,
             min_size=(900, 600),
             text_select=True,
         )
         log.info("create_window OK")
+        window.events.closed += closed.set
         _install_downloader(window)
         log.info("webview.start() 진입 — 창이 닫힐 때까지 블로킹")
-        webview.start()
+        # GUI 는 메인 스레드에서 바로 시작하고, 서버 확인만 별도 스레드에서 한다.
+        webview.start(_open_when_ready, (window, port, closed, failed))
         log.info("webview.start() 반환")
     except Exception:
         log.exception("창을 띄우지 못했습니다")
         _notify("창을 띄우지 못했습니다.\n로그: " + str(config.HOME / "desktop.log"))
         return 1
+    finally:
+        closed.set()
+        lock.close()
     log.info("=== 종료 ===")
     return 0
 
@@ -155,8 +205,9 @@ def _log_webview_assets(webview) -> None:
         log.info("  %-58s %s", rel, "있음" if p.exists() else "없음")
 
 
-def _serve(port: int) -> None:
+def _serve(port: int, failed=None) -> None:
     try:
+        import asyncio
         import uvicorn
 
         from .api import app
@@ -164,9 +215,28 @@ def _serve(port: int) -> None:
         _ensure_streams()
         # log_config=None: uvicorn 이 콘솔 핸들러를 새로 붙이지 않게 한다.
         # 우리 쪽 파일 로깅만 쓰면 충분하다.
-        uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning", log_config=None)
+        server = uvicorn.Server(uvicorn.Config(
+            app, host="127.0.0.1", port=port, log_level="warning", log_config=None,
+        ))
+        if sys.platform == "win32":
+            # 로컬 HTTP 전용 서버: Windows Proactor accept의 WinError 64 경로를 피한다.
+            # 정책을 전역으로 바꾸지 않고 서버 스레드의 이벤트 루프만 선택한다.
+            loop = asyncio.SelectorEventLoop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(server.serve())
+            finally:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+                loop.run_until_complete(loop.shutdown_default_executor())
+                loop.close()
+                asyncio.set_event_loop(None)
+        else:
+            server.run()
     except Exception:
         log.exception("내부 서버가 죽었습니다")
+    finally:
+        if failed:
+            failed.set()
 
 
 def _install_downloader(window) -> None:

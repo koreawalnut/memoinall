@@ -20,11 +20,12 @@ class SharedFileImporter:
     # run_import 가 내용 기준 중복까지 걸러준다
     dedupe_content = True
 
-    def __init__(self, path: str | Path = "", content: str = ""):
+    def __init__(self, path: str | Path = "", content: str = "", password: str = ""):
         self.raw = str(path or "").strip()
         # 빈 경로를 Path 로 만들면 '.' 이 된다 — 미지정과 '현재 폴더'는 달라야 한다.
         self.path = Path(self.raw).expanduser() if self.raw else None
         self.content = content or ""
+        self.password = password or ""
 
     def available(self) -> bool:
         if self.content.strip():
@@ -43,11 +44,7 @@ class SharedFileImporter:
 
         if not self.available():
             raise ValueError(self.unavailable_reason())
-        data = (
-            exchange.parse(self.content)
-            if self.content.strip()
-            else exchange.read_file(self.path)
-        )
+        data = exchange.parse(self._text(), self.password)
 
         notes: list[Note] = []
         for item in data.get("memos") or []:
@@ -73,20 +70,33 @@ class SharedFileImporter:
         return notes
 
     def describe(self) -> dict:
-        """넣기 전에 '누가 언제 몇 건 보냈는지'만 훑어본다."""
+        """넣기 전에 '누가 언제 몇 건 보냈는지'만 훑어본다.
+
+        암호화된 파일인데 비밀번호가 없으면 실패 대신 그렇다고 알려준다 —
+        화면이 비밀번호 칸을 띄울 수 있어야 한다. 틀린 비밀번호는 오류다.
+        """
         from .. import exchange
 
-        data = (
-            exchange.parse(self.content)
-            if self.content.strip()
-            else exchange.read_file(self.path)
-        )
+        text = self._text()
+        encrypted = exchange.sealed_text(text)
+        try:
+            data = exchange.parse(text, self.password)
+        except exchange.PasswordRequired:
+            return {"encrypted": True, "needs_password": True, "count": None,
+                    "exported_at": "", "note": "", "version": None}
         return {
+            "encrypted": encrypted,
+            "needs_password": False,
             "count": len(data.get("memos") or []),
             "exported_at": _text(data.get("exported_at")),
             "note": _text(data.get("note")),
             "version": data.get("version"),
         }
+
+    def _text(self) -> str:
+        from .. import exchange
+
+        return self.content if self.content.strip() else exchange.read_text(self.path)
 
 
 def _text(value) -> str:
