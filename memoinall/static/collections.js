@@ -259,9 +259,33 @@ function colFileHTML(f, i) {
     ${f.selected ? sheets.map((s) => colSheetHTML(s, sheets.length > 1)).join("") : ""}</div>`;
 }
 
+// 같은 이름의 시트를 파일마다 따로 체크하지 않도록 이름별로 묶는다. 취합에 포함한 파일의 시트만 센다.
+function colSheetGroups() {
+  const groups = new Map();
+  for (const f of col.preview.files) {
+    if (f.status !== "read" || !f.selected) continue;
+    for (const s of f.sheets) {
+      if (s.hidden || s.empty) continue;
+      const g = groups.get(s.name) || { name: s.name, keys: [], on: 0 };
+      g.keys.push(s.key); g.on += s.selected ? 1 : 0;
+      groups.set(s.name, g);
+    }
+  }
+  return [...groups.values()];
+}
+function colSheetGroupsHTML(groups) {
+  const multi = col.preview.files.some((f) => f.status === "read" && f.selected && f.sheets.filter((s) => !s.hidden && !s.empty).length > 1);
+  if (!multi) return "";
+  return `<div class="col-groups"><b>시트 이름으로 한 번에 선택</b>
+    <div class="note">파일마다 시트가 여러 개일 때, 같은 이름의 시트를 모든 파일에서 한 번에 넣거나 뺍니다. 파일별로 바꾸려면 아래 목록에서 고르세요.</div>
+    <div class="row" style="margin:8px 0 0">${groups.map((g, i) => `<label class="col-check col-group"><input type="checkbox" data-col-group="${i}" data-focus="group:${i}" ${g.on === g.keys.length ? "checked" : ""} />
+      ‘${esc(g.name)}’ <span class="meta">${g.on}/${g.keys.length}개 파일</span></label>`).join("")}</div></div>`;
+}
+
 function paintCollectReview(keep = false) {
   const p = col.preview;
   if (!p) return;
+  col.groups = colSheetGroups();
   const y = window.scrollY, focus = document.activeElement?.dataset?.focus;
   const s = p.summary;
   const visible = p.files.map((f, i) => [f, i]).filter(([f]) => !col.issuesOnly || colFileIssues(f) || f.status !== "read");
@@ -271,6 +295,7 @@ function paintCollectReview(keep = false) {
       <div class="col-summary"><b>${s.files}개 파일 · ${colNum(s.rows)}행</b>${s.blocking ? ` · <span class="col-warn-text">확인 필요 ${s.blocking}개</span>` : ""}${s.failed ? ` · 읽지 못한 파일 ${s.failed}개` : ""}${s.excluded ? ` · 제외 ${s.excluded}개` : ""}</div>
       ${col.target ? `<div class="note">‘${esc(col.target.title)}’의 새 버전으로 저장합니다. 이전 버전과 그 AI 결과는 그대로 남습니다.</div>` : ""}
       ${col.notices.map((n) => `<div class="note">${esc(n)}</div>`).join("")}
+      ${colSheetGroupsHTML(col.groups)}
       <label class="col-check" style="margin:10px 0"><input type="checkbox" id="colIssuesOnly" data-focus="issuesOnly" ${col.issuesOnly ? "checked" : ""} /> 확인 필요만 보기</label>
       <div id="colFileList">${visible.map(([f, i]) => colFileHTML(f, i)).join("") || '<div class="status">선택한 파일 중 확인이 필요한 항목이 없습니다.</div>'}
         ${p.skipped.map((x) => `<div class="col-file"><div class="row" style="margin:0"><b>${esc(x.path)}</b><span class="spacer"></span><span class="badge col-badge-warn">읽지 않음</span></div><div class="note">${esc(x.reason)} · 결과의 확인 사항에 남습니다.</div></div>`).join("")}</div>
@@ -310,6 +335,11 @@ function bindCollectReview() {
   $("#colIssuesOnly").onchange = (e) => { col.issuesOnly = e.target.checked; paintCollectReview(true); };
   document.querySelectorAll("[data-col-file]").forEach((c) => {
     c.onchange = () => colUpdate(() => { col.rules.files[p.files[+c.dataset.colFile].path] = { selected: c.checked }; });
+  });
+  document.querySelectorAll("[data-col-group]").forEach((c) => {
+    const g = col.groups[+c.dataset.colGroup];
+    c.indeterminate = g.on > 0 && g.on < g.keys.length;
+    c.onchange = () => colUpdate(() => { g.keys.forEach((key) => { colSheetRule(key).selected = c.checked; }); });
   });
   document.querySelectorAll("[data-col-sheet]").forEach((c) => {
     c.onchange = () => colUpdate(() => { colSheetRule(c.dataset.colSheet).selected = c.checked; });
