@@ -55,7 +55,8 @@ def _text(value, label, maximum, *, required=False):
     if value is None and not required:
         return ""
     if not isinstance(value, str) or len(value) > maximum or (required and not value.strip()):
-        raise ValueError(f"{label}을(를) {maximum:,}자 이내로 입력하세요.")
+        size = f"1~{maximum:,}자" if required else f"{maximum:,}자 이내"
+        raise ValueError(f"{label}은 {size}로 입력하세요.")
     return value.strip()
 
 

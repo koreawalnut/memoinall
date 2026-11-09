@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>엑셀 폴더 취합 · 화면 시안</title>
+  <style>
+    :root { color-scheme: light; font-family: "Segoe UI", "Malgun Gothic", sans-serif; color: #25314a; background: #f4f6fa; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-size: 14px; line-height: 1.6; }
+    header { padding: 14px 28px; background: white; border-bottom: 1px solid #dee4ee; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+    header strong { font-size: 18px; }
+    header span { color: #626d82; font-size: 13px; }
+    main { max-width: 980px; margin: 30px auto; padding: 0 22px 48px; }
+    .notice { padding: 10px 14px; background: #eaf0fc; color: #3c527a; border-radius: 8px; margin-bottom: 22px; }
+    .path, .muted { color: #6b7589; }
+    h1 { margin: 8px 0; font-size: 27px; letter-spacing: -1px; }
+    h2 { margin: 0 0 8px; font-size: 19px; }
+    p { margin: 8px 0 16px; }
+    button, input, textarea { font: inherit; }
+    button { cursor: pointer; background: white; color: #344360; border: 1px solid #c9d2e2; border-radius: 7px; padding: 8px 15px; }
+    button:hover { background: #f0f4fd; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 3px solid #6b97f7; outline-offset: 3px; }
+    button.primary { background: #3465cb; border-color: #3465cb; color: white; }
+    button.primary:hover { background: #2a54ac; }
+    button:disabled { background: #eef0f5; color: #929bab; border-color: #dfe4ec; cursor: default; }
+    button.small { font-size: 12px; padding: 5px 9px; }
+    .steps { display: flex; list-style: none; padding: 0; margin: 24px 0; gap: 28px; color: #7d8799; }
+    .steps li { padding-bottom: 8px; border-bottom: 2px solid transparent; }
+    .steps [aria-current="step"] { color: #2458bf; border-color: #3465cb; font-weight: 600; }
+    .panel { padding: 24px; background: white; border: 1px solid #dce2ec; border-radius: 12px; margin-bottom: 16px; }
+    .pick { text-align: center; padding: 42px 24px; }
+    .folder { font-size: 36px; color: #416abd; margin-bottom: 10px; }
+    .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .spread { justify-content: space-between; }
+    .badge { font-size: 12px; background: #edf3ef; color: #37644c; border-radius: 5px; padding: 3px 8px; white-space: nowrap; }
+    .badge.warn { background: #fff1dc; color: #805419; }
+    .warning { background: #fff7e8; color: #78531c; border-radius: 7px; padding: 12px 14px; margin-top: 14px; }
+    .file { border-bottom: 1px solid #edf0f6; padding: 16px 0; }
+    .file:last-child { border-bottom: 0; }
+    .file label { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+    input[type="checkbox"] { accent-color: #3465cb; width: 16px; height: 16px; }
+    .file .muted { margin-left: 30px; font-size: 12px; }
+    .mapping { margin: 12px 0 0 30px; border: 1px solid #ecd4a8; background: #fffbf3; border-radius: 8px; padding: 14px; }
+    .mapping p { margin: 0 0 8px; }
+    .actions { margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+    .scroll { max-width: 100%; overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; text-align: left; font-size: 13px; }
+    th, td { border-bottom: 1px solid #e7ecf3; padding: 9px 10px; white-space: nowrap; }
+    th { background: #f7f9fc; color: #56647e; font-weight: 500; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    details { margin: 16px 0 0; }
+    summary { cursor: pointer; color: #4f607b; }
+    details p { margin: 8px 0; }
+    .metric { margin: 18px 0; font-size: 15px; }
+    .metric strong { font-size: 28px; color: #233e70; }
+    .report { border-left: 3px solid #6d8bc6; background: #f6f8fd; padding: 16px 20px; margin-top: 18px; }
+    .report p:last-child { margin-bottom: 0; }
+    .toast { padding: 12px 14px; background: #eef3fb; border-radius: 7px; margin-top: 14px; }
+    a { color: #3563b6; }
+    [hidden] { display: none !important; }
+    @media (max-width: 600px) {
+      main { margin-top: 18px; padding: 0 12px 32px; }
+      header { padding: 12px 16px; gap: 6px 16px; }
+      .panel { padding: 18px 14px; }
+      h1 { font-size: 24px; }
+      .steps { gap: 16px; font-size: 13px; }
+      .mapping { margin-left: 0; }
+      .actions button { flex: 1; }
+    }
+  </style>
+</head>
+<body>
+  <header><strong>memoinall</strong><span>메모 · AI로 정리 · 가져오기·공유</span></header>
+  <main>
+    <div class="notice">설계 미리보기 · 예시 데이터입니다. 실제 파일 읽기, 저장, AI 호출은 하지 않습니다.</div>
+    <div class="path">가져오기·공유 / 문서 가져오기</div>
+    <h1>엑셀 폴더 취합</h1>
+    <p class="muted">같은 항목을 가진 엑셀을 한 표로 모으고, AI로 정리할 수 있어요.</p>
+    <ol class="steps" aria-label="진행 단계">
+      <li id="stepLabel1" aria-current="step">1. 폴더 선택</li>
+      <li id="stepLabel2">2. 취합 확인</li>
+      <li id="stepLabel3">3. 결과 활용</li>
+    </ol>
+
+    <section id="step1" class="panel pick" aria-labelledby="pickTitle">
+      <div class="folder" aria-hidden="true">▤</div>
+      <h2 id="pickTitle">부서에서 받은 파일을 한곳에 모아 주세요</h2>
+      <p class="muted">열 순서가 달라도 괜찮아요. 항목 이름이 다르면 연결할 수 있어요.</p>
+      <button class="primary" id="pickFolder">예시 폴더 선택</button>
+      <p class="muted" style="font-size:12px;margin-top:14px">예시: 11월 신청 내역 / 파일 3개</p>
+    </section>
+
+    <section id="step2" class="panel" hidden aria-labelledby="reviewTitle">
+      <div class="row spread">
+        <div><h2 id="reviewTitle">11월 신청 내역</h2><span class="muted">3개 파일 · 8행 발견</span></div>
+        <label class="row"><input type="checkbox" id="issuesOnly"> 확인 필요만 보기</label>
+      </div>
+      <div id="files"></div>
+      <p id="noIssues" class="muted" hidden>선택한 파일 중 확인이 필요한 항목이 없습니다.</p>
+      <div id="reviewHint" class="warning" role="status"></div>
+      <details><summary>취합 기준</summary><p class="muted">각 파일의 ‘신청내역’ 시트 · 1행을 항목 이름으로 사용 · 숨김 시트 제외 · 숨긴 행 포함</p></details>
+      <div class="actions"><button id="back">이전</button><button class="primary" id="commit" disabled>취합하기</button></div>
+    </section>
+
+    <section id="step3" hidden aria-labelledby="resultTitle">
+      <div class="panel">
+        <div class="row spread"><h2 id="resultTitle">11월 신청 내역</h2><span class="badge" id="resultBadge"></span></div>
+        <p class="muted" id="resultScope"></p>
+        <div class="row"><button class="primary" id="openAi">이 자료를 AI로 정리</button><button id="export">엑셀로 저장</button></div>
+        <div id="exportInfo" class="toast" role="status" hidden>개발 시 ‘취합표 · 집계 · 확인 사항 · 출처’ 시트를 담은 엑셀로 저장합니다. 시안에서는 파일을 만들지 않습니다.</div>
+        <div id="partial" class="warning" hidden></div>
+        <div style="margin-top:22px" class="scroll"><table aria-label="취합된 신청 내역"><thead><tr><th>부서</th><th>성명</th><th class="num">신청금액(원)</th><th>처리상태</th><th>출처</th></tr></thead><tbody id="resultRows"></tbody></table></div>
+        <div id="sourceInfo" class="toast" role="status" hidden></div>
+        <details><summary>부서별 신청금액 합계</summary><div id="groups" class="scroll"></div></details>
+        <details><summary>더 보기</summary><p class="muted">개발 시 같은 폴더로 다시 취합하거나 취합 방법을 저장할 수 있습니다.</p><button id="restart">시안 처음부터 보기</button></details>
+      </div>
+      <div id="aiPanel" class="panel" hidden>
+        <h2>AI로 정리</h2>
+        <p id="aiScope" class="muted"></p>
+        <div class="row"><button data-prompt="summary">현황 요약</button><button data-prompt="issues">확인할 내용 찾기</button><button data-prompt="report">보고서 초안</button></div>
+        <div class="report" id="report" aria-live="polite"></div>
+        <p class="muted" style="font-size:12px;margin-top:14px">위 글은 예시 집계로 만든 시안 문구입니다. 실제 기능에서는 기존 AI 정리 화면의 요청·편집·메모 저장을 사용합니다.</p>
+      </div>
+    </section>
+    <p class="muted" style="font-size:12px"><a href="excel-folder-collection-design.md">상세 설계안</a> · 표를 하나로 보관하며 행마다 메모를 만들지 않습니다.</p>
+  </main>
+  <script>
+    "use strict";
+    const $ = (selector) => document.querySelector(selector);
+    const files = [
+      { name: "영업1팀.xlsx", count: 3, selected: true, needsMapping: false },
+      { name: "영업2팀.xlsx", count: 3, selected: true, needsMapping: false },
+      { name: "지원팀.xlsx", count: 2, selected: true, needsMapping: true },
+    ];
+    const rows = [
+      [0, "영업1팀", "김가람", 120000, "처리 완료", 2],
+      [0, "영업1팀", "이나래", 80000, "미처리", 3],
+      [0, "영업1팀", "박다온", 45000, "처리 완료", 4],
+      [1, "영업2팀", "최라온", 90000, "처리 완료", 2],
+      [1, "영업2팀", "정마루", 110000, "미처리", 3],
+      [1, "영업2팀", "한바다", 75000, "처리 완료", 4],
+      [2, "지원팀", "윤새봄", 60000, "미처리", 2],
+      [2, "지원팀", "서아람", 40000, "처리 완료", 3],
+    ];
+    const fmt = (value) => value.toLocaleString("ko-KR");
+    const selected = () => files.filter((file) => file.selected);
+    const includedRows = () => rows.filter((row) => files[row[0]].selected);
+    function go(step) {
+      for (let i = 1; i <= 3; i++) {
+        $("#step" + i).hidden = i !== step;
+        if (i === step) $("#stepLabel" + i).setAttribute("aria-current", "step");
+        else $("#stepLabel" + i).removeAttribute("aria-current");
+      }
+    }
+    function review() {
+      const pending = selected().filter((file) => file.needsMapping);
+      let visible = 0;
+      $("#files").innerHTML = files.map((file, i) => {
+        if ($("#issuesOnly").checked && !(file.selected && file.needsMapping)) return "";
+        visible++;
+        return `<div class="file"><div class="row spread"><label><input type="checkbox" data-file="${i}" ${file.selected ? "checked" : ""}> ${file.name}</label><span class="badge ${file.needsMapping ? "warn" : ""}">${file.needsMapping ? "항목 연결 필요" : "취합 가능"}</span></div>
+          <div class="muted">신청내역 · ${file.count}행</div>
+          ${file.needsMapping && file.selected ? `<div class="mapping"><p><strong>같은 항목인가요?</strong></p><p>이 파일의 ‘요청액(원)’을 ‘신청금액(원)’에 연결합니다.</p><p class="muted" style="margin-left:0">예시 값: 60,000 / 40,000</p><button class="small" data-map="${i}">같은 항목으로 사용</button></div>` : ""}</div>`;
+      }).join("");
+      $("#noIssues").hidden = visible > 0;
+      const count = selected().length;
+      const totalRows = includedRows().length;
+      $("#reviewHint").textContent = pending.length ? `확인 필요 ${pending.length}개 · 항목을 연결하거나 해당 파일의 선택을 해제해 주세요.` : count ? `선택한 ${count}개 파일 · ${totalRows}행을 취합합니다.${count < 3 ? ` 제외한 파일 ${3 - count}개는 결과에 함께 표시됩니다.` : ""}` : "취합할 파일을 선택해 주세요.";
+      $("#commit").disabled = pending.length > 0 || count === 0;
+      $("#commit").textContent = `${count}개 파일 · ${totalRows}행 취합하기`;
+      document.querySelectorAll("[data-file]").forEach((input) => input.onchange = () => { files[Number(input.dataset.file)].selected = input.checked; review(); });
+      document.querySelectorAll("[data-map]").forEach((button) => button.onclick = () => { files[Number(button.dataset.map)].needsMapping = false; review(); });
+    }
+    function report(kind) {
+      const data = includedRows();
+      const total = data.reduce((sum, row) => sum + row[3], 0);
+      const pending = data.filter((row) => row[4] === "미처리");
+      const excluded = files.filter((file) => !file.selected).map((file) => file.name);
+      const scope = excluded.length ? `제외한 파일: ${excluded.join(", ")}. 이 결과는 선택한 파일만을 기준으로 합니다.` : "발견한 3개 파일을 모두 포함했습니다.";
+      const titles = { summary: "현황 요약", issues: "확인할 내용", report: "11월 신청 내역 보고 초안" };
+      const body = kind === "issues" ? `선택한 자료에서 신청금액의 빈칸과 계산 불가 값은 없습니다. 처리상태가 ‘미처리’인 ${pending.length}건은 후속 확인 대상으로 볼 수 있습니다. 실제 처리 지연 여부는 이 자료만으로 알 수 없습니다.` : `선택한 ${selected().length}개 파일의 신청 ${data.length}건을 취합했습니다. 신청금액 합계는 ${fmt(total)}원이며, 이 중 미처리 ${pending.length}건의 금액은 ${fmt(pending.reduce((sum, row) => sum + row[3], 0))}원입니다.`;
+      $("#report").innerHTML = `<strong>${titles[kind]}</strong><p>${body}</p><p>${scope}</p><p class="muted">근거: 예시 취합표의 전체 선택 행 · 신청금액 합계 · 처리상태별 건수</p>`;
+    }
+    function result() {
+      const data = includedRows();
+      const missing = files.filter((file) => !file.selected);
+      $("#resultBadge").textContent = missing.length ? `일부 파일 취합 · 제외 ${missing.length}개` : "전체 파일 취합";
+      $("#resultBadge").className = "badge" + (missing.length ? " warn" : "");
+      $("#resultScope").textContent = `${selected().length}개 파일 · ${data.length}행 · 신청금액 합계 ${fmt(data.reduce((sum, row) => sum + row[3], 0))}원`;
+      $("#partial").hidden = !missing.length;
+      $("#partial").textContent = "사용자가 제외한 파일: " + missing.map((file) => file.name).join(", ");
+      $("#resultRows").innerHTML = data.map((row) => `<tr><td>${row[1]}</td><td>${row[2]}</td><td class="num">${fmt(row[3])}</td><td>${row[4]}</td><td><button class="small" data-source="${rows.indexOf(row)}">출처 보기</button></td></tr>`).join("");
+      document.querySelectorAll("[data-source]").forEach((button) => button.onclick = () => {
+        const row = rows[Number(button.dataset.source)];
+        $("#sourceInfo").hidden = false;
+        $("#sourceInfo").textContent = `원본 위치: ${files[row[0]].name} / 신청내역 / ${row[5]}행 · 저장 당시의 값을 표시합니다.`;
+      });
+      const groups = new Map();
+      data.forEach((row) => { const group = groups.get(row[1]) || { count: 0, sum: 0 }; group.count++; group.sum += row[3]; groups.set(row[1], group); });
+      $("#groups").innerHTML = `<table aria-label="부서별 합계"><thead><tr><th>부서</th><th class="num">신청 건수</th><th class="num">합계(원)</th></tr></thead><tbody>${[...groups].map(([name, group]) => `<tr><td>${name}</td><td class="num">${group.count}</td><td class="num">${fmt(group.sum)}</td></tr>`).join("")}</tbody></table>`;
+      $("#aiScope").textContent = `사용할 자료: 11월 신청 내역 · ${selected().length}개 파일 · ${data.length}행`;
+      ["#aiPanel", "#exportInfo", "#sourceInfo"].forEach((id) => $(id).hidden = true);
+      report("summary");
+      go(3);
+    }
+    $("#pickFolder").onclick = () => { review(); go(2); };
+    $("#back").onclick = () => go(1);
+    $("#issuesOnly").onchange = review;
+    $("#commit").onclick = result;
+    $("#openAi").onclick = () => { $("#aiPanel").hidden = false; $("#aiPanel").scrollIntoView({ behavior: "smooth", block: "start" }); };
+    $("#export").onclick = () => $("#exportInfo").hidden = !$("#exportInfo").hidden;
+    document.querySelectorAll("[data-prompt]").forEach((button) => button.onclick = () => report(button.dataset.prompt));
+    $("#restart").onclick = () => { files.forEach((file, i) => { file.selected = true; file.needsMapping = i === 2; }); $("#issuesOnly").checked = false; go(1); window.scrollTo(0, 0); };
+  </script>
+</body>
+</html>

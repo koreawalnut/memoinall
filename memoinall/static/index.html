@@ -63,6 +63,9 @@
   #workflowDialog #wfTags { width: 100%; }
   #wfTagChoices { max-height: 140px; overflow: auto; }
   #wfDates input, #genDates input { min-width: 0; flex: 1; }
+  @media (max-width: 600px) {
+    #workflowDialog .field { grid-template-columns: 1fr; gap: 4px; }
+  }
   .detail-tag-input { display: flex; gap: 6px; margin-top: 9px; }
   .detail-tag-input input { min-width: 0; flex: 1; background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; }
   #dTagChoices { max-height: 130px; overflow-y: auto; padding: 3px; }
