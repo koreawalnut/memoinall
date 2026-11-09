@@ -276,6 +276,7 @@ def build_pack(
 ) -> dict:
     """생성 직전까지 — 질의 도출, 검색, 프롬프트 조립. LLM 호출은 안 한다."""
     budget_tokens = budget_tokens or settings.get_int("gen.budget_tokens", 6000)
+    required_tags = store.tag_list(tag, tags)
     if memo_ids is not None:
         if not memo_ids:
             raise ValueError("근거로 쓸 메모를 하나 이상 선택하세요.")
@@ -286,6 +287,15 @@ def build_pack(
                 hits.append(store.get_memo(memo_id))
             except KeyError:
                 raise ValueError(f"선택한 메모 M{memo_id}를 찾을 수 없습니다. 다시 선택하세요.")
+        # 선택한 ID도 검색 범위를 우회할 수 없다. 태그가 나중에 바뀐 경우에도
+        # 조용히 일부만 보내지 않고, AI 호출 전에 다시 확인하도록 한다.
+        for hit in hits:
+            facets = hit.get("facets", {})
+            if (not set(required_tags).issubset(facets.get("tag", []))
+                    or (person and person not in facets.get("person", []))
+                    or (since and hit["created_at"] < since)
+                    or (until and hit["created_at"] > (until + "T23:59:59" if len(until) == 10 else until))):
+                raise ValueError("선택한 메모가 찾을 범위와 맞지 않습니다. 메모 고르기를 눌러 다시 확인하세요.")
     else:
         derived = {"queries": queries or [], "topic": "", "method": "manual"}
         if not queries:
@@ -338,6 +348,7 @@ def build_pack(
         "query_method": derived["method"],
         "topic": derived.get("topic", ""),
         "memo_ids": list(dict.fromkeys(memo_ids)) if memo_ids is not None else None,
+        "scope": {"tags": required_tags, "person": person, "since": since, "until": until},
         "budget_tokens": budget_tokens,
         "used_tokens": used,
         "sources": included,
@@ -393,6 +404,9 @@ def generate(instruction: str, **kwargs) -> dict:
     effort = kwargs.pop("effort", None)
     max_tokens = kwargs.pop("max_tokens", None)
     pack = build_pack(instruction, **kwargs)
+
+    if not pack["sources"] and any(pack["scope"].values()):
+        return {**pack, "output": None, "reason": "선택한 범위에서 참고할 메모를 찾지 못했습니다. 태그나 검색 조건을 바꿔 주세요."}
 
     if not pack["sources"] and not instruction.strip():
         return {**pack, "output": None, "reason": "지시사항이 비어 있습니다."}

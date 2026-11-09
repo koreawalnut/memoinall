@@ -8,7 +8,7 @@ from . import db, store
 
 MAX_BODY = 200_000
 PACK_KEYS = ("instruction", "format", "queries", "query_method", "budget_tokens", "used_tokens",
-             "sources", "dropped", "prompt", "provider", "memo_ids")
+             "sources", "dropped", "prompt", "provider", "memo_ids", "scope")
 
 
 class Conflict(ValueError):

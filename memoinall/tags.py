@@ -61,6 +61,14 @@ def all_tags(*, with_counts: bool = True) -> list[dict]:
     ]
 
 
+def filter_choices() -> list[dict]:
+    """등록 여부와 관계없이 범위 선택에 쓸 수 있는 태그 전부."""
+    choices = {tag["name"]: tag for tag in all_tags()}
+    for name, count in _usage().items():
+        choices.setdefault(name, {"name": name, "count": count, "color": "slate", "note": ""})
+    return list(choices.values())
+
+
 def names() -> list[str]:
     return [r["name"] for r in db.query("SELECT name FROM tag_defs ORDER BY sort, name")]
 

@@ -2,7 +2,8 @@
 const gen = { instruction: "", format: "auto", budget: 6000, queries: null, plan: null, output: null,
   busy: false, memoIds: null, scope: null, review: null, showSources: false, initialized: false,
   editing: false, body: "", savedDraft: "", draftSaving: false, draftTask: Promise.resolve(), draftTimer: null,
-  error: "", followup: "", historyOffset: 0, historyQuery: "", finderVersion: 0, oldVersion: null };
+  error: "", followup: "", historyOffset: 0, historyQuery: "", finderVersion: 0, oldVersion: null,
+  tagChoices: [] };
 
 async function startGenerate(ids, instruction) {
   if (gen.busy) { toast("진행 중인 정리가 끝난 뒤 다시 선택하세요"); return; }
@@ -16,24 +17,63 @@ async function startGenerate(ids, instruction) {
 
 function genScopeLabel() {
   const count = gen.review ? gen.review.selected.size : gen.memoIds?.length;
-  if (count !== undefined) return `직접 선택한 메모 ${count}건만 사용`;
   const s = gen.scope;
-  if (!s) return "전체 메모에서 필요한 내용을 찾습니다";
-  return "찾을 범위: " + [...s.tags.map((t) => "#" + t), s.person ? "@" + s.person : "",
-    s.since ? s.since + "부터" : "", s.until ? s.until + "까지" : ""].filter(Boolean).join(" · ");
+  const filters = s ? [...(s.tags || []).map((t) => "#" + t), s.person ? "@" + s.person : "",
+    s.since ? s.since + "부터" : "", s.until ? s.until + "까지" : ""].filter(Boolean) : [];
+  return [filters.length ? "찾을 범위: " + filters.join(" · ") : "",
+    count !== undefined ? `선택한 메모 ${count}건만 사용` : ""].filter(Boolean).join(" — ") || "전체 메모에서 필요한 내용을 찾습니다";
+}
+
+function changeGenScope(scope) {
+  if (gen.busy) return;
+  gen.scope = scope; gen.memoIds = gen.review = null;
+  ++gen.finderVersion;
+  invalidatePlan(true); renderPlanPanel(); paintGenTags(); setGenBusy(false);
+  genProgress("범위를 바꿨습니다. 메모 고르기로 대상을 확인하거나 바로 정리할 수 있습니다.");
+}
+
+function paintGenTags() {
+  const host = $("#genTagChoices");
+  if (!host) return;
+  const focused = document.activeElement?.dataset.genTag;
+  const selected = gen.scope?.tags || [], query = ($("#genTagSearch").value || "").trim().replace(/^#/, "").toLowerCase();
+  $("#genTagCount").textContent = selected.length ? `${selected.length}개 선택` : "선택 안 함";
+  $("#genTagClear").hidden = !selected.length;
+  $("#genTagClear").disabled = gen.busy;
+  $("#genSelectedTags").innerHTML = selected.map((name) => `<button type="button" class="tagchip on t-slate" data-gen-remove-tag="${esc(name)}" aria-label="#${esc(name)} 조건 해제" ${gen.busy ? "disabled" : ""}>#${esc(name)} ×</button>`).join("");
+  const choices = gen.tagChoices.filter((t) => t.name.toLowerCase().includes(query));
+  host.innerHTML = choices.slice(0, 40).map((t) => tagChip(t, selected.includes(t.name),
+    `data-gen-tag="${esc(t.name)}" aria-pressed="${selected.includes(t.name)}" ${gen.busy ? "disabled" : ""}`)).join("") ||
+    `<span class="status">${gen.tagChoices.length ? "일치하는 태그가 없습니다." : "아직 메모에 사용한 태그가 없습니다."}</span>`;
+  $("#genTagMore").textContent = choices.length > 40 ? `태그 ${choices.length}개 중 40개 표시 · 이름으로 검색하면 나머지도 고를 수 있습니다.` : "";
+  document.querySelectorAll("[data-gen-tag], [data-gen-remove-tag]").forEach((b) => {
+    b.onclick = () => {
+      const name = b.dataset.genTag || b.dataset.genRemoveTag;
+      changeGenScope({ ...gen.scope, tags: selected.includes(name) ? selected.filter((t) => t !== name) : [...selected, name] });
+    };
+  });
+  if (focused) host.querySelector(`[data-gen-tag="${CSS.escape(focused)}"]`)?.focus();
+}
+
+function genMemosUrl(query = "", offset = 0) {
+  const s = gen.scope || {}, params = new URLSearchParams({ q: query, offset, limit: 20 });
+  if (s.tags?.length) params.set("tags", s.tags.join(","));
+  for (const key of ["person", "since", "until"]) if (s[key]) params.set(key, s[key]);
+  return `/api/generate/memos?${params}`;
 }
 
 async function renderGenerate(version = renderVersion) {
-  const [{ formats, llm_ready }, history] = await Promise.all([
-    api("/api/generate/formats"), api("/api/generate/history"),
+  const [{ formats, llm_ready }, history, tagList] = await Promise.all([
+    api("/api/generate/formats"), api("/api/generate/history"), api("/api/generate/tags"),
   ]);
   if (version !== renderVersion) return;
+  gen.tagChoices = tagList.items;
   if (!gen.initialized) {
     gen.initialized = true;
     if (history.items.length) {
       const r = await api(`/api/generate/history/${history.items[0].id}`);
       if (version !== renderVersion) { gen.initialized = false; return; }
-      adoptGenResult(r); gen.instruction = r.instruction; gen.format = r.format;
+      adoptGenResult(r); gen.instruction = r.instruction; gen.format = r.format; gen.scope = r.scope || null;
     }
   }
   $("#view").innerHTML = `
@@ -46,6 +86,14 @@ async function renderGenerate(version = renderVersion) {
       <div class="desc" style="margin-top:10px">원하는 내용을 적으면 메모를 찾아 정리합니다. 만든 결과는 자동으로 보관됩니다.
         ${llm_ready ? "" : '<br>AI를 연결하면 바로 정리할 수 있어요. <a href="#" id="genSettings">AI 연결하기</a>'}</div>
       <textarea class="gen-input" id="genInput" aria-label="정리할 내용" placeholder="예) 이번 주 업무를 팀 공유용으로 정리해줘">${esc(gen.instruction)}</textarea>
+      <details class="capture-options" id="genTagFilter" style="margin:12px 0" ${gen.scope?.tags?.length ? "open" : ""}>
+        <summary>태그로 범위 좁히기 · <span class="meta" id="genTagCount"></span></summary>
+        <div class="note" style="margin-top:8px">여러 개를 고르면 <b>그 태그가 모두 붙은 메모만</b> 찾습니다. 태그를 바꾸면 참고할 메모를 다시 고릅니다.</div>
+        <div class="tagrow" id="genSelectedTags" style="margin-top:8px"></div>
+        <div class="row" style="margin:10px 0"><input type="search" id="genTagSearch" aria-label="범위를 좁힐 태그 찾기" placeholder="태그 이름으로 찾기" style="flex:1;min-width:0" /><button class="btn ghost" id="genTagClear">태그 해제</button></div>
+        <div class="tagrow" id="genTagChoices" style="max-height:180px;overflow:auto;padding:2px"></div>
+        <div class="note" id="genTagMore"></div>
+      </details>
       <div class="row" style="margin:10px 0"><label for="genFormat">형식</label><select id="genFormat">${formats.map((f) => `<option value="${f.key}" ${gen.format === f.key ? "selected" : ""}>${esc(f.label)}</option>`).join("")}</select>
         <span class="spacer"></span><button class="btn" id="genPlan">메모 고르기</button><button class="btn primary" id="genRun">${llm_ready ? "정리하기" : "요청문 만들기"}</button></div>
       <div class="note" id="genScope">${esc(genScopeLabel())}</div>
@@ -60,11 +108,11 @@ async function renderGenerate(version = renderVersion) {
   $("#genInput").onkeydown = (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); runGenerate(); } };
   $("#genFormat").onchange = (e) => { gen.format = e.target.value; invalidatePlan(); };
   $("#genBudget").onchange = (e) => { gen.budget = +e.target.value; invalidatePlan(); };
-  $("#genAll").onclick = () => { gen.memoIds = gen.scope = gen.review = null; invalidatePlan(true); renderPlanPanel(); setGenBusy(false); };
+  $("#genTagSearch").oninput = paintGenTags;
+  $("#genTagClear").onclick = () => changeGenScope({ ...gen.scope, tags: [] });
+  $("#genAll").onclick = () => changeGenScope(null);
   $("#genFiltered").onclick = () => {
-    gen.memoIds = gen.review = null;
-    gen.scope = { tags: [...state.tags], person: state.person, since: state.since, until: state.until };
-    invalidatePlan(true); renderPlanPanel(); setGenBusy(false);
+    changeGenScope({ tags: [...state.tags], person: state.person, since: state.since, until: state.until });
   };
   $("#genPlan").onclick = planGenerate; $("#genRun").onclick = runGenerate;
   $("#genNew").onclick = () => startGenerate(null, "");
@@ -77,12 +125,12 @@ async function renderGenerate(version = renderVersion) {
   $("#genHistoryPrev").onclick = () => { gen.historyOffset = Math.max(0, gen.historyOffset - 20); loadGenHistory(); };
   $("#genHistoryNext").onclick = () => { gen.historyOffset += 20; loadGenHistory(); };
   gen.historyOffset = 0; gen.historyQuery = ""; paintGenHistory(history);
-  renderPlanPanel(); renderGenOutput(); setGenBusy(gen.busy);
+  paintGenTags(); renderPlanPanel(); renderGenOutput(); setGenBusy(gen.busy);
 }
 
 function setGenBusy(busy) {
   const empty = gen.review && !gen.review.selected.size;
-  document.querySelectorAll("#genInput, #genFormat, #genBudget, #genPlan, #genRun, #genAll, #genFiltered, #genRun2, #genNew, #genEdit, #genDone, #genMemo, #genRefine, #genFollowup, #genOldSelect, #genRestore, #genBody, [data-gen-quick], [data-gen-history], #genPlanOut input, #genPlanOut button")
+  document.querySelectorAll("#genInput, #genFormat, #genBudget, #genPlan, #genRun, #genAll, #genFiltered, #genRun2, #genNew, #genEdit, #genDone, #genMemo, #genRefine, #genFollowup, #genOldSelect, #genRestore, #genBody, #genTagSearch, #genTagClear, [data-gen-tag], [data-gen-remove-tag], [data-gen-quick], [data-gen-history], #genPlanOut input, #genPlanOut button")
     .forEach((el) => { el.disabled = busy || (["genRun", "genRun2"].includes(el.id) && empty); });
   if (!busy) paintGenPicker();
 }
@@ -107,7 +155,7 @@ async function planGenerate() {
     const payload = genPayload(); delete payload.source_revisions;
     let plan;
     if (!payload.instruction && payload.memo_ids === null) {
-      const list = await api("/api/generate/memos");
+      const list = await api(genMemosUrl());
       plan = { candidates: list.items, sources: [], dropped: [], queries: [] };
     } else {
       plan = await api("/api/generate/plan", { method: "POST", body: { ...payload, instruction: payload.instruction || "선택한 메모 정리" } });
@@ -118,7 +166,7 @@ async function planGenerate() {
     gen.review = { items: [...merged.values()], selected: previous ? previous.selected : new Set(payload.instruction || payload.memo_ids !== null ? incoming.map((m) => m.key) : []) };
     gen.plan = plan; gen.queries = plan.queries || []; gen.showSources = true;
     gen.planKey = JSON.stringify(genPayload());
-    renderPlanPanel(); genProgress();
+    renderPlanPanel(); genProgress(!incoming.length && gen.scope?.tags?.length ? "고른 태그에 맞는 메모를 찾지 못했습니다. 태그를 바꾸거나 해제해 주세요." : "");
   } catch (e) { genProgress(e.message); }
   finally { gen.busy = false; setGenBusy(false); }
 }
@@ -184,7 +232,7 @@ async function findGenMemos(offset) {
   if (!host) return;
   host.textContent = "찾는 중…";
   try {
-    const r = await api(`/api/generate/memos?${new URLSearchParams({ q: query, offset, limit: 20 })}`);
+    const r = await api(genMemosUrl(query, offset));
     if (!host.isConnected || version !== gen.finderVersion) return;
     host.innerHTML = r.items.map((m, i) => `<div class="src"><div class="src-body"><b>${esc(m.title)}</b><div class="meta">${esc((m.created_at || "").slice(0, 10))}</div><details><summary class="status">본문 확인</summary><pre class="pack">${esc(m.body)}</pre></details></div><button class="btn" data-gen-add="${i}">${gen.review.selected.has(m.key) ? "선택됨" : "추가"}</button></div>`).join("") || '<div class="status">찾은 메모가 없습니다.</div>';
     host.querySelectorAll("[data-gen-add]").forEach((b) => {
@@ -368,7 +416,7 @@ async function openGenHistory(id) {
     await flushGenDraft();
     const r = await api(`/api/generate/history/${id}`);
     adoptGenResult(r); gen.instruction = r.instruction; gen.format = r.format;
-    gen.memoIds = null; gen.review = gen.plan = gen.scope = gen.queries = null; gen.followup = "";
+    gen.memoIds = null; gen.review = gen.plan = gen.queries = null; gen.scope = r.scope || null; gen.followup = "";
     if (state.tab === "generate") await render();
   } catch (e) { genProgress(e.message); }
   finally { gen.busy = false; setGenBusy(false); }

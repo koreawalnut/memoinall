@@ -775,12 +775,22 @@ def do_generate(payload: dict = Body(...)):
 
 
 @app.get("/api/generate/memos")
-def generation_candidates(q: str = "", limit: int = Query(20, ge=1, le=50), offset: int = Query(0, ge=0, le=10000)):
+def generation_candidates(
+    q: str = "", limit: int = Query(20, ge=1, le=50), offset: int = Query(0, ge=0, le=10000),
+    tag: str | None = None, tag_csv: str | None = Query(None, alias="tags"),
+    person: str | None = None, since: str | None = None, until: str | None = None,
+):
+    scope = dict(tag=tag, tags=_csv(tag_csv), person=person, since=since, until=until)
     if q.strip():
-        rows = search.search(q, limit=offset + limit + 1)[offset:]
+        rows = search.search(q, limit=offset + limit + 1, **scope)[offset:]
     else:
-        rows = store.list_memos(limit=limit + 1, offset=offset)
+        rows = store.list_memos(limit=limit + 1, offset=offset, **scope)
     return {"items": [generate.candidate(store.get_memo(m["id"])) for m in rows[:limit]], "has_more": len(rows) > limit}
+
+
+@app.get("/api/generate/tags")
+def generation_tags():
+    return {"items": tags.filter_choices()}
 
 
 @app.get("/api/generate/history")
