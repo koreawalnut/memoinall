@@ -10,14 +10,17 @@
 from __future__ import annotations
 
 import re
+import hashlib
+import json
 import shutil
 import sqlite3
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 from .. import store
+from ..source_tags import append_source_tag
 
 
 @dataclass
@@ -29,7 +32,10 @@ class Note:
     created_at: str | None = None
     updated_at: str | None = None
     tags: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     origin: str = ""  # 어느 컬럼/파일에서 본문을 건졌는지 (진단용)
+    legacy_created_at: str | None = None
+    legacy_updated_at: str | None = None
 
 
 _BLANKS_RE = re.compile(r"\n{3,}")
@@ -72,7 +78,10 @@ def parse_any_time(value) -> str | None:
         if not raw:
             return None
         try:
-            return datetime.fromisoformat(raw).replace(tzinfo=None, microsecond=0).isoformat()
+            parsed = datetime.fromisoformat(raw)
+            if parsed.tzinfo is not None:
+                parsed = parsed.astimezone()
+            return parsed.replace(tzinfo=None, microsecond=0).isoformat()
         except ValueError:
             if raw.isdigit():
                 return epoch_ms_to_iso(raw)
@@ -83,6 +92,19 @@ def parse_any_time(value) -> str | None:
         if n > 500_000_000_000_000:
             return epoch_ms_to_iso((n - 621_355_968_000_000_000) // 10_000)
         return epoch_ms_to_iso(n)
+    return None
+
+
+def legacy_aware_time(value) -> str | None:
+    """구버전이 시간대를 버리고 저장한 값. 원본에 시간대가 있을 때만 복구 근거로 쓴다."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        if parsed.tzinfo is not None:
+            return parsed.replace(tzinfo=None, microsecond=0).isoformat()
+    except ValueError:
+        pass
     return None
 
 
@@ -115,6 +137,10 @@ class ImportResult:
     imported: int = 0
     skipped_existing: int = 0
     skipped_empty: int = 0
+    items: list[dict] = field(default_factory=list)
+    revision: str = ""
+    selected: int = 0
+    warnings: list[str] = field(default_factory=list)
     error: str = ""
     samples: list[str] = field(default_factory=list)
     memo_ids: list[int] = field(default_factory=list)
@@ -123,6 +149,7 @@ class ImportResult:
     updated: int = 0
     unchanged: int = 0
     skipped_duplicate: int = 0  # 소스는 달라도 이미 같은 내용을 갖고 있어서 건너뜀
+    corrected_times: int = 0
 
 
 def run_import(
@@ -134,6 +161,9 @@ def run_import(
     min_chars: int = 0,
     update_existing: bool = False,
     extra_tags: list[str] | None = None,
+    review: bool = False,
+    selected_keys: list[str] | None = None,
+    expected_revision: str = "",
 ) -> ImportResult:
     """임포터 하나를 실행한다. dry_run 이면 읽기만 하고 아무것도 쓰지 않는다.
 
@@ -156,23 +186,51 @@ def run_import(
         # "RedmineError: API 키가 올바르지 않습니다" 처럼 지저분해진다.
         from ..exchange import ExchangeError
         from .redmine import RedmineError
+        from .evernote import EvernoteError
 
-        ours = isinstance(exc, (RedmineError, ExchangeError))
+        ours = isinstance(exc, (RedmineError, ExchangeError, EvernoteError))
         result.error = str(exc) if ours else f"{type(exc).__name__}: {exc}"
         return result
 
     result.found = len(notes)
+    if review or selected_keys is not None:
+        if len(notes) > 1000:
+            result.error = "파일당 1,000건까지 선택할 수 있습니다. 파일을 나눠 가져오세요."
+            return result
+        result.revision = hashlib.sha256(json.dumps(
+            [[asdict(n) for n in notes], min_chars, update_existing, extra_tags],
+            ensure_ascii=False, sort_keys=True,
+        ).encode("utf-8")).hexdigest()
+        if expected_revision and expected_revision != result.revision:
+            result.error = "파일 또는 가져오기 옵션이 바뀌었습니다. 미리보기를 다시 확인하세요."
+            return result
+    selected = set(selected_keys) if selected_keys is not None else None
+    if selected is not None and not selected <= {str(i) for i in range(len(notes))}:
+        result.error = "선택한 메모를 파일에서 찾지 못했습니다. 미리보기를 다시 확인하세요."
+        return result
+    result.selected = len(selected) if selected is not None else len(notes)
     # 내용 기준 중복 방지. 소스가 달라도 같은 내용이면 건너뛴다 — 받은 파일에는
     # 내가 이미 갖고 있는 메모(돌고 돌아온 내 것 포함)가 섞여 들어오기 때문이다.
-    known = store.content_uids() if getattr(importer, "dedupe_content", False) else None
+    known = set(store.content_uids()) if getattr(importer, "dedupe_content", False) else None
 
-    for note in notes:
+    seen = set()
+    for index, note in enumerate(notes):
+        if selected is not None and str(index) not in selected:
+            continue
+        result.warnings = list(dict.fromkeys([*result.warnings, *note.warnings]))
         body = clean(note.body)
+        item = {"key": str(index), "title": body.splitlines()[0] if body else "(빈 메모)",
+                "body": body, "created_at": note.created_at, "warnings": note.warnings,
+                "status": "가져오기", "eligible": False}
+        if dry_run and review:
+            result.items.append(item)
         if not body:
+            item["status"] = "본문 없음"
             result.skipped_empty += 1
             continue
         result.lengths.append(len(body))
         if min_chars and len(body) < min_chars:
+            item["status"] = "너무 짧음"
             result.skipped_short += 1
             continue
 
@@ -189,6 +247,14 @@ def run_import(
             if new_tags:
                 tagged = body + "\n" + " ".join("#" + t for t in new_tags)
 
+        original_tagged = tagged
+        tagged = append_source_tag(tagged, importer.name)
+        item["body"] = tagged
+        if note.external_id in seen:
+            item["status"] = "파일 안 중복"
+            result.skipped_duplicate += 1
+            continue
+        seen.add(note.external_id)
         memo_id = store.find_by_external(importer.name, note.external_id)
         if memo_id is None and known is not None:
             # external_id 로는 못 찾아도 같은 내용을 이미 갖고 있을 수 있다.
@@ -199,28 +265,48 @@ def run_import(
                 # 갱신 대상으로 삼지 않는다 — 남이 보낸 파일이 내가 쓴 메모를
                 # 덮어쓰는 일은 없어야 한다. 내용이 같으니 잃을 것도 없다.
                 result.skipped_duplicate += 1
+                item["status"] = "같은 내용 있음"
                 continue
         if memo_id is not None:
+            corrected = store.correct_import_times(memo_id, {
+                "created_at": (note.legacy_created_at, note.created_at),
+                "updated_at": (note.legacy_updated_at if note.updated_at else note.legacy_created_at,
+                               note.updated_at or note.created_at),
+            }, dry_run=dry_run, enqueue_enrich=background_enrich)
+            if corrected:
+                result.corrected_times += 1
+                if not dry_run:
+                    result.memo_ids.append(memo_id)
             if not update_existing:
-                result.skipped_existing += 1
+                item.update(status="시간 바로잡기" if corrected else "이미 있음", eligible=corrected)
+                if not corrected:
+                    result.skipped_existing += 1
                 continue
             if store.get_memo(memo_id, with_facets=False)["body"] == tagged:
-                result.unchanged += 1
+                item.update(status="시간 바로잡기" if corrected else "변경 없음", eligible=corrected)
+                if not corrected:
+                    result.unchanged += 1
                 continue
+            item.update(status="갱신 (기존 내용 덮어쓰기)", eligible=True)
             if not dry_run:
                 store.update_memo(memo_id, tagged, enqueue_enrich=background_enrich)
-                result.memo_ids.append(memo_id)
+                store.remember_import_body(memo_id, original_tagged)
+                if memo_id not in result.memo_ids:
+                    result.memo_ids.append(memo_id)
             result.updated += 1
             _add_sample(result, sample, note, body, prefix="갱신")
             continue
 
         _add_sample(result, sample, note, body)
+        item["eligible"] = True
+        if known is not None:
+            known.add(exchange.content_uid(note.created_at, body))
         if dry_run:
             result.imported += 1
             continue
 
         memo = store.add_memo(
-            tagged,
+            original_tagged,
             source=importer.name,
             created_at=note.created_at,
             updated_at=note.updated_at,
@@ -267,7 +353,13 @@ def build_redmine(**kwargs):
 
 # 가져오기로 만들어진 source 값들. 손으로 쓴 메모('web')·CLI('cli') 는 여기 없다 —
 # 초기화가 그것까지 지우면 안 되기 때문에 삭제 대상은 이 목록으로만 받는다.
-SOURCE_NAMES = ("sticky", "samsung", "redmine", "files", "shared")
+SOURCE_NAMES = ("sticky", "samsung", "redmine", "files", "shared", "evernote")
+
+
+def build_evernote(**kwargs):
+    from .evernote import EvernoteImporter
+
+    return EvernoteImporter(path=kwargs.get("evernote_path") or "", content=kwargs.get("evernote_content") or "")
 
 
 def build_shared(**kwargs):
@@ -293,6 +385,7 @@ def all_importers(**kwargs) -> list:
         build_redmine(**kwargs),
         FilesImporter(kwargs.get("files_path") or ""),
         build_shared(**kwargs),
+        build_evernote(**kwargs),
     ]
 
 
@@ -313,6 +406,8 @@ def get_importer(name: str, **kwargs):
         return build_redmine(**kwargs)
     if name == "shared":
         return build_shared(**kwargs)
+    if name == "evernote":
+        return build_evernote(**kwargs)
     if name not in table:
         raise ValueError(f"알 수 없는 소스: {name} (사용 가능: {', '.join(SOURCE_NAMES)})")
     return table[name]()

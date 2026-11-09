@@ -397,6 +397,7 @@ def cmd_import(args) -> int:
     opts = {
         "files_path": args.path,
         "shared_path": args.shared_file,
+        "evernote_path": args.evernote_file,
         "shared_password": shared_password,
         "redmine_kinds": args.redmine_kinds,
         "redmine_projects": args.redmine_projects,
@@ -437,6 +438,8 @@ def cmd_import(args) -> int:
         if result.unchanged:
             detail += f" · 변경없음 {result.unchanged}"
         updated = f" · 갱신 {result.updated}건" if result.updated else ""
+        if result.corrected_times:
+            updated += f" · 시간 바로잡기 {result.corrected_times}건"
         print(f"   원본 {result.found}건 → 대상 {result.imported}건{updated} ({detail})")
         if dry and result.lengths:
             lens = sorted(result.lengths)
@@ -448,6 +451,8 @@ def cmd_import(args) -> int:
             )
         for s in result.samples:
             print(f"     · {s}")
+        for warning in result.warnings:
+            print(f"   주의: {warning}")
         print()
         total += result.imported
 
@@ -455,6 +460,7 @@ def cmd_import(args) -> int:
         # 다시 칠 수 있는 명령이어야 한다 — 경로를 빼먹으면 아무것도 안 걸린다
         extra = f' --path "{args.path}"' if args.path else ""
         extra += f' --shared-file "{args.shared_file}"' if args.shared_file else ""
+        extra += f' --evernote-file "{args.evernote_file}"' if args.evernote_file else ""
         print(f"총 {total}건을 가져올 수 있습니다.  "
               f"실행: python -m memoinall import --source {args.source}{extra} --commit")
         return 0
@@ -596,9 +602,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     i = sub.add_parser("import", help="외부 메모 앱·받은 파일에서 가져오기")
     i.add_argument("--source", default="all",
-                   choices=["all", "sticky", "samsung", "redmine", "files", "shared"])
+                   choices=["all", "sticky", "samsung", "redmine", "files", "shared", "evernote"])
     i.add_argument("--path", help="files 소스의 폴더 경로")
     i.add_argument("--shared-file", help="shared 소스가 읽을 메모 파일(.json)")
+    i.add_argument("--evernote-file", help="Evernote에서 내보낸 메모 파일(.enex), 50MB 이하")
     i.add_argument("--tag", help="가져오는 메모에 붙일 태그, 쉼표 구분")
     i.add_argument("--redmine-kinds", help="issues,wiki,documents,news 중 골라서 (기본은 설정값)")
     i.add_argument("--redmine-projects", help="프로젝트 식별자, 쉼표 구분 (비우면 전체)")

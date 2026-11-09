@@ -12,7 +12,7 @@ import re
 import shutil
 from pathlib import Path
 
-from . import Note, clean, open_readonly_copy, parse_any_time
+from . import Note, clean, legacy_aware_time, open_readonly_copy, parse_any_time
 
 PACKAGE = "Microsoft.MicrosoftStickyNotes_8wekyb3d8bbwe"
 
@@ -78,6 +78,8 @@ class StickyNotesImporter:
                         body=body,
                         created_at=parse_any_time(row["created"]),
                         updated_at=parse_any_time(row["updated"]),
+                        legacy_created_at=legacy_aware_time(row["created"]),
+                        legacy_updated_at=legacy_aware_time(row["updated"]),
                         origin=f"{table}.{text_col}",
                     )
                 )

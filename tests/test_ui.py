@@ -106,7 +106,7 @@ def main():
         page.locator("#generateSelection").click()
         expect(page.locator("#genScope")).to_contain_text("2건만 사용")
         page.locator("#genPlan").click()
-        expect(page.locator("#genPlanOut")).to_contain_text("직접 선택한 근거")
+        expect(page.locator("#genPlanOut")).to_contain_text("참고할 메모")
         assert set(page.evaluate("gen.plan.sources.map(s => s.id)")) == set(selected)
         page.locator("#genFormat").select_option("handoff")
         page.locator("#genRun").click()
@@ -265,7 +265,7 @@ def main():
         page.locator("#dPack").click()
         expect(page.locator("#genScope")).to_contain_text("1건만 사용")
         page.locator("#genPlan").click()
-        expect(page.locator("#genPlanOut")).to_contain_text("직접 선택한 근거")
+        expect(page.locator("#genPlanOut")).to_contain_text("참고할 메모")
         assert len(page.evaluate("gen.plan.sources")) == 1
         print("OK unsaved edit protection; detail-to-AI uses exactly one memo")
 

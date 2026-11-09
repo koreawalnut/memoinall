@@ -12,6 +12,7 @@ import threading
 from datetime import datetime
 
 from . import config, db, embed, extract, settings, textutil
+from .source_tags import SOURCE_TAGS, append_source_tag
 
 log = logging.getLogger(__name__)
 
@@ -51,13 +52,19 @@ def add_memo(
     body = (body or "").strip()
     if not body:
         raise ValueError("빈 메모는 저장할 수 없습니다.")
+    original = body
+    body = append_source_tag(body, source)
     created = created_at or now_iso()
-    cur = db.execute(
-        "INSERT INTO memos(body, title, created_at, updated_at, source, external_id) VALUES(?,?,?,?,?,?)",
-        (body, textutil.title_from(body), created, updated_at or created, source, external_id),
-    )
-    memo_id = int(cur.lastrowid)
-    _index_fts(memo_id, body)
+    conn = db.connect()
+    with conn:
+        cur = conn.execute(
+            "INSERT INTO memos(body, title, created_at, updated_at, source, external_id) VALUES(?,?,?,?,?,?)",
+            (body, textutil.title_from(body), created, updated_at or created, source, external_id),
+        )
+        memo_id = int(cur.lastrowid)
+        _index_body(conn, memo_id, body)
+        if body != original:
+            _remember_import_alias(conn, memo_id, created, original, created, body)
     if enqueue_enrich:
         enqueue(memo_id)
     return get_memo(memo_id)
@@ -84,16 +91,7 @@ def update_memo(memo_id: int, body: str, *, enqueue_enrich: bool = True) -> dict
         )
         if not cur.rowcount:
             raise KeyError(f"메모 {memo_id} 없음")
-        conn.execute("DELETE FROM memo_fts WHERE rowid=?", (memo_id,))
-        conn.execute(
-            "INSERT INTO memo_fts(rowid, grams, raw) VALUES(?,?,?)",
-            (memo_id, textutil.ngram_index_text(body), textutil.normalize(body).lower()),
-        )
-        conn.execute("DELETE FROM facets WHERE memo_id=? AND kind='tag'", (memo_id,))
-        conn.executemany(
-            "INSERT OR IGNORE INTO facets(memo_id, kind, value) VALUES(?, 'tag', ?)",
-            [(memo_id, name) for name in extract.TAG_RE.findall(body)],
-        )
+        _index_body(conn, memo_id, body)
     if enqueue_enrich:
         enqueue(memo_id)
     return get_memo(memo_id)
@@ -114,10 +112,97 @@ def content_uids() -> dict[str, int]:
     """
     from . import exchange  # 순환 방지 — exchange 는 store 를 쓴다
 
-    return {
-        exchange.content_uid(r["created_at"], r["body"]): int(r["id"])
+    by_id = {
+        int(r["id"]): exchange.content_uid(r["created_at"], r["body"])
         for r in db.query("SELECT id, created_at, body FROM memos")
     }
+    current = {uid: memo_id for memo_id, uid in by_id.items()}
+    aliases = {
+        r["original_uid"]: int(r["memo_id"])
+        for r in db.query("SELECT * FROM memo_import_aliases")
+        if by_id.get(r["memo_id"]) == r["tagged_uid"]
+    }
+    return {**aliases, **current}
+
+
+def _index_body(conn, memo_id: int, body: str) -> None:
+    """원문을 바꾸는 트랜잭션 안에서 검색과 태그도 즉시 반영한다."""
+    conn.execute("DELETE FROM memo_fts WHERE rowid=?", (memo_id,))
+    conn.execute("INSERT INTO memo_fts(rowid, grams, raw) VALUES(?,?,?)",
+                 (memo_id, textutil.ngram_index_text(body), textutil.normalize(body).lower()))
+    conn.execute("DELETE FROM facets WHERE memo_id=? AND kind='tag'", (memo_id,))
+    conn.executemany("INSERT OR IGNORE INTO facets(memo_id,kind,value) VALUES(?,'tag',?)",
+                     [(memo_id, tag) for tag in extract.TAG_RE.findall(body)])
+
+
+def _remember_import_alias(conn, memo_id, old_created, old_body, created, body) -> None:
+    from .exchange import content_uid
+
+    old_uid, uid = content_uid(old_created, old_body), content_uid(created, body)
+    if old_uid == uid:
+        return
+    conn.execute("UPDATE memo_import_aliases SET tagged_uid=? WHERE memo_id=? AND tagged_uid=?",
+                 (uid, memo_id, old_uid))
+    conn.execute("INSERT OR REPLACE INTO memo_import_aliases VALUES(?,?,?)", (memo_id, old_uid, uid))
+
+
+def remember_import_body(memo_id: int, original: str) -> None:
+    conn = db.connect()
+    with conn:
+        row = conn.execute("SELECT created_at,body FROM memos WHERE id=?", (memo_id,)).fetchone()
+        if row:
+            _remember_import_alias(conn, memo_id, row["created_at"], original, row["created_at"], row["body"])
+
+
+def backfill_source_tags() -> int:
+    """첫 화면이 열린 뒤 한 번만 보완한다. 작성·수정 시각은 유지한다."""
+    conn, count = db.connect(), 0
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if conn.execute("SELECT 1 FROM meta WHERE key='source_tags_v1'").fetchone():
+            return 0
+        marks = ",".join("?" for _ in SOURCE_TAGS)
+        rows = conn.execute(f"SELECT id,body,source,created_at FROM memos WHERE source IN ({marks})",
+                            tuple(SOURCE_TAGS)).fetchall()
+        for row in rows:
+            body = append_source_tag(row["body"], row["source"])
+            if body == row["body"]:
+                continue
+            conn.execute("UPDATE memos SET body=?,enriched_at=NULL WHERE id=?", (body, row["id"]))
+            _index_body(conn, row["id"], body)
+            _remember_import_alias(conn, row["id"], row["created_at"], row["body"], row["created_at"], body)
+            count += 1
+        conn.execute("INSERT INTO meta(key,value) VALUES('source_tags_v1','done')")
+    if count:
+        invalidate_cache()
+    return count
+
+
+def correct_import_times(memo_id: int, changes: dict, *, dry_run: bool, enqueue_enrich: bool) -> bool:
+    """원본을 재확인한 시각만 보정한다. 사용자가 수정한 시각은 그대로 둔다."""
+    changes = {key: (old, new) for key, (old, new) in changes.items()
+               if key in ("created_at", "updated_at") and old and new and old != new}
+    if not changes:
+        return False
+    conn = db.connect()
+    with conn:
+        if not dry_run:
+            conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT * FROM memos WHERE id=?", (memo_id,)).fetchone()
+        if not row:
+            return False
+        updates = {key: new for key, (old, new) in changes.items() if row[key] == old}
+        if not updates:
+            return False
+        if dry_run:
+            return True
+        fields = ",".join(f"{key}=?" for key in updates)
+        conn.execute(f"UPDATE memos SET {fields},enriched_at=NULL WHERE id=?", (*updates.values(), memo_id))
+        _remember_import_alias(conn, memo_id, row["created_at"], row["body"],
+                               updates.get("created_at", row["created_at"]), row["body"])
+    if enqueue_enrich:
+        enqueue(memo_id)
+    return True
 
 
 def count_by_source(source: str) -> dict:

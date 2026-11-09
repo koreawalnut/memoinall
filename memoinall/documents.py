@@ -415,8 +415,7 @@ def save(filename: str, parts: list[dict]) -> dict:
                 (body, title, now, now, uid),
             )
             memo_id = cursor.lastrowid
-            conn.execute("INSERT INTO memo_fts(rowid,grams,raw) VALUES(?,?,?)",
-                         (memo_id, textutil.ngram_index_text(body), textutil.normalize(body).lower()))
+            store._index_body(conn, memo_id, body)
             created.append(memo_id)
             memos.append({"id": memo_id, "title": title, "duplicate": False})
     for memo_id in created:

@@ -1,0 +1,1496 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>memoinall — 업무 메모·검색·AI 정리·공유 가이드</title>
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+  <style>
+    :root {
+      --bg-app: #0f172a;
+      --bg-slide: #ffffff;
+      --bg-subtle: #f8fafc;
+      --bg-card: #ffffff;
+      --bg-accent-soft: #eff6ff;
+      --bg-emerald-soft: #ecfdf5;
+      --bg-amber-soft: #fffbeb;
+      --bg-purple-soft: #f5f3ff;
+      --text-main: #0f172a;
+      --text-secondary: #334155;
+      --text-muted: #64748b;
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --emerald: #059669;
+      --amber: #d97706;
+      --purple: #7c3aed;
+      --border: #e2e8f0;
+      --shadow-lg: 0 20px 25px -5px rgba(15, 23, 42, 0.12), 0 8px 10px -6px rgba(15, 23, 42, 0.08);
+      --shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.08);
+      --radius-lg: 16px;
+      --radius-md: 12px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Malgun Gothic", sans-serif;
+      background-color: var(--bg-app);
+      color: var(--text-main);
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* 상단 컨트롤 바 (발표/인쇄 시 숨김 가능) */
+    .control-bar {
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 24px;
+      background: rgba(15, 23, 42, 0.92);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      color: #f8fafc;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .control-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 0.95rem;
+    }
+
+    .badge-track {
+      background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+      color: #fff;
+      font-size: 0.75rem;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-weight: 700;
+    }
+
+    .control-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .btn-ctrl {
+      background: rgba(255, 255, 255, 0.1);
+      color: #f8fafc;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      padding: 7px 14px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      font-family: inherit;
+    }
+
+    .btn-ctrl:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .btn-ctrl.active {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #fff;
+    }
+
+    .slide-counter {
+      font-size: 0.85rem;
+      color: #cbd5e1;
+      min-width: 64px;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* 레이아웃 컨테이너 */
+    .deck-container {
+      max-width: 1280px;
+      margin: 28px auto 60px;
+      padding: 0 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 36px;
+    }
+
+    /* 슬라이드 모드 (한 장씩 보기) */
+    body.mode-slide .deck-container {
+      height: calc(100vh - 64px);
+      margin: 0 auto;
+      padding: 20px;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+    }
+
+    body.mode-slide .slide {
+      display: none;
+      width: 100%;
+      max-width: 1240px;
+      height: 100%;
+      max-height: 720px;
+      overflow-y: auto;
+    }
+
+    body.mode-slide .slide.active-slide {
+      display: flex;
+    }
+
+    /* 개별 슬라이드 (16:9 비율 대응 카드) */
+    .slide {
+      background: var(--bg-slide);
+      border-radius: 20px;
+      box-shadow: var(--shadow-lg);
+      padding: 44px 52px;
+      min-height: 680px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(226, 232, 240, 0.8);
+    }
+
+    .slide::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 6px;
+      background: linear-gradient(90deg, #2563eb 0%, #7c3aed 50%, #059669 100%);
+    }
+
+    /* 슬라이드 헤더 */
+    .slide-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 16px;
+    }
+
+    .slide-kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--primary);
+      margin-bottom: 6px;
+    }
+
+    .slide-title {
+      font-size: 1.75rem;
+      font-weight: 800;
+      color: var(--text-main);
+      letter-spacing: -0.02em;
+      line-height: 1.25;
+    }
+
+    .slide-subtitle {
+      font-size: 0.98rem;
+      color: var(--text-secondary);
+      margin-top: 4px;
+    }
+
+    .score-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .score-pill.blue { background: var(--bg-accent-soft); color: var(--primary-dark); border: 1px solid #bfdbfe; }
+    .score-pill.green { background: var(--bg-emerald-soft); color: var(--emerald); border: 1px solid #a7f3d0; }
+    .score-pill.purple { background: var(--bg-purple-soft); color: var(--purple); border: 1px solid #ddd6fe; }
+    .score-pill.amber { background: var(--bg-amber-soft); color: var(--amber); border: 1px solid #fde68a; }
+
+    /* 슬라이드 본문 그리드 */
+    .slide-body {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 20px;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      align-items: stretch;
+    }
+
+    .grid-5-7 {
+      display: grid;
+      grid-template-columns: 5fr 7fr;
+      gap: 24px;
+      align-items: stretch;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    /* 카드 컴포넌트 */
+    .card {
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .card.white {
+      background: #ffffff;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .card.highlight-blue {
+      background: var(--bg-accent-soft);
+      border-color: #bfdbfe;
+    }
+
+    .card.highlight-green {
+      background: var(--bg-emerald-soft);
+      border-color: #a7f3d0;
+    }
+
+    .card.highlight-purple {
+      background: var(--bg-purple-soft);
+      border-color: #ddd6fe;
+    }
+
+    .card-title {
+      font-size: 1.08rem;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card p, .card li {
+      font-size: 0.92rem;
+      color: var(--text-secondary);
+    }
+
+    .card ul {
+      padding-left: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    /* 표지 슬라이드 전용 스타일 */
+    .cover-layout {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 32px;
+      align-items: center;
+      flex: 1;
+    }
+
+    .cover-badge-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+
+    .cover-main-title {
+      font-size: 2.55rem;
+      font-weight: 900;
+      line-height: 1.2;
+      letter-spacing: -0.03em;
+      color: var(--text-main);
+      margin-bottom: 16px;
+    }
+
+    .cover-main-title .accent {
+      background: linear-gradient(90deg, #2563eb, #7c3aed);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .cover-lead {
+      font-size: 1.08rem;
+      color: var(--text-secondary);
+      margin-bottom: 24px;
+      line-height: 1.6;
+    }
+
+    .kpi-strip {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 8px;
+    }
+
+    .kpi-box {
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 16px;
+    }
+
+    .kpi-num {
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: var(--primary);
+    }
+
+    .kpi-label {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      font-weight: 600;
+      margin-top: 2px;
+    }
+
+    /* 캡처 이미지 슬롯 (클릭/드래그앤드롭 지원) */
+    .screenshot-slot {
+      position: relative;
+      border: 2px dashed #94a3b8;
+      border-radius: var(--radius-md);
+      background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+      min-height: 280px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      overflow: hidden;
+    }
+
+    .screenshot-slot:hover,
+    .screenshot-slot.dragover {
+      border-color: var(--primary);
+      background: #eff6ff;
+    }
+
+    .screenshot-slot.has-image {
+      border-style: solid;
+      border-color: var(--border);
+      padding: 0;
+      background: #0f172a;
+    }
+
+    .screenshot-slot img.preview-img {
+      width: 100%;
+      height: 100%;
+      max-height: 430px;
+      object-fit: contain;
+      display: none;
+    }
+
+    .screenshot-slot.has-image img.preview-img {
+      display: block;
+    }
+
+    .screenshot-slot.has-image .slot-placeholder {
+      display: none;
+    }
+
+    .slot-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      max-width: 90%;
+    }
+
+    .slot-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: #dbeafe;
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.3rem;
+      font-weight: 800;
+    }
+
+    .slot-title {
+      font-size: 0.98rem;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .slot-desc {
+      font-size: 0.83rem;
+      color: var(--text-secondary);
+      line-height: 1.45;
+    }
+
+    .slot-tip {
+      margin-top: 6px;
+      font-size: 0.76rem;
+      color: var(--primary-dark);
+      background: #dbeafe;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-weight: 600;
+    }
+
+    .slot-change-btn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(15, 23, 42, 0.78);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      display: none;
+    }
+
+    .screenshot-slot.has-image:hover .slot-change-btn {
+      display: inline-block;
+    }
+
+    /* 발표자 노트 / 캡처 가이드 박스 (토글 가능) */
+    .guide-note {
+      margin-top: 14px;
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      border-left: 4px solid #f59e0b;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 0.82rem;
+      color: #78350f;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    body.hide-guides .guide-note,
+    body.hide-guides .slot-tip {
+      display: none !important;
+    }
+
+    /* 5대 핵심 흐름 다이어그램 */
+    .pipeline-flow {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
+      margin: 6px 0;
+    }
+
+    .pipeline-step {
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-top: 4px solid var(--primary);
+      border-radius: 12px;
+      padding: 14px;
+      position: relative;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .pipeline-step:nth-child(2) { border-top-color: #0284c7; }
+    .pipeline-step:nth-child(3) { border-top-color: #7c3aed; }
+    .pipeline-step:nth-child(4) { border-top-color: #059669; }
+    .pipeline-step:nth-child(5) { border-top-color: #d97706; }
+
+    .step-num {
+      font-size: 0.72rem;
+      font-weight: 800;
+      color: var(--text-muted);
+      letter-spacing: 0.05em;
+    }
+
+    .step-name {
+      font-size: 1rem;
+      font-weight: 800;
+      color: var(--text-main);
+      margin: 4px 0 6px;
+    }
+
+    .step-detail {
+      font-size: 0.82rem;
+      color: var(--text-secondary);
+    }
+
+    /* 테이블 스타일 */
+    .comp-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    .comp-table th,
+    .comp-table td {
+      padding: 11px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .comp-table th {
+      background: #f1f5f9;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .comp-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .comp-table td.good {
+      background: #f0fdf4;
+      color: #065f46;
+      font-weight: 600;
+    }
+
+    .tag-chip {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      background: #e2e8f0;
+      color: #1e293b;
+      margin-right: 4px;
+      margin-bottom: 4px;
+    }
+
+    .tag-chip.blue { background: #dbeafe; color: #1e40af; }
+    .tag-chip.green { background: #d1fae5; color: #065f46; }
+    .tag-chip.purple { background: #ede9fe; color: #5b21b6; }
+
+    /* 슬라이드 푸터 */
+    .slide-footer {
+      margin-top: 18px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+
+    /* 인쇄 (PDF 저장) 최적화 */
+    @media print {
+      @page {
+        size: A4 landscape;
+        margin: 8mm;
+      }
+      body {
+        background: #ffffff;
+      }
+      .control-bar,
+      .guide-note,
+      .slot-tip,
+      .slot-change-btn {
+        display: none !important;
+      }
+      .deck-container {
+        margin: 0;
+        padding: 0;
+        gap: 0;
+        max-width: none;
+      }
+      .slide {
+        box-shadow: none;
+        border: 1px solid #cbd5e1;
+        border-radius: 12px;
+        min-height: 185mm;
+        max-height: 190mm;
+        padding: 28px 36px;
+        page-break-after: always;
+        break-after: page;
+        display: flex !important;
+      }
+      .slide:last-child {
+        page-break-after: auto;
+        break-after: auto;
+      }
+    }
+
+    @media (max-width: 960px) {
+      .cover-layout, .grid-2, .grid-5-7, .grid-3, .pipeline-flow {
+        grid-template-columns: 1fr;
+      }
+      .slide {
+        padding: 28px 24px;
+        min-height: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 상단 컨트롤 바 -->
+  <header class="control-bar">
+    <div class="control-title">
+      <span class="badge-track">memoinall 소개 및 활용 가이드</span>
+      <span>쉽게 메모 · 빠르게 검색 · AI 문서화 · 문서 가져오기 · 안전 공유</span>
+    </div>
+    <div class="control-actions">
+      <button class="btn-ctrl active" id="btnScrollMode" onclick="setViewMode('scroll')">전체 스크롤 보기</button>
+      <button class="btn-ctrl" id="btnSlideMode" onclick="setViewMode('slide')">PPT 슬라이드 모드 (←/→)</button>
+      <span class="slide-counter" id="slideCounter">총 10장</span>
+      <button class="btn-ctrl" id="btnPrev" onclick="moveSlide(-1)" style="display:none;">◀ 이전</button>
+      <button class="btn-ctrl" id="btnNext" onclick="moveSlide(1)" style="display:none;">다음 ▶</button>
+      <button class="btn-ctrl" id="btnToggleGuide" onclick="toggleGuides()">💡 캡처/발표 가이드 숨기기</button>
+      <button class="btn-ctrl" onclick="window.print()">🖨️ PDF / 인쇄 저장</button>
+    </div>
+  </header>
+
+  <main class="deck-container" id="deckContainer">
+
+    <!-- ==================== SLIDE 1: 표지 ==================== -->
+    <section class="slide active-slide">
+      <div class="cover-layout">
+        <div>
+          <div class="cover-badge-row">
+            <span class="score-pill blue">업무 기록 & AI 문서화 도구</span>
+            <span class="score-pill green">Windows 원클릭 설치 지원</span>
+          </div>
+          <h1 class="cover-main-title">
+            쉽게 적고, 빠르게 찾아,<br />
+            <span class="accent">AI로 정리·공유하는</span><br />
+            <strong>memoinall (메모인올)</strong>
+          </h1>
+          <p class="cover-lead">
+            복잡한 양식 없이 <strong>쉽게 메모</strong>하고, 단어가 정확히 기억나지 않아도 <strong>빠르게 검색</strong>하며,<br />
+            세팅한 AI로 내 메모를 근거 삼아 <strong>출처(<code>[M번호]</code>)가 표시된 정리 결과물</strong>을 만들고,<br />
+            흩어진 <strong>외부 메모·문서(엑셀·한글·PDF) 가져오기</strong>부터 <strong>동료 공유</strong>까지 하나로 끝내는 업무 보조 도구
+          </p>
+          <div class="kpi-strip">
+            <div class="kpi-box">
+              <div class="kpi-num">5대 흐름</div>
+              <div class="kpi-label">메모·검색·AI·가져오기·공유 통합</div>
+            </div>
+            <div class="kpi-box">
+              <div class="kpi-num">[M번호]</div>
+              <div class="kpi-label">원문 출처가 연결된 AI 문서 생성</div>
+            </div>
+            <div class="kpi-box">
+              <div class="kpi-num">46.2 MB</div>
+              <div class="kpi-label">Python 불필요 Setup.exe 설치 파일</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 대표 화면 캡처 슬롯 #1 -->
+        <div>
+          <div class="screenshot-slot" data-slot="1">
+            <input type="file" accept="image/*" hidden />
+            <img class="preview-img" alt="대표 실행 화면 캡처" />
+            <button type="button" class="slot-change-btn">이미지 변경</button>
+            <div class="slot-placeholder">
+              <div class="slot-icon">📸 1</div>
+              <div class="slot-title">[캡처 1] memoinall 전체 메인 화면</div>
+              <div class="slot-desc">
+                앱을 실행한 뒤 상단/좌측의 3대 주메뉴(<strong>내 메모 · AI로 정리 · 가져오기·공유</strong>)와<br />
+                메모 입력창·검색창·메모 목록이 한눈에 보이는 기본 화면을 캡처해 넣어주세요.
+              </div>
+              <div class="slot-tip">클릭하거나 캡처 이미지를 이곳에 드래그 앤 드롭하세요</div>
+            </div>
+          </div>
+          <div class="guide-note">
+            <div>
+              <strong>💡 화면 소개 포인트:</strong> 복잡한 기능 나열 대신 <strong>‘내 메모 · AI로 정리 · 가져오기·공유’</strong> 3개 주메뉴로 단순화하여 누구나 설치 직후 바로 쓸 수 있는 실전형 업무 도구입니다.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="slide-footer">
+        <span>memoinall — 적을 땐 무형식, 꺼낼 땐 구조화</span>
+        <span>Slide 01 / 10</span>
+      </div>
+    </section>
+
+    <!-- ==================== SLIDE 2: 기획 배경 및 새로운 접근 ==================== -->
+    <section class="slide">
+      <div>
+        <div class="slide-header">
+          <div>
+            <div class="slide-kicker">01. 기획 배경 및 새로운 정의</div>
+            <h2 class="slide-title">흩어진 메모와 문서, 왜 정작 필요할 땐 찾지 못하고 다시 쓸까?</h2>
+            <p class="slide-subtitle">기록할 때의 ‘분류 부담’을 없애고, 검색·AI 문서화·가져오기·공유를 하나의 흐름으로 연결</p>
+          </div>
+          <span class="score-pill purple">창의적 업무 재정의</span>
+        </div>
+
+        <div class="slide-body">
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-title">😫 기존 업무 메모·문서 관리의 3대 불편 (AS-IS)</div>
+              <ul>
+                <li><strong>적는 순간 분류를 강요하는 피로감:</strong> 회의나 전화 중 폴더, 제목, 양식을 먼저 맞추려다 보니 기록을 미루거나 스티커 메모·메모장에 대충 적어두고 잊어버림</li>
+                <li><strong>여러 앱과 파일에 파편화된 기록:</strong> 스티커 메모, 삼성 노트, 에버노트, Redmine, 그리고 엑셀·한글(<code>.hwp</code>)·PDF 문서에 내용이 흩어져 있어 통합 검색이 불가능</li>
+                <li><strong>AI 활용과 메모 공유의 번거로움:</strong> 내 메모를 AI로 정리하려면 관련 기록을 일일이 찾아 복사·붙여넣어야 하고, 동료에게 필요한 메모만 골라 전달하기도 까다로움</li>
+              </ul>
+            </div>
+
+            <div class="card highlight-blue">
+              <div class="card-title">🚀 memoinall의 해결 방식 (TO-BE)</div>
+              <ul>
+                <li><strong>적을 땐 무형식, 꺼낼 땐 구조화:</strong> 입력창 하나에 양식 없이 바로 적으면(초안 자동 보관), 백그라운드에서 색인·태그·사람 정보를 자동으로 정리</li>
+                <li><strong>의미 + 한글 키워드 하이브리드 검색:</strong> 정확한 단어가 기억나지 않아도 문맥으로 빠르게 찾고, 태그·사람·작성일 조건으로 정확히 좁힘</li>
+                <li><strong>출처 기반 AI 정리 & 외부 가져오기·공유:</strong> 세팅한 AI로 내 메모를 근거 삼아 <strong><code>[M번호]</code> 원문 링크가 달린 정리본</strong>을 만들고, 외부 메모·문서 반입과 동료 공유를 한곳에서 처리</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="pipeline-flow">
+            <div class="pipeline-step">
+              <div class="step-num">PILLAR 1</div>
+              <div class="step-name">쉽게 메모</div>
+              <div class="step-detail">양식 강요 없이 즉시 기록 &amp; <code>#태그</code>·초안 자동 보호</div>
+            </div>
+            <div class="pipeline-step">
+              <div class="step-num">PILLAR 2</div>
+              <div class="step-name">빠르게 검색</div>
+              <div class="step-detail">하이브리드(의미+한글) 검색 및 <strong><code>#태그</code>·날짜·사람 필터</strong></div>
+            </div>
+            <div class="pipeline-step">
+              <div class="step-num">PILLAR 3</div>
+              <div class="step-name">AI 활용</div>
+              <div class="step-detail">세팅한 AI로 검색·태그 범위 근거 기반 <code>[M번호]</code> 결과물 생성</div>
+            </div>
+            <div class="pipeline-step">
+              <div class="step-num">PILLAR 4</div>
+              <div class="step-name">쉽게 가져오기</div>
+              <div class="step-detail">스티커메모·삼성노트·에버노트·Redmine 및 엑셀·HWP·PDF 통합</div>
+            </div>
+            <div class="pipeline-step">
+              <div class="step-num">PILLAR 5</div>
+              <div class="step-name">쉽게 공유</div>
+              <div class="step-detail"><strong><code>#태그</code>·기간 조건</strong> 또는 직접 선택으로 암호화 파일 공유</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="slide-footer">
+        <span>핵심 주안점: 쉽게 메모하고 → 빠르게 검색하고 → AI를 활용하고 → 외부 내용을 쉽게 가져오고 → 쉽게 공유한다</span>
+        <span>Slide 02 / 10</span>
+      </div>
+    </section>
+
+    <!-- ==================== SLIDE 3: 핵심 기능 1 - 쉽게 메모 & 빠르게 검색 ==================== -->
+    <section class="slide">
+      <div>
+        <div class="slide-header">
+          <div>
+            <div class="slide-kicker">02. 주요 기능 ① — 쉽게 메모하고, 빠르게 검색하기 (내 메모 &amp; #태그 활용)</div>
+            <h2 class="slide-title">형식 없이 적고 <code>#태그</code>만 붙여두면, 언제든 주제별로 즉시 찾아낸다</h2>
+            <p class="slide-subtitle">작성 내용 유실을 막는 초안 보호와 한글 하이브리드 검색 · <code>#태그</code> 필터의 결합</p>
+          </div>
+          <span class="score-pill blue">핵심 주안점 1 &amp; 2</span>
+        </div>
+
+        <div class="slide-body">
+          <div class="grid-5-7">
+            <div style="display:flex; flex-direction:column; gap:14px;">
+              <div class="card white">
+                <div class="card-title">✍️ 1. 쉽게 메모 &amp; 간편한 <code>#태그</code> 지정</div>
+                <ul>
+                  <li><strong>단일 입력창 &amp; <code>Ctrl+Enter</code> 즉시 저장:</strong> 제목이나 폴더를 먼저 고를 필요 없이 떠오르는 업무 내용을 그대로 입력 (초안 자동 보관·복원)</li>
+                  <li><strong>작성 중에도, 저장 후에도 쉬운 <code>#태그</code> 관리:</strong> 본문에 <code>#업무명</code>을 바로 적거나 ‘태그 추가’에서 선택할 수 있고, 이미 저장한 메모도 상세 화면에서 새 태그 입력·기존 태그 선택·제거(<code>×</code>) 시 본문과 검색 색인이 즉시 동기화됨</li>
+                </ul>
+              </div>
+
+              <div class="card highlight-green">
+                <div class="card-title">⚡ 2. 빠르게 검색 — 하이브리드 검색 &amp; <code>#태그</code> 필터</div>
+                <ul>
+                  <li><strong><code>#태그</code>로 주제·업무별 모아보기:</strong> 업무나 프로젝트별 태그(예: <code>#예산</code>, <code>#인수인계</code>, <code>#회의</code>)만 클릭하면 관련 메모만 즉시 필터링되며, 선택한 태그 범위를 그대로 <strong>AI 정리나 동료 공유로 연결</strong> 가능</li>
+                  <li><strong>의미 검색 + 한글 2-gram 검색 결합(RRF):</strong> 조사(<em>‘회의록을’</em>)가 붙어 있거나 정확한 단어가 기억나지 않는 애매한 표현도 <code>#태그</code>·작성일·<code>@사람</code> 조건과 조합해 정확히 탐색</li>
+                </ul>
+              </div>
+            </div>
+
+            <!-- 캡처 슬롯 #2 -->
+            <div style="display:flex; flex-direction:column; justify-content:space-between;">
+              <div class="screenshot-slot" data-slot="2" style="flex:1;">
+                <input type="file" accept="image/*" hidden />
+                <img class="preview-img" alt="내 메모 작성 및 검색 화면" />
+                <button type="button" class="slot-change-btn">이미지 변경</button>
+                <div class="slot-placeholder">
+                  <div class="slot-icon">📸 2</div>
+                  <div class="slot-title">[캡처 2] ‘내 메모’ 작성 및 검색·상세 필터 화면</div>
+                  <div class="slot-desc">
+                    메모 입력창(‘초안 보관됨’ 표시)과 함께, 검색창 및 <strong>상세 검색(작성일·태그·사람 조건)</strong>으로<br />
+                    원하는 업무 메모를 빠르게 찾아낸 목록 화면을 캡처해 넣어주세요.
+                  </div>
+                  <div class="slot-tip">클릭하거나 캡처 이미지를 드래그 앤 드롭하세요</div>
+                </div>
+              </div>
+              <div class="guide-note">
+                <div>
+                  <strong>💡 캡처 팁:</strong> 메모 몇 건에 <code>#태그</code>가 붙어 있고, 검색어나 태그/날짜 필터가 적용되어 깔끔하게 걸러진 화면을 캡처하면 ‘빠른 검색’의 강점이 한눈에 보입니다.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="slide-footer">
+        <span>원문 보호 원칙: 색인과 태그는 언제든 재생성 가능한 구조로 관리되어 원본 메모를 안전하게 보존</span>
+        <span>Slide 03 / 10</span>
+      </div>
+    </section>
+
+    <!-- ==================== SLIDE 4: 핵심 기능 2 - AI 세팅 및 출처 기반 AI 활용 ==================== -->
+    <section class="slide">
+      <div>
+        <div class="slide-header">
+          <div>
+            <div class="slide-kicker">03. 주요 기능 ② — 원하는 AI를 세팅하고 내 메모를 근거로 결과물 만들기 (AI로 정리)</div>
+            <h2 class="slide-title">내가 고른 메모와 검색 근거로 ‘출처(<code>[M번호]</code>) 붙은 문서’ 즉시 생성</h2>
+            <p class="slide-subtitle">사용할 AI 프로바이더를 유연하게 세팅하고, 환각 없이 근거가 검증된 보고서·인수인계서 작성</p>
+          </div>
+          <span class="score-pill green">핵심 주안점 3 (AI 활용)</span>
+        </div>
+
+        <div class="slide-body">
+          <div class="grid-5-7">
+            <div style="display:flex; flex-direction:column; gap:14px;">
+              <div class="card highlight-blue">
+                <div class="card-title">⚙️ 1. 사용할 AI 간편 세팅 (더 보기 → 설정)</div>
+                <ul>
+                  <li><strong>원하는 AI 선택 및 연결 테스트:</strong> 설정 화면에서 <strong>Claude · ChatGPT · Gemini · Ollama(또는 OpenAI 호환 서버)</strong> 중 사용할 AI와 모델·API 키를 세팅</li>
+                  <li><strong>저장 전 연결 테스트 지원:</strong> 키나 모델명을 잘못 입력하지 않도록 저장 전에 즉시 연결 상태를 확인하고, 서버에서 사용 가능한 모델 목록도 바로 불러옴</li>
+                  <li><strong>프롬프트 생성 모드:</strong> API 키를 세팅하지 않은 환경에서도 검색된 근거가 정리된 <strong>완성형 프롬프트</strong>를 뽑아 사내 웹 AI 등에 붙여넣어 활용 가능</li>
+                </ul>
+              </div>
+
+              <div class="card white">
+                <div class="card-title">📑 2. 근거 직접 지정 & 원문 링크(<code>[M번호]</code>) 문서 생성</div>
+                <div>
+                  <span class="tag-chip blue">인수인계서</span>
+                  <span class="tag-chip green">보고서</span>
+                  <span class="tag-chip green">브리핑</span>
+                  <span class="tag-chip">개요/목차</span>
+                  <span class="tag-chip">목록 정리</span>
+                  <span class="tag-chip">이메일 초안</span>
+                  <span class="tag-chip purple">질문에 답하기</span>
+                </div>
+                <ul>
+                  <li><strong>다각도 자동 검색 또는 직접 선택:</strong> 지시사항에서 다각도 검색어를 도출해 근거를 찾거나, <strong>체크박스로 내가 직접 고른 메모만</strong> 근거로 지정해 AI 문서 생성</li>
+                  <li><strong>원문 즉시 대조:</strong> 결과물의 <strong><code>[M번호]</code>를 클릭하면 해당 원본 메모가 바로 열려</strong> 사실 여부를 즉시 확인 (기록에 없는 내용은 지어내지 않도록 제어)</li>
+                </ul>
+              </div>
+            </div>
+
+            <!-- 캡처 슬롯 #3 -->
+            <div style="display:flex; flex-direction:column; justify-content:space-between;">
+              <div class="screenshot-slot" data-slot="3" style="flex:1;">
+                <input type="file" accept="image/*" hidden />
+                <img class="preview-img" alt="AI로 정리 및 출처 링크 결과 화면" />
+                <button type="button" class="slot-change-btn">이미지 변경</button>
+                <div class="slot-placeholder">
+                  <div class="slot-icon">📸 3</div>
+                  <div class="slot-title">[캡처 3] ‘AI로 정리’ — 결과물(인수인계서/보고서) 및 <code>[M번호]</code> 출처 링크 화면</div>
+                  <div class="slot-desc">
+                    <strong>AI로 정리</strong> 탭에서 지시사항과 형식(예: 보고서 또는 인수인계서)을 지정해 생성된 결과물과<br />
+                    근거 메모 목록, 본문 내 <code>[M1]</code>, <code>[M2]</code> 원문 열기 링크가 보이는 화면을 캡처해 넣어주세요.
+                  </div>
+                  <div class="slot-tip">클릭하거나 캡처 이미지를 드래그 앤 드롭하세요</div>
+                </div>
+              </div>
+              <div class="guide-note">
+                <div>
+                  <strong>💡 핵심 차별점:</strong> 단순히 전체 메모를 뭉뚱그려 요약하는 것이 아니라, 내가 선택한 메모나 다각도 검색으로 찾은 정확한 근거만 바탕으로 문서를 쓰고 <code>[M번호]</code>를 눌러 원문을 바로 확인할 수 있습니다.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="slide-footer">
+        <span>토큰 예산 자동 관리: 긴 메모가 있어도 예산 안에서 전문 → 검색 적중 부분 → 앞부분 순으로 자동 조절하여 누락 방지</span>
+        <span>Slide 04 / 10</span>
+      </div>
+    </section>
+
+    <!-- ==================== SLIDE 5: 핵심 기능 3 - 다른 메모·문서 쉽게 가져오기 ==================== -->
+    <section class="slide">
+      <div>
+        <div class="slide-header">
+          <div>
+            <div class="slide-kicker">04. 주요 기능 ③ — 다른 앱의 메모와 업무 문서를 쉽게 가져오기</div>
+            <h2 class="slide-title">스티커 메모·삼성 노트·에버노트부터 엑셀·한글(HWP)·PDF까지 한곳으로!</h2>
+            <p class="slide-subtitle">미리보기로 내용을 확인·편집하고 필요한 항목만 깔끔하게 골라 담는 가져오기 워크플로우</p>
+          </div>
+          <span class="score-pill amber">핵심 주안점 4 (쉽게 가져오기)</span>
+        </div>
+
+        <div class="slide-body">
+          <div class="grid-5-7">
+            <div style="display:flex; flex-direction:column; gap:14px;">
+              <div class="card white">
+                <div class="card-title">🗂️ 1. 기존 메모 앱 & 협업 툴 기록 간편 가져오기</div>
+                <ul>
+                  <li><strong>Windows 스티커 메모 & 삼성 노트:</strong> PC에 저장된 기존 메모 DB를 원본 훼손 없이 읽어와 원래 작성 시각 그대로 통합 (불필요한 문단 ID 등 노이즈 자동 정리)</li>
+                  <li><strong>에버노트(<code>.enex</code>) 선택 가져오기:</strong> 내보낸 파일에서 제목·본문을 검색하고 <strong>본문 확인 및 체크박스 선택</strong>으로 필요한 노트만 쏙 골라 반입</li>
+                  <li><strong>Redmine 연동:</strong> 주소와 API 키를 세팅해 이슈·위키·문서·공지를 종류별·기간별로 가져오기 지원</li>
+                </ul>
+              </div>
+
+              <div class="card highlight-blue">
+                <div class="card-title">📄 2. 엑셀·한글(HWP/HWPX)·PDF 문서 파일을 메모로 가져오기</div>
+                <ul>
+                  <li><strong>다양한 행정 문서 직접 읽기:</strong> 엑셀(<code>.xlsx/.xlsm/.xls</code> 시트별), 한글(<code>.hwp/.hwpx</code> 구역별), PDF(페이지별), 텍스트(<code>.txt/.md</code>) 지원</li>
+                  <li><strong>미리보기·편집 후 선택 저장:</strong> 추출된 텍스트를 눈으로 확인하고 직접 다듬은 뒤, <strong>원하는 시트·페이지·구역만 체크해 메모로 저장</strong>하고 곧바로 <strong>‘이 자료를 AI로 정리’</strong>로 연결!</li>
+                </ul>
+              </div>
+            </div>
+
+            <!-- 캡처 슬롯 #4 -->
+            <div style="display:flex; flex-direction:column; justify-content:space-between;">
+              <div class="screenshot-slot" data-slot="4" style="flex:1;">
+                <input type="file" accept="image/*" hidden />
+                <img class="preview-img" alt="다른 메모 및 문서 가져오기 화면" />
+                <button type="button" class="slot-change-btn">이미지 변경</button>
+                <div class="slot-placeholder">
+                  <div class="slot-icon">📸 4</div>
+                  <div class="slot-title">[캡처 4] ‘가져오기·공유 → 다른 앱에서 가져오기’ 또는 문서 미리보기 화면</div>
+                  <div class="slot-desc">
+                    스티커 메모·삼성 노트·에버노트·Redmine 가져오기 화면이나,<br />
+                    <strong>파일을 메모로 가져오기</strong>에서 엑셀·한글·PDF의 시트/구역을 미리보고 체크하는 화면을 캡처해 넣어주세요.
+                  </div>
+                  <div class="slot-tip">클릭하거나 캡처 이미지를 드래그 앤 드롭하세요</div>
+                </div>
+              </div>
+              <div class="guide-note">
+                <div>
+                  <strong>💡 실무 활용 팁:</strong> 엑셀·한글·PDF 문서 속 내용을 일일이 복사해 옮길 필요 없이, 원하는 시트·구역만 골라 메모로 저장하고 즉시 검색·AI 정리에 활용할 수 있습니다.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="slide-footer">
+        <span>중복 방지 보장: 같은 외부 메모나 문서를 다시 가져와도 중복 생성되지 않으며, 미리보기 확인 후 저장만 반영</span>
+        <span>Slide 05 / 10</span>
+      </div>
+    </section>
+
+    <!-- ==================== SLIDE 6: 핵심 기능 4 - 동료와 쉽게 공유 & AI 설정 ==================== -->
+    <section class="slide">
+      <div>
+        <div class="slide-header">
+          <div>
+            <div class="slide-kicker">05. 주요 기능 ④ — <code>#태그</code>와 선택 체크로 동료와 쉽게 주고받기</div>
+            <h2 class="slide-title"><code>#태그</code> 하나로 공유할 업무 범위를 추리고, 눈으로 확인 후 안전하게 전달</h2>
+            <p class="slide-subtitle">일일이 메모를 찾지 않아도 태그·기간 조건과 체크박스로 간편하게 주고받는 양방향 공유</p>
+          </div>
+          <span class="score-pill purple">핵심 주안점 5 (쉽게 공유)</span>
+        </div>
+
+        <div class="slide-body">
+          <div class="grid-5-7">
+            <div style="display:flex; flex-direction:column; gap:14px;">
+              <div class="card highlight-purple">
+                <div class="card-title">🤝 1. 보낼 때 — <code>#태그</code>로 한 번에 추리고 확인 후 핀셋 공유</div>
+                <ul>
+                  <li><strong><code>#태그</code>·기간 조건 또는 직접 선택:</strong> 메모를 하나씩 찾을 필요 없이 특정 <strong><code>#태그</code>(예: <code>#인수인계</code>, <code>#프로젝트A</code>)나 작성일·사람 조건</strong>으로 보낼 범위를 한 번에 좁히거나 체크박스로 직접 선택</li>
+                  <li><strong>‘무엇이 나가는지 보기’ 사전 검토:</strong> 내보내기 전 대상 목록 전체를 검색·본문 확인하며 불필요한 개인 메모를 체크 해제 가능</li>
+                  <li><strong>AES-256-GCM 비밀번호 암호화:</strong> 비밀번호를 지정하면 공유 파일(<code>.json</code>)이 암호화되어 사내 메신저·이메일로도 안전하게 전달</li>
+                </ul>
+              </div>
+
+              <div class="card highlight-green">
+                <div class="card-title">📥 2. 받을 때 — 찾아보기로 열어 필요한 메모만 선택 반입</div>
+                <ul>
+                  <li><strong>파일 찾아보기 &amp; 자동 미리보기:</strong> 동료에게 받은 <code>.json</code> 파일을 선택(암호화 파일은 비밀번호 입력)하면 들어있는 메모 목록·태그·본문을 즉시 미리보기</li>
+                  <li><strong>선택 저장 및 자동 중복 제외:</strong> 이미 내 DB에 있는 동일한 메모는 자동으로 안내·건너뛰고, 내가 체크한 메모만 태그와 함께 그대로 저장</li>
+                </ul>
+              </div>
+            </div>
+
+            <!-- 캡처 슬롯 #5 -->
+            <div style="display:flex; flex-direction:column; justify-content:space-between;">
+              <div class="screenshot-slot" data-slot="5" style="flex:1;">
+                <input type="file" accept="image/*" hidden />
+                <img class="preview-img" alt="동료와 주고받기 또는 AI 설정 화면" />
+                <button type="button" class="slot-change-btn">이미지 변경</button>
+                <div class="slot-placeholder">
+                  <div class="slot-icon">📸 5</div>
+                  <div class="slot-title">[캡처 5] ‘가져오기·공유 → 동료와 주고받기’ (공유·인수인계) 화면</div>
+                  <div class="slot-desc">
+                    <strong>동료와 주고받기</strong>에서 보낼 메모(또는 받은 <code>.json</code> 파일)의 목록·본문을 미리 보고<br />
+                    체크박스로 선택해 비밀번호 암호화 파일로 내보내거나 가져오는 화면을 캡처해 넣어주세요.
+                  </div>
+                  <div class="slot-tip">클릭하거나 캡처 이미지를 드래그 앤 드롭하세요</div>
+                </div>
+              </div>
+              <div class="guide-note">
+                <div>
+                  <strong>💡 협업·인수인계 강점:</strong> 보낼 때도, 받을 때도 어떤 메모가 오가는지 본문을 미리 보고 체크박스로 고를 수 있어 개인 메모가 섞여 나갈 걱정이 전혀 없습니다.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="slide-footer">
+        <span>데이터 무결성: 공유 미리보기 도중 원본 메모가 수정·삭제되면 다시 확인하도록 안내하여 정확한 전달 보장</span>
+        <span>Slide 06 / 10</span>
+      </div>
+    </section>
+
+    <!-- ==================== SLIDE 7: 5대 핵심 기능별 전후 비교 및 실측 지표 ==================== -->
+    <section class="slide">
+      <div>
+        <div class="slide-header">
+          <div>
+            <div class="slide-kicker">06. 5대 핵심 기능별 도입 효과 및 실측 검증</div>
+            <h2 class="slide-title">메모 · 검색 · AI 활용 · 가져오기 · 공유가 어떻게 달라지는가?</h2>
+            <p class="slide-subtitle">5대 핵심 기능별 기존 방식과의 차이점 및 프로젝트 실측 지표</p>
+          </div>
+          <span class="score-pill blue">5대 핵심 기능 Before & After</span>
+        </div>
+
+        <div class="slide-body">
+          <table class="comp-table">
+            <thead>
+              <tr>
+                <th style="width:18%;">5대 핵심 기능</th>
+                <th style="width:33%;">기존 방식 (Before)</th>
+                <th style="width:33%;">memoinall 활용 (After)</th>
+                <th style="width:16%;">핵심 개선점</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>① 쉽게 메모</strong></td>
+                <td>메모할 때마다 폴더·제목·양식을 먼저 고민해야 하고, 작성 중 창을 닫으면 적던 내용이 사라짐</td>
+                <td>분류 강요 없이 단일 입력창에 바로 적고(<code>Ctrl+Enter</code>), <strong>초안 자동 보관·복원 및 닫기 전 변경 확인</strong>으로 보호</td>
+                <td class="good">기록 장벽 해소 &<br />작성 내용 유실 방지</td>
+              </tr>
+              <tr>
+                <td><strong>② 빠르게 검색</strong></td>
+                <td>정확한 단어가 기억나지 않거나 한글 조사가 다르게 붙으면 검색되지 않아 목록을 일일이 찾아야 함</td>
+                <td><strong>의미 벡터 + 한글 2-gram 하이브리드 검색</strong>에 <strong><code>#태그</code>·작성일·<code>@사람</code> 필터</strong>를 조합해 주제별 메모를 즉시 탐색</td>
+                <td class="good"><code>#태그</code> &amp; 문맥 검색으로<br />원하는 메모 즉시 탐색</td>
+              </tr>
+              <tr>
+                <td><strong>③ AI 활용</strong></td>
+                <td>AI에게 정리를 맡기려면 관련 메모를 일일이 찾아 복사·붙여넣어야 하고, 결과물의 원문 근거 확인이 어려움</td>
+                <td>세팅한 AI로 다각도 검색·<strong>현재 <code>#태그</code> 필터 범위·직접 고른 메모</strong>를 근거로 정리하고, <strong><code>[M번호]</code>로 원문 즉시 열람</strong></td>
+                <td class="good">수작업 복붙 제거 &amp;<br />원문 출처 즉시 확인</td>
+              </tr>
+              <tr>
+                <td><strong>④ 쉽게 가져오기</strong></td>
+                <td>스티커 메모, 삼성 노트, 에버노트, Redmine이나 엑셀·한글(HWP)·PDF에 내용이 흩어져 통합 활용 불가</td>
+                <td>외부 앱 메모와 문서(시트·페이지·구역 선택)를 가져오며 <strong>출처·분류용 <code>#태그</code>를 자동 부여</strong>해 검색·공유에 연결</td>
+                <td class="good">흩어진 외부 메모와<br />문서의 손쉬운 통합</td>
+              </tr>
+              <tr>
+                <td><strong>⑤ 쉽게 공유</strong></td>
+                <td>전체 메모 중 동료에게 필요한 기록만 골라내기 번거롭고, 전달 전 내용 확인이나 파일 암호화가 어려움</td>
+                <td><strong>특정 <code>#태그</code>·기간 조건</strong>으로 보낼 메모를 한 번에 추린 뒤, <strong>본문 확인·체크박스 선택</strong> 후 <strong>AES-256 암호화 파일(<code>.json</code>)</strong>로 교환</td>
+                <td class="good"><code>#태그</code> 범위 지정 &amp;<br />확인 후 안전 핀셋 공유</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="grid-3">
+            <div class="card highlight-blue">
+              <div class="card-title">⚡ 실측 1: 모델 로드 17.8초 → 1.5초</div>
+              <p>PyTorch(590MB) 대신 <strong>ONNX Runtime(49MB)</strong>을 적용해 설치 파일은 <strong>46.2MB</strong>로 줄이고, 임베딩 모델 로드 시간을 <strong>17.8초에서 1.5초</strong>로 단축 (벡터 코사인 유사도 1.0 동일)</p>
+            </div>
+            <div class="card highlight-green">
+              <div class="card-title">🎯 실측 2: 토큰 예산 3,000 → 2,999 맞춤</div>
+              <p>19,000자 장문 메모가 섞인 실제 데이터에서 예산 3,000토큰 지정 시 <strong>2,999토큰 사용·근거 12건 자동 수록</strong> (미적용 시 메모 1건에 10,954토큰 초과하는 문제 해결)</p>
+            </div>
+            <div class="card highlight-purple">
+              <div class="card-title">🔍 실측 3: 하이브리드 검색 & 658개 테스트</div>
+              <p>어휘 일치 질의 <strong>Top-1(9/9)</strong>, 은유적 질의(<em>“돈이 많이 새는 곳”</em> → 서버 비용) <strong>Top-3(5/6)</strong> 적중 및 Python 테스트 <strong>658건</strong>·브라우저 흐름 <strong>16종</strong> 검증 통과</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="slide-footer">
+        <span>측정 근거: 프로젝트 실측 벤치마크(README.md) 및 자동화 회귀 테스트(docs/usability-review.md) 기준</span>
+        <span>Slide 07 / 10</span>
+      </div>
+    </section>
+
+    <!-- ==================== SLIDE 8: 종합 요약 및 확산 계획 ==================== -->
+    <section class="slide">
+      <div>
+        <div class="slide-header">
+          <div>
+            <div class="slide-kicker">07. 종합 요약 및 향후 활용 계획</div>
+            <h2 class="slide-title">쉽게 적고, 빠르게 찾고, AI로 정리해 동료와 나누는 스마트 워크</h2>
+            <p class="slide-subtitle">실무 활용성 · 공유 가능성 · 창의적 업무 혁신 요약 및 확산 로드맵</p>
+          </div>
+          <span class="score-pill blue">Summary & Roadmap</span>
+        </div>
+
+        <div class="slide-body">
+          <div class="grid-3">
+            <div class="card highlight-blue">
+              <div class="card-title">⚡ 실무 활용성</div>
+              <ul>
+                <li>분류 없이 쉽게 적고 <strong>초안 자동 보관·복원</strong>으로 보호</li>
+                <li>하이브리드 검색과 필터로 <strong>과거 메모를 빠르게 탐색</strong></li>
+                <li>선택한 메모를 근거로 <strong>출처(<code>[M번호]</code>) 붙은 AI 정리</strong></li>
+                <li>외부 앱 메모 및 엑셀·한글(HWP)·PDF 선택 구간 흡수</li>
+              </ul>
+            </div>
+
+            <div class="card highlight-green">
+              <div class="card-title">🤝 공유 가능성</div>
+              <ul>
+                <li><strong><code>Setup.exe</code> 원클릭 설치 파일</strong>로 누구나 즉시 설치</li>
+                <li>Claude·ChatGPT·Gemini 등 <strong>원하는 AI 간편 세팅</strong></li>
+                <li>API 키 없이도 <strong>근거 프롬프트 복사</strong>로 웹 AI 활용 가능</li>
+                <li><strong><code>#태그</code> 조건 &amp; 체크박스 선택</strong>으로 암호화 파일 공유</li>
+              </ul>
+            </div>
+
+            <div class="card highlight-purple">
+              <div class="card-title">💡 창의성 (차별점)</div>
+              <ul>
+                <li><strong>“적을 땐 무형식, 꺼낼 땐 구조화”</strong>로 기록 장벽 해소</li>
+                <li>의미 벡터 검색 + 한글 2-gram 키워드 하이브리드 검색</li>
+                <li>다각도 질의 도출 및 내가 고른 메모 기반 AI 문서 생성</li>
+                <li>메모·검색·AI·가져오기·공유의 5대 업무 흐름 단일화</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="card white" style="padding:22px;">
+            <div class="card-title">🌱 우리 원 확산을 위한 3단계 활용 계획</div>
+            <div class="grid-3" style="margin-top:8px;">
+              <div>
+                <strong style="color:var(--primary);">1단계: 설치 파일 & 가이드 공유</strong>
+                <p style="margin-top:4px;">사내 게시판에 <code>memoinall-Setup.exe</code>와 AI 세팅 가이드를 배포하여, 흩어진 스티커 메모·엑셀·한글 자료를 손쉽게 통합하도록 지원</p>
+              </div>
+              <div>
+                <strong style="color:var(--emerald);">2단계: 보고서·인수인계 표준화</strong>
+                <p style="margin-top:4px;">주간 보고서 초안 작성 및 순환보직·담당 변경 시 선택 메모 공유(<code>.json</code>)와 AI 인수인계서 생성을 활용해 업무 인수인계 시간 단축</p>
+              </div>
+              <div>
+                <strong style="color:var(--purple);">3단계: 부서별 AI 활용 노하우 확산</strong>
+                <p style="margin-top:4px;">부서별 자주 쓰는 지시사항과 태그 공유 팩을 교환하며 우리 원의 실질적인 AI 학습 및 업무 자동화 문화 정착에 기여</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="slide-footer">
+        <span>감사합니다 — memoinall: 쉽게 메모하고, 빠르게 검색하고, AI로 정리해 쉽게 나누는 업무 에이전트</span>
+        <span>Slide 08 / 10</span>
+      </div>
+    </section>
+
+    <!-- ==================== SLIDE 9: 부록 A - 프로그램 설치 및 첫 실행 방법 ==================== -->
+    <section class="slide">
+      <div>
+        <div class="slide-header">
+          <div>
+            <div class="slide-kicker">Appendix A. 부록 — 프로그램 설치 및 첫 실행 방법</div>
+            <h2 class="slide-title">Python 설치도, 관리자 권한도 필요 없는 1분 원클릭 설치</h2>
+            <p class="slide-subtitle">전달받은 <code>memoinall-Setup-0.1.0.exe</code> 파일 하나만 실행하면 모든 준비가 끝납니다</p>
+          </div>
+          <span class="score-pill green">부록 1: 설치 가이드</span>
+        </div>
+
+        <div class="slide-body">
+          <div class="grid-5-7">
+            <div style="display:flex; flex-direction:column; gap:14px;">
+              <div class="card white">
+                <div class="card-title">💿 1단계: 설치 파일 실행 (Windows 10/11 x64)</div>
+                <ul>
+                  <li><strong><code>memoinall-Setup-0.1.0.exe</code>(약 46MB) 더블클릭:</strong> 별도의 개발 환경(Python 등)이나 관리자 권한 없이 현재 사용자 폴더(<code>%LOCALAPPDATA%\Programs\memoinall</code>)에 즉시 설치됩니다.</li>
+                  <li><strong>바로가기 자동 등록:</strong> 시작 메뉴에 <code>memoinall</code>이 등록되며, 바탕화면 바로가기 생성 여부를 선택할 수 있습니다. (무설치 단일/폴더 실행 파일 방식도 지원)</li>
+                </ul>
+              </div>
+
+              <div class="card highlight-blue">
+                <div class="card-title">🚀 2단계: 앱 첫 실행 및 백그라운드 검색 모델 준비</div>
+                <ul>
+                  <li><strong>기다림 없는 즉시 사용:</strong> 첫 실행 시 의미 검색용 임베딩 모델을 백그라운드로 자동 다운로드하며, <strong>내려받는 동안에도 즉시 메모 작성·저장·키워드 검색을 사용할 수 있습니다.</strong></li>
+                  <li><strong>안전한 데이터 분리 보관:</strong> 메모 DB와 설정·모델은 <code>%USERPROFILE%\.memoinall</code>에 별도 보관되어, <strong>새 버전을 덮어써 업데이트하거나 앱을 제거해도 작성한 메모는 삭제되지 않습니다.</strong></li>
+                </ul>
+              </div>
+            </div>
+
+            <!-- 캡처 슬롯 #6 & #7 (설치 화면 + 첫 실행 화면) -->
+            <div style="display:flex; flex-direction:column; gap:12px; justify-content:space-between;">
+              <div class="grid-2" style="gap:14px; flex:1;">
+                <div class="screenshot-slot" data-slot="6" style="min-height:240px;">
+                  <input type="file" accept="image/*" hidden />
+                  <img class="preview-img" alt="Windows 설치 마법사 캡처" />
+                  <button type="button" class="slot-change-btn">이미지 변경</button>
+                  <div class="slot-placeholder">
+                    <div class="slot-icon">📸 6</div>
+                    <div class="slot-title">[캡처 6] Setup.exe 설치 화면</div>
+                    <div class="slot-desc">
+                      <code>memoinall-Setup-0.1.0.exe</code> 실행 시 나타나는 설치 경로 확인 또는 바탕화면 바로가기 선택 화면을 캡처해 넣어주세요.
+                    </div>
+                    <div class="slot-tip">클릭 또는 드래그 앤 드롭</div>
+                  </div>
+                </div>
+
+                <div class="screenshot-slot" data-slot="7" style="min-height:240px;">
+                  <input type="file" accept="image/*" hidden />
+                  <img class="preview-img" alt="설치 완료 또는 첫 실행 화면 캡처" />
+                  <button type="button" class="slot-change-btn">이미지 변경</button>
+                  <div class="slot-placeholder">
+                    <div class="slot-icon">📸 7</div>
+                    <div class="slot-title">[캡처 7] 설치 완료 / 첫 실행 화면</div>
+                    <div class="slot-desc">
+                      설치 완료 화면이나 시작 메뉴에서 실행된 첫 화면(사이드바의 검색 모델 준비/완료 상태 안내 등)을 캡처해 넣어주세요.
+                    </div>
+                    <div class="slot-tip">클릭 또는 드래그 앤 드롭</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="guide-note" style="margin-top:0;">
+                <div>
+                  <strong>💡 타 부서 배포 팁:</strong> WebView2 런타임이 없는 PC에서도 설치 프로그램이 자동으로 확인·안내해 주므로 누구나 막힘없이 설치할 수 있습니다.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="slide-footer">
+        <span>부록 A: 프로그램 설치 및 업데이트 가이드 — 재설치·업데이트 시에도 기존 메모 데이터 100% 유지</span>
+        <span>Slide 09 / 10</span>
+      </div>
+    </section>
+
+    <!-- ==================== SLIDE 10: 부록 B - 사용할 AI 초기 세팅 방법 ==================== -->
+    <section class="slide">
+      <div>
+        <div class="slide-header">
+          <div>
+            <div class="slide-kicker">Appendix B. 부록 — 사용할 AI 초기 세팅 방법 (더 보기 → 설정)</div>
+            <h2 class="slide-title">원하는 AI를 선택하고 ‘연결 테스트’ 한 번이면 세팅 완료!</h2>
+            <p class="slide-subtitle">Claude · ChatGPT · Gemini 등 선호하는 모델을 연결하거나, 키 없이 프롬프트 복사 모드로 바로 사용</p>
+          </div>
+          <span class="score-pill purple">부록 2: AI 세팅 가이드</span>
+        </div>
+
+        <div class="slide-body">
+          <div class="grid-5-7">
+            <div style="display:flex; flex-direction:column; gap:14px;">
+              <div class="card white">
+                <div class="card-title">⚙️ AI 연결 3단계 따라하기</div>
+                <ul>
+                  <li><strong>1. 설정 메뉴 열기:</strong> 상단 메뉴의 <strong>[더 보기 → 설정]</strong>을 클릭합니다.</li>
+                  <li><strong>2. 프로바이더 & 모델 선택:</strong> <strong>Claude (Anthropic) · ChatGPT (OpenAI) · Gemini (Google) · Ollama</strong> 중 사용할 AI를 고르고 API 키를 입력합니다. (프로바이더별 키와 모델이 각각 저장되어 언제든 전환 가능)</li>
+                  <li><strong>3. 연결 테스트 후 저장:</strong> 저장하기 전에 <strong><code>[연결 테스트]</code></strong> 버튼을 눌러 입력한 키와 모델이 정상 응답하는지 바로 확인한 뒤 <strong><code>[저장]</code></strong>을 누릅니다.</li>
+                </ul>
+              </div>
+
+              <div class="card highlight-green">
+                <div class="card-title">💡 알아두면 좋은 활용 팁</div>
+                <ul>
+                  <li><strong>모델 목록 자동 불러오기:</strong> <code>[서버에서 모델 목록 불러오기]</code>를 누르면 현재 사용 가능한 모델 이름을 직접 타이핑할 필요 없이 목록에서 고를 수 있습니다.</li>
+                  <li><strong>API 키가 없어도 100% 활용:</strong> 별도의 API 키를 세팅하지 않아도, <strong>[AI로 정리]</strong> 실행 시 관련 메모 근거가 완벽하게 묶인 <strong>완성형 프롬프트</strong>를 만들어주므로 사용 중인 웹 AI 화면에 그대로 붙여넣어 쓸 수 있습니다.</li>
+                </ul>
+              </div>
+            </div>
+
+            <!-- 캡처 슬롯 #8 (AI 설정 화면) -->
+            <div style="display:flex; flex-direction:column; justify-content:space-between;">
+              <div class="screenshot-slot" data-slot="8" style="flex:1;">
+                <input type="file" accept="image/*" hidden />
+                <img class="preview-img" alt="더 보기 - 설정 AI 세팅 화면 캡처" />
+                <button type="button" class="slot-change-btn">이미지 변경</button>
+                <div class="slot-placeholder">
+                  <div class="slot-icon">📸 8</div>
+                  <div class="slot-title">[캡처 8] ‘더 보기 → 설정’ — 사용할 AI 선택 및 연결 테스트 화면</div>
+                  <div class="slot-desc">
+                    <strong>더 보기 → 설정</strong> 화면에서 프로바이더(Claude / ChatGPT / Gemini 등)를 선택하고,<br />
+                    API 키(마스킹 표시)·모델 설정 및 <strong><code>연결 테스트</code> 성공 메시지</strong>가 뜬 화면을 캡처해 넣어주세요.
+                  </div>
+                  <div class="slot-tip">클릭하거나 캡처 이미지를 드래그 앤 드롭하세요</div>
+                </div>
+              </div>
+              <div class="guide-note">
+                <div>
+                  <strong>💡 세팅 편의성 포인트:</strong> 잘못된 키를 저장하고 나중에 오류를 겪지 않도록 ‘저장 전 연결 테스트’와 ‘API 키 마스킹 표시’까지 지원해 누구나 혼자서도 쉽게 세팅할 수 있습니다.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="slide-footer">
+        <span>부록 B: AI 초기 세팅 가이드 — 프로바이더별 설정 자동 기억 및 호환 파라미터 자동 조정 지원</span>
+        <span>Slide 10 / 10</span>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    // 1. 뷰 모드 전환 (전체 스크롤 vs PPT 슬라이드)
+    let currentMode = 'scroll';
+    let currentSlideIdx = 0;
+    const slides = Array.from(document.querySelectorAll('.slide'));
+    const counterEl = document.getElementById('slideCounter');
+    const btnPrev = document.getElementById('btnPrev');
+    const btnNext = document.getElementById('btnNext');
+
+    function setViewMode(mode) {
+      currentMode = mode;
+      document.body.classList.toggle('mode-slide', mode === 'slide');
+      document.getElementById('btnScrollMode').classList.toggle('active', mode === 'scroll');
+      document.getElementById('btnSlideMode').classList.toggle('active', mode === 'slide');
+      btnPrev.style.display = mode === 'slide' ? 'inline-block' : 'none';
+      btnNext.style.display = mode === 'slide' ? 'inline-block' : 'none';
+      updateSlideView();
+    }
+
+    function moveSlide(delta) {
+      if (currentMode !== 'slide') return;
+      currentSlideIdx = Math.max(0, Math.min(slides.length - 1, currentSlideIdx + delta));
+      updateSlideView();
+    }
+
+    function updateSlideView() {
+      slides.forEach((s, idx) => {
+        s.classList.toggle('active-slide', idx === currentSlideIdx);
+      });
+      if (currentMode === 'slide') {
+        counterEl.textContent = `${currentSlideIdx + 1} / ${slides.length}`;
+      } else {
+        counterEl.textContent = `총 ${slides.length}장`;
+      }
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (currentMode !== 'slide') return;
+      if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
+        e.preventDefault();
+        moveSlide(1);
+      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        e.preventDefault();
+        moveSlide(-1);
+      }
+    });
+
+    // 2. 캡처/발표 가이드 토글
+    function toggleGuides() {
+      const hidden = document.body.classList.toggle('hide-guides');
+      const btn = document.getElementById('btnToggleGuide');
+      btn.textContent = hidden ? '💡 캡처/발표 가이드 보이기' : '💡 캡처/발표 가이드 숨기기';
+    }
+
+    // 3. 캡처 슬롯: 클릭 또는 드래그앤드롭으로 즉시 이미지 삽입 (브라우저 로컬 미리보기)
+    document.querySelectorAll('.screenshot-slot').forEach((slot) => {
+      const fileInput = slot.querySelector('input[type="file"]');
+      const imgEl = slot.querySelector('img.preview-img');
+      const changeBtn = slot.querySelector('.slot-change-btn');
+      const slotKey = 'memoinall_contest_slot_' + slot.dataset.slot;
+
+      try {
+        const saved = localStorage.getItem(slotKey);
+        if (saved) {
+          imgEl.src = saved;
+          slot.classList.add('has-image');
+        }
+      } catch (_) {}
+
+      function loadFile(file) {
+        if (!file || !file.type.startsWith('image/')) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          imgEl.src = ev.target.result;
+          slot.classList.add('has-image');
+          try {
+            localStorage.setItem(slotKey, ev.target.result);
+          } catch (_) {}
+        };
+        reader.readAsDataURL(file);
+      }
+
+      slot.addEventListener('click', (e) => {
+        if (e.target === changeBtn || !slot.classList.contains('has-image')) {
+          fileInput.click();
+        }
+      });
+
+      changeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        fileInput.click();
+      });
+
+      fileInput.addEventListener('change', () => {
+        if (fileInput.files && fileInput.files[0]) {
+          loadFile(fileInput.files[0]);
+        }
+      });
+
+      slot.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        slot.classList.add('dragover');
+      });
+
+      slot.addEventListener('dragleave', () => {
+        slot.classList.remove('dragover');
+      });
+
+      slot.addEventListener('drop', (e) => {
+        e.preventDefault();
+        slot.classList.remove('dragover');
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+          loadFile(e.dataTransfer.files[0]);
+        }
+      });
+    });
+  </script>
+</body>
+</html>

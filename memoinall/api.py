@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import time
 from contextlib import asynccontextmanager, suppress
@@ -15,6 +17,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import (
     config,
+    ai_history,
     context,
     db,
     documents,
@@ -38,6 +41,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 def _prepare_search() -> None:
     started = time.monotonic()
     try:
+        store.backfill_source_tags()
         embed.ensure_loaded_async()
         count = store.reindex_pending()
         log.info("검색 준비: 재색인 %d건 예약 (%.3fs)", count, time.monotonic() - started)
@@ -336,6 +340,8 @@ def patch_todo(todo_id: int, payload: dict = Body(...)):
 @app.get("/api/import/sources")
 def import_sources(path: str | None = None, shared: str | None = None):
     """각 소스의 가용 여부. UI 가 켜고 끌 판단을 여기서 한다."""
+    from .source_tags import SOURCE_TAGS
+
     out = []
     for imp in importers.all_importers(files_path=path, shared_path=shared):
         available = imp.available()
@@ -347,6 +353,7 @@ def import_sources(path: str | None = None, shared: str | None = None):
                 "path": str(imp.path or ""),
                 "reason": "" if available else imp.unavailable_reason(),
                 "network": imp.name == "redmine",
+                "source_tag": SOURCE_TAGS.get(imp.name, ""),
                 # 이미 가져와 있는 양. 다시 가져올지 지울지 판단할 근거가 된다.
                 "stored": store.count_by_source(imp.name),
             }
@@ -436,8 +443,13 @@ def _export_filters(payload: dict) -> dict:
 @app.post("/api/export/preview")
 def export_preview(payload: dict = Body(default={})):
     """무엇이 나갈지 먼저 보여준다. 남에게 보내는 파일이라 내용 확인이 필요하다."""
-    rows = exchange.select(**_export_filters(payload))
-    body = exchange.dumps(exchange.build(rows, note=str(payload.get("note") or "")))
+    filters = _export_filters(payload)
+    filters["limit"] = min(filters["limit"], 1001)
+    rows = exchange.select(**filters)
+    if len(rows) > 1000:
+        raise HTTPException(400, "한 번에 1,000건까지 확인할 수 있습니다. 태그·기간으로 범위를 좁혀주세요.")
+    pack = exchange.build(rows, note=str(payload.get("note") or ""))
+    body = exchange.dumps(pack)
     return {
         "count": len(rows),
         "bytes": len(body.encode("utf-8")),
@@ -449,19 +461,38 @@ def export_preview(payload: dict = Body(default={})):
                 "title": m["title"],
                 "created_at": m["created_at"],
                 "source": m.get("source") or "",
+                "body": item["body"],
+                "tags": item["tags"],
+                "revision": _export_revision(item),
             }
-            for m in rows[:30]
+            for m, item in zip(rows, pack["memos"])
         ],
     }
+
+
+def _export_revision(item: dict) -> str:
+    return hashlib.sha256(json.dumps(item, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def _reviewed_export(payload: dict) -> dict:
+    filters = _export_filters(payload)
+    rows = exchange.select(**filters)
+    pack = exchange.build(rows, note=str(payload.get("note") or ""))
+    revisions = payload.get("revisions")
+    if revisions is not None:
+        actual = {str(m["id"]): _export_revision(item) for m, item in zip(rows, pack["memos"])}
+        if (filters["ids"] is None or not isinstance(revisions, dict)
+                or set(revisions) != {str(i) for i in filters["ids"]} or revisions != actual):
+            raise HTTPException(409, "선택한 메모가 변경되거나 삭제되었습니다. 미리보기를 다시 확인하세요.")
+    if not rows:
+        raise HTTPException(400, "내보낼 메모가 없습니다 — 조건을 확인하세요.")
+    return pack
 
 
 @app.post("/api/export")
 def export_run(payload: dict = Body(default={})):
     """파일로 저장. 경로를 안 주면 다운로드 폴더에 기본 이름으로 만든다."""
-    rows = exchange.select(**_export_filters(payload))
-    if not rows:
-        raise HTTPException(400, "내보낼 메모가 없습니다 — 조건을 확인하세요.")
-    pack = exchange.build(rows, note=str(payload.get("note") or ""))
+    pack = _reviewed_export(payload)
     target = str(payload.get("path") or "").strip() or exchange.export_dir()
     password = str(payload.get("password") or "")
     try:
@@ -477,10 +508,7 @@ def export_run(payload: dict = Body(default={})):
 @app.post("/api/export/content")
 def export_content(payload: dict = Body(default={})):
     """파일 대신 내용 그대로. 메신저에 붙여넣어 보낼 때 쓴다."""
-    rows = exchange.select(**_export_filters(payload))
-    if not rows:
-        raise HTTPException(400, "내보낼 메모가 없습니다 — 조건을 확인하세요.")
-    pack = exchange.build(rows, note=str(payload.get("note") or ""))
+    pack = _reviewed_export(payload)
     password = str(payload.get("password") or "")
     try:
         content = exchange.dumps(exchange.seal(pack, password))
@@ -518,6 +546,8 @@ def _run_imports(payload: dict, *, dry_run: bool):
         "shared_path": payload.get("shared_path"),
         "shared_content": payload.get("shared_content"),
         "shared_password": payload.get("shared_password"),
+        "evernote_path": payload.get("evernote_path"),
+        "evernote_content": payload.get("evernote_content"),
         **_redmine_opts(payload.get("redmine") or {}),
     }
     try:
@@ -538,11 +568,22 @@ def _run_imports(payload: dict, *, dry_run: bool):
         except tags.TagError as exc:
             raise HTTPException(400, str(exc))
 
+    selected_keys = payload.get("selected_keys")
+    if selected_keys is not None and (
+        source not in ("shared", "evernote") or not isinstance(selected_keys, list)
+        or len(selected_keys) > 1000 or any(not isinstance(k, str) for k in selected_keys)
+    ):
+        raise HTTPException(400, "파일에서 선택한 메모 목록이 올바르지 않습니다.")
+    if selected_keys is not None and not payload.get("revision"):
+        raise HTTPException(400, "선택 가져오기 전에 미리보기를 확인하세요.")
     results = []
     for imp in targets:
         r = importers.run_import(
             imp, dry_run=dry_run, min_chars=min_chars, update_existing=update_existing,
             extra_tags=extra_tags,
+            review=bool(payload.get("review")) and source in ("shared", "evernote"),
+            selected_keys=selected_keys,
+            expected_revision=str(payload.get("revision") or ""),
         )
         lengths = sorted(r.lengths)
         results.append(
@@ -554,6 +595,7 @@ def _run_imports(payload: dict, *, dry_run: bool):
                 "found": r.found,
                 "importable": r.imported,
                 "updated": r.updated,
+                "corrected_times": r.corrected_times,
                 "unchanged": r.unchanged,
                 "skipped_existing": r.skipped_existing,
                 "skipped_duplicate": r.skipped_duplicate,
@@ -561,6 +603,10 @@ def _run_imports(payload: dict, *, dry_run: bool):
                 "skipped_short": r.skipped_short,
                 "error": r.error,
                 "samples": r.samples,
+                "items": r.items,
+                "revision": r.revision,
+                "selected": r.selected,
+                "warnings": r.warnings,
                 "median_chars": lengths[len(lengths) // 2] if lengths else 0,
                 "max_chars": lengths[-1] if lengths else 0,
             }
@@ -572,6 +618,7 @@ def _run_imports(payload: dict, *, dry_run: bool):
         "results": results,
         "total": sum(r["importable"] for r in results),
         "total_updated": sum(r["updated"] for r in results),
+        "total_corrected_times": sum(r["corrected_times"] for r in results),
     }
 
 
@@ -705,10 +752,15 @@ def _generate_request(payload: dict, instruction: str, *, run: bool = False):
         since=payload.get("since"),
         until=payload.get("until"),
         memo_ids=_memo_ids(payload.get("memo_ids")),
+        source_revisions=payload.get("source_revisions"),
     )
     try:
         if run:
-            return generate.generate(instruction, effort=payload.get("effort"), **options)
+            result = generate.generate(instruction, effort=payload.get("effort"), **options)
+            if result.get("output"):
+                saved = ai_history.create(result)
+                result.update({key: saved[key] for key in ("history_id", "version", "latest_version", "draft_body", "memo_id", "versions")})
+            return result
         return generate.build_pack(instruction, **options)
     except (KeyError, ValueError) as exc:
         raise HTTPException(400, str(exc))
@@ -720,6 +772,78 @@ def do_generate(payload: dict = Body(...)):
     if not instruction:
         raise HTTPException(400, "instruction 이 필요합니다.")
     return _generate_request(payload, instruction, run=True)
+
+
+@app.get("/api/generate/memos")
+def generation_candidates(q: str = "", limit: int = Query(20, ge=1, le=50), offset: int = Query(0, ge=0, le=10000)):
+    if q.strip():
+        rows = search.search(q, limit=offset + limit + 1)[offset:]
+    else:
+        rows = store.list_memos(limit=limit + 1, offset=offset)
+    return {"items": [generate.candidate(store.get_memo(m["id"])) for m in rows[:limit]], "has_more": len(rows) > limit}
+
+
+@app.get("/api/generate/history")
+def generation_history(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0), q: str = ""):
+    return ai_history.list_results(limit, offset, q)
+
+
+def _history_action(callback, *args, **kwargs):
+    try:
+        return callback(*args, **kwargs)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc).strip("'"))
+    except ai_history.Conflict as exc:
+        raise HTTPException(409, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.get("/api/generate/history/{result_id}")
+def generation_result(result_id: int, version: int | None = Query(None, ge=1)):
+    return _history_action(ai_history.get, result_id, version)
+
+
+@app.put("/api/generate/history/{result_id}/draft")
+def generation_draft(result_id: int, payload: dict = Body(...)):
+    return _history_action(ai_history.save_draft, result_id, payload.get("version"), payload.get("body"))
+
+
+@app.post("/api/generate/history/{result_id}/save")
+def generation_save(result_id: int, payload: dict = Body(...)):
+    return _history_action(ai_history.commit, result_id, payload.get("version"), payload.get("body"))
+
+
+@app.post("/api/generate/history/{result_id}/restore")
+def generation_restore(result_id: int, payload: dict = Body(...)):
+    target = payload.get("target_version")
+    if not isinstance(target, int) or isinstance(target, bool) or target < 1:
+        raise HTTPException(400, "되돌릴 내용을 선택하세요.")
+    return _history_action(ai_history.restore, result_id, payload.get("version"), target)
+
+
+@app.post("/api/generate/history/{result_id}/memo")
+def generation_memo(result_id: int, payload: dict = Body(...)):
+    return _history_action(ai_history.save_as_memo, result_id, payload.get("version"))
+
+
+@app.post("/api/generate/history/{result_id}/refine")
+def generation_refine(result_id: int, payload: dict = Body(...)):
+    request = payload.get("request")
+    if not isinstance(request, str) or not request.strip() or len(request) > 2000:
+        raise HTTPException(400, "바꾸고 싶은 내용을 2,000자 이내로 적어주세요.")
+    # Save a manually edited baseline first. A failed provider call cannot erase it.
+    previous = _history_action(ai_history.commit, result_id, payload.get("version"), payload.get("body"))
+    result = generate.refine(previous, previous["output"], request.strip())
+    if not result.get("output"):
+        return {**previous, "refine_error": result.get("reason") or "빈 결과를 받았습니다. 다시 시도하세요."}
+    try:
+        ai_history.check_body(result["output"])
+    except ValueError:
+        return {**previous, "refine_error": "다듬은 결과를 저장할 수 없습니다. 더 짧게 요청하거나 다시 시도하세요."}
+    updated = {**previous, "provider": result.get("provider", previous.get("provider"))}
+    return _history_action(ai_history.commit, result_id, previous["version"], result["output"],
+                           kind="refined", pack=updated, request=request.strip())
 
 
 # --------------------------------------------------------------------------- 시스템

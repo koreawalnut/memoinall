@@ -84,6 +84,36 @@ CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT
 );
+
+-- 자동 태그/시간 보정 이전의 공유 파일도 중복으로 인식한다.
+-- tagged_uid가 현재 메모와 같을 때만 유효하므로 사용자의 본문 수정은 숨기지 않는다.
+CREATE TABLE IF NOT EXISTS memo_import_aliases (
+    memo_id INTEGER NOT NULL REFERENCES memos(id) ON DELETE CASCADE,
+    original_uid TEXT NOT NULL,
+    tagged_uid TEXT NOT NULL,
+    PRIMARY KEY (memo_id, original_uid)
+);
+
+CREATE TABLE IF NOT EXISTS ai_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    latest_version INTEGER NOT NULL DEFAULT 0,
+    draft_body TEXT
+);
+CREATE TABLE IF NOT EXISTS ai_versions (
+    result_id INTEGER NOT NULL REFERENCES ai_results(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    body TEXT NOT NULL,
+    pack_json TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    request TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    memo_id INTEGER REFERENCES memos(id) ON DELETE SET NULL,
+    PRIMARY KEY (result_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_results_updated ON ai_results(updated_at DESC, id DESC);
 """
 
 

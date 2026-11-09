@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import warnings
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -31,6 +32,10 @@ from memoinall.importers.redmine import RedmineError, RedmineImporter, _tag  # n
 
 PASS = FAIL = 0
 GOOD_KEY = "secret-key-123"
+
+
+def local_time(value):
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone().replace(tzinfo=None).isoformat()
 
 
 def check(label, cond, extra=""):
@@ -186,8 +191,8 @@ def main() -> int:
     check("메타 줄(트래커·상태·담당)", "결함" in n.body and "진행중" in n.body and "김철수" in n.body,
           n.body.splitlines()[1] if len(n.body.splitlines()) > 1 else "")
     check("external_id 형식", n.external_id == "issue:100", n.external_id)
-    check("작성시각 변환", n.created_at == "2026-03-04T05:06:07", n.created_at)
-    check("수정시각 변환", n.updated_at == "2026-04-01T00:00:00", n.updated_at)
+    check("작성시각 변환", n.created_at == local_time("2026-03-04T05:06:07Z"), n.created_at)
+    check("수정시각 변환", n.updated_at == local_time("2026-04-01T00:00:00Z"), n.updated_at)
     check("프로젝트/트래커 태그", "포털개편" in n.tags or "포털_개편" in n.tags, n.tags)
 
     section("페이지네이션")
@@ -256,7 +261,7 @@ def main() -> int:
           (again.imported, again.skipped_existing))
 
     saved = store.get_memo(result.memo_ids[0])
-    check("원본 작성시각 유지", saved["created_at"] == "2026-03-04T05:06:07", saved["created_at"])
+    check("원본 작성시각 유지", saved["created_at"] == local_time("2026-03-04T05:06:07Z"), saved["created_at"])
     check("source 기록", saved["source"] == "redmine", saved["source"])
     store.enrich(saved["id"])
     tags = {t["value"] for t in store.top_facets("tag")}

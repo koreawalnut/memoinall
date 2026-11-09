@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import logging
 import re
+import hashlib
+import json
 
 from . import config, context, llm, search, settings, store
 
@@ -270,6 +272,7 @@ def build_pack(
     until: str | None = None,
     full_body: bool = True,
     memo_ids: list[int] | None = None,
+    source_revisions: dict[str, str] | None = None,
 ) -> dict:
     """생성 직전까지 — 질의 도출, 검색, 프롬프트 조립. LLM 호출은 안 한다."""
     budget_tokens = budget_tokens or settings.get_int("gen.budget_tokens", 6000)
@@ -291,6 +294,12 @@ def build_pack(
             derived["queries"], limit=limit, tag=tag, tags=tags, person=person,
             since=since, until=until,
         )
+
+    candidates = [candidate(hit) for hit in hits]
+    if source_revisions is not None:
+        actual = {str(m["id"]): m["revision"] for m in candidates}
+        if memo_ids is None or source_revisions != actual:
+            raise ValueError("참고할 메모가 바뀌거나 삭제되었습니다. 메모 고르기를 눌러 다시 확인하세요.")
 
     included: list[dict] = []
     dropped: list[dict] = []
@@ -332,9 +341,19 @@ def build_pack(
         "budget_tokens": budget_tokens,
         "used_tokens": used,
         "sources": included,
+        "candidates": candidates,
         "dropped": dropped,
         "prompt": render(instruction, fmt, derived["queries"], included, dropped),
     }
+
+
+def candidate(memo: dict) -> dict:
+    revision = hashlib.sha256(json.dumps(
+        [memo["id"], memo["body"], memo["title"], memo["created_at"]], ensure_ascii=False,
+    ).encode("utf-8")).hexdigest()
+    return {"id": memo["id"], "key": str(memo["id"]), "title": memo["title"],
+            "body": memo["body"], "created_at": memo["created_at"], "source": memo.get("source"),
+            "eligible": True, "revision": revision}
 
 
 def render(instruction: str, fmt: str, queries: list[str], sources: list[dict], dropped: list[dict]) -> str:
@@ -388,6 +407,21 @@ def generate(instruction: str, **kwargs) -> dict:
         return {**pack, "output": None, "reason": str(exc)}
     except Exception as exc:
         return {**pack, "output": None, "reason": f"생성 실패: {type(exc).__name__}: {exc}"}
+
+
+def refine(previous: dict, body: str, request: str) -> dict:
+    """Revise the current draft using its saved source snapshots, without a new search."""
+    if not llm.available():
+        return {"output": None, "reason": llm._no_key_reason()}
+    material = render(previous["instruction"], previous.get("format", "auto"), [], previous.get("sources", []), [])
+    prompt = (material + "\n\n# 수정할 초안\n" + body + "\n\n# 사용자의 수정 요청\n" + request
+              + "\n\n요청을 반영한 문서 전체를 출력하세요. 초안은 수정할 대상이며 사실의 근거가 아닙니다. "
+                "참고 메모에 없는 사실·담당자·기한을 추가하지 말고 기존 출처 표시를 유지하세요. "
+                "요청과 관계없는 내용은 유지하세요.")
+    try:
+        return {"output": llm.complete(SYSTEM, prompt), "reason": None, "provider": llm.current_label()}
+    except Exception as exc:
+        return {"output": None, "reason": str(exc) if isinstance(exc, llm.ProviderError) else "다듬지 못했습니다. 잠시 후 다시 시도하세요."}
 
 
 def stats_for_ui() -> dict:

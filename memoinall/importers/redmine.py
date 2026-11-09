@@ -19,7 +19,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import Note, clean
+from . import Note, clean, legacy_aware_time, parse_any_time
 
 log = logging.getLogger(__name__)
 
@@ -207,8 +207,7 @@ class RedmineImporter:
         return Note(
             external_id=f"issue:{iid}",
             body="\n".join(lines),
-            created_at=_iso(issue.get("created_on")),
-            updated_at=_iso(issue.get("updated_on")),
+            **_times(issue.get("created_on"), issue.get("updated_on")),
             tags=tags,
             origin="issue",
         )
@@ -255,8 +254,7 @@ class RedmineImporter:
                 notes.append(Note(
                     external_id=f"wiki:{project}/{title}",
                     body=f"{title}\n\n{text}",
-                    created_at=_iso(detail.get("created_on")),
-                    updated_at=_iso(detail.get("updated_on")),
+                    **_times(detail.get("created_on"), detail.get("updated_on")),
                     tags=[t for t in (_tag(str(project)), "위키") if t],
                     origin="wiki",
                 ))
@@ -285,8 +283,7 @@ class RedmineImporter:
                 notes.append(Note(
                     external_id=f"document:{doc.get('id')}",
                     body=f"{title}\n\n{text}".strip(),
-                    created_at=_iso(doc.get("created_on")),
-                    updated_at=_iso(doc.get("created_on")),
+                    **_times(doc.get("created_on"), doc.get("created_on")),
                     tags=[t for t in (_tag(str(project)), _tag(category), "문서") if t],
                     origin="document",
                 ))
@@ -312,8 +309,7 @@ class RedmineImporter:
                 notes.append(Note(
                     external_id=f"news:{item.get('id')}",
                     body=f"{title}\n\n{text}".strip(),
-                    created_at=_iso(item.get("created_on")),
-                    updated_at=_iso(item.get("created_on")),
+                    **_times(item.get("created_on"), item.get("created_on")),
                     tags=[t for t in (_tag(proj), "공지") if t],
                     origin="news",
                 ))
@@ -337,10 +333,15 @@ def _http_hint(exc: urllib.error.HTTPError, url: str) -> str:
 
 def _iso(value: str | None) -> str | None:
     """Redmine 은 '2026-03-04T05:06:07Z' 형태로 준다."""
-    if not value:
-        return None
-    text = str(value).replace("Z", "").replace("T", " ").strip()
-    return text.replace(" ", "T")[:19] or None
+    return parse_any_time(value)
+
+
+def _times(created, updated) -> dict:
+    return {
+        "created_at": _iso(created), "updated_at": _iso(updated),
+        "legacy_created_at": legacy_aware_time(created),
+        "legacy_updated_at": legacy_aware_time(updated),
+    }
 
 
 def _tag(value: str) -> str:

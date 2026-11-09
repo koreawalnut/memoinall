@@ -167,7 +167,7 @@
   }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
   .row label { color: var(--dim); font-size: 13.5px; }
-  .row input[type=number], .row select, .row input[type=date] {
+  .row input[type=number], .row select, .row input[type=date], .row input[type=search] {
     background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 5px 9px;
   }
   .todo { display: flex; gap: 9px; align-items: flex-start; padding: 9px 12px; border-bottom: 1px solid var(--line); }
@@ -362,6 +362,7 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+<script src="/static/generate.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 // tags 는 조회 조건(AND). tag 하나만 쓰던 시절의 사이드바 클릭도 여기로 모은다.
@@ -395,7 +396,17 @@ const api = async (path, opts = {}) => {
 };
 
 const esc = (s) => (s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const fmt = (iso) => (iso || "").replace("T", " ").slice(0, 16);
+// 서버의 시간대 없는 값은 PC 현지 시각, Z/offset이 있는 값은 현지 시각으로 변환한다.
+// OS의 오전/오후 설정과 관계없이 00:00~23:59로 보여 준다.
+function fmt(iso) {
+  if (!iso) return "";
+  const value = String(iso).trim().replace(" ", "T");
+  if (!/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2})?/.test(value)) return "";
+  const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? value + "T00:00:00" : value);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
 
 let toastTimer;
 function toast(msg) {
@@ -525,6 +536,7 @@ for (const [id, key] of [["filterSince", "since"], ["filterUntil", "until"]]) {
 // 검색으로 좁힌 그대로 내보내기. 조건을 주고받기 화면에 옮겨 담고 목록부터 보여준다 —
 // 남에게 보내는 파일이라 무엇이 나가는지 확인 없이 저장되면 안 된다.
 async function prepareExport(selected = false) {
+  exportReview = null;
   imp.section = "share";
   Object.assign(exp, { ids: selected ? [...state.selected.keys()] : null,
     q: selected ? "" : state.q, tags: selected ? [] : [...state.tags], tag: "",
@@ -547,7 +559,7 @@ const TABS = [
   { id: "rollup", icon: "📅", name: "기간 요약", sub: "일·주·월",
     title: "기간 요약", lead: "고른 기간의 메모에서 결정·할 일·열린 질문을 모아 보여줍니다." },
   { id: "generate", primary: true, icon: "✨", name: "AI로 정리",
-    title: "메모로 문서 만들기", lead: "지시사항을 적으면 관련 메모를 찾아 근거로 삼고 결과물을 씁니다." },
+    title: "메모로 문서 만들기", lead: "원하는 내용을 적고, 필요한 메모로 정리해 보세요. 만든 내용은 다시 고쳐 쓸 수 있습니다." },
   { id: "import", primary: true, icon: "📥", name: "가져오기·공유",
     title: "메모 가져오기·공유", lead: "다른 앱에 적은 메모를 가져오거나, 필요한 기록을 동료에게 전달하세요." },
   { id: "settings", icon: "⚙️", name: "설정", sub: "AI·검색",
@@ -730,6 +742,7 @@ function qs(extra = {}) {
 function cardHTML(m) {
   const f = m.facets || {};
   const badges = [
+    m.source === "ai" ? '<span class="badge">AI로 정리</span>' : "",
     m.why ? `<span class="badge why">${esc(m.why)}</span>` : "",
     ...(f.tag || []).slice(0, 5).map((t) => `<span class="badge tag">#${esc(t)}</span>`),
     ...(f.person || []).slice(0, 3).map((p) => `<span class="badge person">@${esc(p)}</span>`),
@@ -941,251 +954,19 @@ async function renderRollup(version = renderVersion) {
 // 지시사항 → (검색 질의 도출) → 근거 검색 → 결과물.
 // 중간의 '검색 질의'를 감추지 않고 보여주고 고칠 수 있게 한 게 핵심이다.
 // 왜 그 근거가 뽑혔는지 안 보이면 결과물을 믿을 수 없기 때문.
-const gen = { instruction: "", format: "auto", budget: 6000, queries: null, plan: null, output: null,
-  busy: false, memoIds: null, scope: null };
+// AI document UI is in generate.js.
 
-function startGenerate(ids, instruction) {
-  if (gen.busy) { toast("진행 중인 생성이 끝난 뒤 다시 선택하세요"); return; }
-  Object.assign(gen, { instruction, memoIds: ids, scope: null, queries: null, plan: null, output: null });
-  goTab("generate");
-}
-
-function genScopeLabel() {
-  if (gen.memoIds !== null) return `직접 선택한 메모 ${gen.memoIds.length}건만 사용`;
-  const s = gen.scope;
-  if (!s) return "전체 메모에서 관련 자료 자동 검색";
-  const parts = [...s.tags.map((t) => "#" + t), s.person ? "@" + s.person : "",
-    s.since ? s.since + "부터" : "", s.until ? s.until + "까지" : ""].filter(Boolean);
-  return parts.length ? "검색 범위: " + parts.join(" · ") : "전체 메모에서 관련 자료 자동 검색";
-}
-
-async function renderGenerate(version = renderVersion) {
-  const { formats, llm_ready, provider } = await api("/api/generate/formats");
-  if (version !== renderVersion) return;
-  const fmtOptions = formats.map((f) => `<option value="${f.key}"${gen.format === f.key ? " selected" : ""}>${esc(f.label)}</option>`).join("");
-
-  $("#view").innerHTML = `
-    <div class="panel">
-      <h3>무엇을 만들까요?</h3>
-      <div class="desc">
-        원하는 결과를 적어주세요. 메모를 찾아 요약이나 문서로 정리합니다.
-        ${llm_ready
-          ? ""
-          : `<br/><span style="color:var(--warn)">AI를 연결하면 바로 결과를 만들 수 있어요. 연결 전에는 다른 AI에 붙여넣을 요청문을 만듭니다.</span> <a href="#" id="genSettings" style="color:var(--accent)">AI 연결하기</a>`}
-      </div>
-      <textarea class="gen-input" id="genInput" placeholder="예) 연수원 AX 세미나 내용으로 교육과정 기획안 초안 써줘&#10;예) 이번 분기에 결정된 것만 모아서 팀 공유용으로 정리해줘">${esc(gen.instruction)}</textarea>
-      <div class="status" id="genScope" style="margin-top:8px">${esc(genScopeLabel())}</div>
-      <div class="row" style="margin:10px 0 0">
-        <label>형식</label>
-        <select id="genFormat" style="min-width:130px">${fmtOptions}</select>
-        <span class="spacer"></span>
-        <button class="btn" id="genPlan">근거 먼저 보기</button>
-        <button class="btn primary" id="genRun">${llm_ready ? "정리하기" : "요청문 만들기"}</button>
-      </div>
-      <details class="capture-options" style="margin-top:14px">
-        <summary>자료 범위·상세 설정</summary>
-        <div class="row" style="margin:10px 0">
-          <button class="btn ghost" id="genAll">전체 메모에서 찾기</button>
-          <button class="btn ghost" id="genFiltered">현재 검색 조건으로 찾기</button>
-        </div>
-        <div class="row"><label for="genBudget">자료 분량 (토큰)</label>
-          <input type="number" id="genBudget" value="${gen.budget}" min="500" step="500" style="width:95px" />
-        </div>
-      </details>
-    </div>
-    <div id="genPlanOut"></div>
-    <div id="genOut"></div>`;
-
-  $("#genInput").oninput = (e) => { gen.instruction = e.target.value; invalidatePlan(true); };
-  $("#genInput").onkeydown = (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); runGenerate(); } };
-  $("#genFormat").onchange = (e) => { gen.format = e.target.value; invalidatePlan(); };
-  $("#genBudget").oninput = (e) => { gen.budget = +e.target.value; invalidatePlan(); };
-  $("#genAll").onclick = () => { gen.memoIds = gen.scope = null; invalidatePlan(true); $("#genScope").textContent = genScopeLabel(); };
-  $("#genFiltered").onclick = () => {
-    gen.memoIds = null;
-    gen.scope = { tags: [...state.tags], person: state.person, since: state.since, until: state.until };
-    invalidatePlan(true); $("#genScope").textContent = genScopeLabel();
-  };
-  $("#genPlan").onclick = () => planGenerate();
-  $("#genRun").onclick = () => runGenerate();
-  if ($("#genSettings")) $("#genSettings").onclick = (e) => { e.preventDefault(); goTab("settings"); };
-
-  if (gen.plan) renderPlanPanel();
-  if (gen.output !== null) renderGenOutput();
-  setGenBusy(gen.busy);
-}
-
-function setGenBusy(busy) {
-  document.querySelectorAll("#genInput, #genFormat, #genBudget, #genPlan, #genRun, #genAll, #genFiltered, #genRun2, #addQ, [data-delq]")
-    .forEach((el) => { el.disabled = busy || (el.id === "genRun2" && !gen.plan?.sources.length); });
-}
-
-function invalidatePlan(resetQueries = false) {
-  gen.plan = null;
-  if (resetQueries) gen.queries = null;
-  if ($("#genPlanOut")) $("#genPlanOut").innerHTML = "";
-}
-
-function genPayload() {
-  return {
-    instruction: gen.instruction.trim(),
-    format: gen.format,
-    budget: gen.budget,
-    queries: gen.queries,
-    memo_ids: gen.memoIds,
-    ...(gen.scope || {}),
-  };
-}
-
-async function planGenerate() {
-  if (!gen.instruction.trim()) { toast("지시사항을 먼저 적어주세요"); return; }
-  if (gen.busy) return;
-  gen.busy = true;
-  setGenBusy(true);
-  const payload = genPayload();
-  const target = $("#genPlanOut");
-  target.innerHTML = `<div class="status">근거 찾는 중…</div>`;
-  try {
-    const plan = await api("/api/generate/plan", { method: "POST", body: payload });
-    if (JSON.stringify(payload) !== JSON.stringify(genPayload())) { target.textContent = "입력이 바뀌었습니다. 근거를 다시 확인하세요."; return; }
-    gen.plan = plan;
-    gen.queries = plan.queries.slice();
-    if (state.tab === "generate") renderPlanPanel();
-  } catch (e) {
-    if (target.isConnected) target.textContent = "근거 검색 실패: " + e.message;
-  } finally { gen.busy = false; setGenBusy(false); }
-}
-
-function renderPlanPanel() {
-  if (!$("#genPlanOut")) return;
-  const p = gen.plan;
-  const pct = Math.min(100, Math.round((p.used_tokens / p.budget_tokens) * 100));
-  const chips = (gen.queries || []).map((q, i) =>
-    `<span class="qchip">${esc(q)}<button data-delq="${i}" title="이 질의 빼기">×</button></span>`).join("");
-
-  $("#genPlanOut").innerHTML = `
-    <div class="panel">
-      <h3>${p.query_method === "selected" ? "직접 선택한 근거" : "검색 질의"} <span class="meta">${p.query_method === "selected" ? "선택 범위 안에서만 생성" : p.query_method === "llm" ? "AI가 도출" : p.query_method === "manual" ? "직접 지정" : "규칙으로 도출"}</span></h3>
-      <div class="qchips" ${p.query_method === "selected" ? "hidden" : ""}>${chips || '<span class="status">질의 없음</span>'}
-        <input id="addQ" placeholder="+ 질의 추가 후 Enter" style="background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:3px 11px;outline:none;width:200px" />
-      </div>
-      <div class="desc" style="margin:12px 0 6px">
-        근거 <b>${p.sources.length}건</b> · ${p.used_tokens} / ${p.budget_tokens} 토큰
-        ${p.dropped.length ? ` · <span style="color:var(--warn)">예산 초과로 제외 ${p.dropped.length}건</span>` : ""}
-      </div>
-      <div class="bar ${pct >= 100 ? "over" : ""}"><i style="width:${pct}%"></i></div>
-      <div style="margin-top:12px">
-        ${p.sources.map((s) => `<div class="src">
-          <div class="src-body">
-            <div><b>[M${s.id}]</b> ${esc(s.title)} <span class="meta">${s.created_at.slice(0, 10)}</span></div>
-            <div class="meta">${p.query_method === "selected" ? "직접 선택" : "일치 질의: " + s.matched_queries.map(esc).join(" / ")}${s.included_as !== "full" ? " · 일부 내용만 포함" : ""}</div>
-          </div>
-          <button class="btn ghost" data-openmemo="${s.id}"
-                  data-q="${esc((s.matched_queries || []).join(" "))}"
-                  style="padding:3px 9px;font-size:13.5px">열기</button>
-        </div>`).join("") || `<div class="status">관련 메모를 찾지 못했습니다. 질의를 바꿔보세요.</div>`}
-      </div>
-      <div class="row" style="margin:14px 0 0">
-        <button class="btn" id="copyGenPrompt">프롬프트 복사</button>
-        <span class="spacer"></span>
-        <button class="btn primary" id="genRun2" ${p.sources.length ? "" : "disabled"}>이 근거로 생성</button>
-      </div>
-      <details style="margin-top:10px"><summary class="status" style="cursor:pointer">조립된 프롬프트 보기</summary><pre class="pack">${esc(p.prompt)}</pre></details>
-    </div>`;
-
-  document.querySelectorAll("[data-delq]").forEach((b) => {
-    b.onclick = () => { gen.queries.splice(+b.dataset.delq, 1); planWithQueries(); };
-  });
-  // 근거로 쓰인 메모도 '어느 질의에 걸렸는지' 를 들고 열린다
-  document.querySelectorAll("[data-openmemo]").forEach((b) => {
-    b.onclick = () => openMemo(+b.dataset.openmemo, b.dataset.q ? { q: b.dataset.q, chunk: "" } : null);
-  });
-  $("#addQ").onkeydown = (e) => {
-    if (e.key !== "Enter" || !e.target.value.trim()) return;
-    gen.queries.push(e.target.value.trim());
-    e.target.value = "";
-    planWithQueries();
-  };
-  $("#copyGenPrompt").onclick = () => { navigator.clipboard.writeText(p.prompt); toast("프롬프트를 복사했습니다"); };
-  $("#genRun2").onclick = () => runGenerate(true);
-}
-
-async function planWithQueries() {
-  return planGenerate();
-}
-
-async function runGenerate(usePlan = false) {
-  if (!gen.instruction.trim()) { toast("지시사항을 먼저 적어주세요"); return; }
-  if (gen.busy) return;
-  gen.busy = true;
-  setGenBusy(true);
-  const target = $("#genOut");
-  const payload = genPayload();
-  if (usePlan && gen.plan) payload.memo_ids = gen.plan.sources.map((s) => s.id);
-  target.innerHTML = `<div class="panel"><div class="status">생성 중… 근거를 모으고 쓰는 중입니다.</div></div>`;
-  try {
-    const r = await api("/api/generate", { method: "POST", body: payload });
-    gen.plan = r;
-    gen.queries = r.queries.slice();
-    gen.output = r;
-    if (state.tab === "generate") { renderPlanPanel(); renderGenOutput(); }
-  } catch (e) {
-    if (target.isConnected) target.textContent = "생성 실패: " + e.message;
-  } finally {
-    gen.busy = false;
-    setGenBusy(false);
-  }
-}
-
-function renderGenOutput() {
-  const r = gen.output;
-  if (r.output) {
-    const sourceIds = new Set(r.sources.map((s) => s.id));
-    const outputHTML = esc(r.output).replace(/\[M(\d+)\]/g, (text, id) => sourceIds.has(+id)
-      ? `<a href="#" data-output-source="${id}" style="color:var(--accent)" title="출처 메모 열기">${text}</a>` : text);
-    $("#genOut").innerHTML = `
-      <div class="panel">
-        <div class="row" style="margin:0 0 10px">
-          <h3 style="margin:0">결과물</h3>
-          <span class="meta">근거 ${r.sources.length}건 · [M{id}] 는 출처 메모</span>
-          <span class="spacer"></span>
-          <button class="btn" id="copyOut">복사</button>
-          <button class="btn ghost" id="dlOut">파일로</button>
-        </div>
-        <pre class="pack" style="border-color:var(--accent);max-height:none">${outputHTML}</pre>
-      </div>`;
-    document.querySelectorAll("[data-output-source]").forEach((a) => {
-      a.onclick = (e) => { e.preventDefault(); openMemo(+a.dataset.outputSource); };
-    });
-    $("#copyOut").onclick = () => { navigator.clipboard.writeText(r.output); toast("복사했습니다"); };
-    $("#dlOut").onclick = async () => {
-      const name = `memoinall-${r.instruction.slice(0, 20).replace(/[^\w가-힣]+/g, "_")}.md`;
-      // 데스크톱 앱(WebView2)은 blob: 다운로드를 무시한다 — 네이티브 저장 대화상자로.
-      if (window.pywebview?.api?.save) {
-        const ok = await window.pywebview.api.save(r.output, name);
-        toast(ok ? "저장했습니다" : "저장을 취소했습니다");
-        return;
-      }
-      const blob = new Blob([r.output], { type: "text/markdown;charset=utf-8" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = name;
-      a.click();
-      URL.revokeObjectURL(a.href);
-    };
-  } else {
-    $("#genOut").innerHTML = `<div class="panel"><div class="status">${esc(r.reason || "결과 없음")}</div></div>`;
-  }
-}
-
-// ---------------------------------------------------------------- 가져오기
-// 소스별 결과를 각자 자리에 남긴다. 하나를 가져와도 다른 소스의 결과가 지워지지 않는다.
 const imp = { section: "import", path: "", sharedPath: "", sharedContent: "", sharedName: "", sharedPassword: "", sharedLocked: false, minChars: 0, update: false, tags: [], results: {}, busy: false };
 const docImport = { preview: null, selected: new Set(), edits: new Map(), busy: false, saving: false, dirty: false, error: "", result: null };
 // 내보내기 조건. 조건들은 AND 로 겹친다 — '결제 + 지난달' 처럼 좁혀 보낼 수 있어야 한다.
 const exp = { ids: null, q: "", tag: "", tags: [], person: null, since: "", until: "", archived: false, note: "" };
 // 내보낼 파일을 잠글 비밀번호. exp 에 두면 exportPayload 가 미리보기 요청에도 실어 보내므로 따로 둔다.
 const expSecret = { password: "", confirm: "" };
+let exportReview = null;
+let exportPreviewVersion = 0;
+let sharedLoadVersion = 0;
+const importReviews = {};
+const evernoteFile = { content: "", name: "", version: 0 };
 const RM_KINDS = { issues: "이슈", wiki: "위키", documents: "문서", news: "공지" };
 
 // 소스 한 칸: 상태 + 자기 버튼 + 자기 결과. '일괄'도 같은 칸에 결과를 흘려보낸다.
@@ -1197,11 +978,12 @@ function sourceCard(x, extra = "") {
         <span class="${x.available ? "ok" : "no"}">${x.available ? "● 사용 가능" : "○ 없음"}</span>
         ${x.network ? '<span class="badge">네트워크</span>' : ""}</div>
       <div class="meta" style="word-break:break-all">${esc(x.available ? x.path : x.reason)}</div>
+      ${x.source_tag ? `<div class="meta">가져오면 #${esc(x.source_tag)} 태그가 붙습니다.</div>` : ""}
       ${extra}
       <div class="row" style="margin:9px 0 0">
         <span class="spacer"></span>
         <button class="btn" data-src-preview="${x.name}" ${disabled}>미리보기</button>
-        <button class="btn primary" data-src-run="${x.name}" ${disabled}>가져오기</button>
+        <button class="btn primary" data-src-run="${x.name}" ${disabled}>${["shared", "evernote"].includes(x.name) ? "선택한 메모 가져오기" : "가져오기"}</button>
       </div>
       ${resetRow(x)}
       <div id="impOut-${x.name}"></div>
@@ -1273,10 +1055,11 @@ async function renderImport(version = renderVersion) {
     const shared = sources.find((x) => x.name === "shared");
     Object.assign(shared, { available: true, path: imp.sharedName });
   }
+  if (evernoteFile.content) Object.assign(sources.find((x) => x.name === "evernote"), { available: true, path: evernoteFile.name });
   const s = cfg.settings;
   const kinds = (s["import.redmine.kinds"].value || "").split(",").map((k) => k.trim());
   const byName = Object.fromEntries(sources.map((x) => [x.name, x]));
-  const usable = sources.filter((x) => x.name !== "shared" && x.available).length;
+  const usable = sources.filter((x) => !["shared", "evernote"].includes(x.name) && x.available).length;
 
   // 텍스트 폴더는 경로 입력이 칸 안에 있어야 한다 — 다른 데 있으면 뭘 가져올지 안 보인다.
   const filesExtra = `
@@ -1317,6 +1100,14 @@ async function renderImport(version = renderVersion) {
       <div style="margin:8px 0"><button class="btn" type="button" id="chooseDocument">파일 선택</button></div>
       <input id="documentFile" type="file" accept=".xlsx,.xlsm,.xls,.pdf,.hwp,.hwpx,.txt,.md" hidden />
       <div id="documentPreview" aria-live="polite"></div>
+    </div>
+    <div class="panel" data-exchange-section="import">
+      <h3>에버노트에서 가져오기</h3>
+      <div class="desc">Evernote 데스크톱 앱에서 메모 또는 노트북을 <b>ENEX로 내보내기</b> 한 뒤 선택하세요.
+        제목·본문·태그·작성 시각을 가져옵니다. 이미지·첨부파일과 암호화된 내용은 저장하지 않으니 원본 파일을 보관하세요.</div>
+      ${sourceCard(byName.evernote, `<label for="evernoteFile" class="status">ENEX 파일 (50MB·1,000건 이하)</label>
+        <input id="evernoteFile" type="file" accept=".enex" style="margin-top:8px" />
+        <div id="evernoteFileStatus" class="note">${esc(evernoteFile.name || "파일 선택 후 필요한 메모만 체크해 가져올 수 있습니다.")}</div>`)}
     </div>
     <div class="panel" data-exchange-section="share">
       <h3>메모 내보내기</h3>
@@ -1383,7 +1174,8 @@ async function renderImport(version = renderVersion) {
         <button class="btn" id="expCopy">내용 복사</button>
         <button class="btn primary" id="expSave">파일로 저장</button>
       </div>
-      <div id="expOut"></div>
+      <div id="expReview"></div>
+      <div id="expOut" aria-live="polite"></div>
     </div>
 
     <div class="panel" data-exchange-section="share">
@@ -1420,7 +1212,7 @@ async function renderImport(version = renderVersion) {
         </div>
       </div>` : ""}
       <div class="row" data-exchange-section="import" style="margin:12px 0 0">
-        <span class="meta">사용 가능한 소스 ${usable} / ${sources.length - 1}</span>
+        <span class="meta">사용 가능한 소스 ${usable} / ${sources.length - 2} · ENEX와 받은 파일은 각 목록에서 선택</span>
         <span class="spacer"></span>
         <button class="btn" id="impPreviewAll" ${usable ? "" : "disabled"}>전체 미리보기</button>
         <button class="btn primary" id="impRunAll" ${usable ? "" : "disabled"}>전체 가져오기</button>
@@ -1499,24 +1291,56 @@ async function renderImport(version = renderVersion) {
   $("#documentFile").onchange = (e) => { if (e.target.files[0]) previewDocument(e.target.files[0]); };
   $("#chooseDocument").onclick = () => $("#documentFile").click();
   paintDocumentPreview();
+  $("#evernoteFile").onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (imp.busy) { e.target.value = ""; toast("진행 중인 가져오기가 끝난 뒤 파일을 선택하세요"); return; }
+    const version = ++evernoteFile.version;
+    evernoteFile.content = evernoteFile.name = "";
+    delete importReviews.evernote;
+    delete imp.results.evernote;
+    document.querySelectorAll('[data-src-run="evernote"], [data-src-preview="evernote"]').forEach((b) => { b.disabled = true; });
+    $("#impOut-evernote").textContent = "";
+    try {
+      if (file.size > 50000000) throw new Error("50MB 이하의 ENEX 파일을 선택하세요. Evernote에서 나눠 내보낼 수 있습니다.");
+      const content = (await file.text()).replace(/^\uFEFF/, "");
+      if (version !== evernoteFile.version) return;
+      evernoteFile.content = content;
+      evernoteFile.name = file.name;
+      await render();
+      await doImport(true, "evernote");
+    } catch (err) {
+      if (version === evernoteFile.version && $("#evernoteFileStatus")) $("#evernoteFileStatus").textContent = err.message;
+    }
+  };
 
   $("#impPath").onchange = (e) => { imp.path = e.target.value.trim(); render(); };
   $("#impShared").onchange = (e) => {
+    sharedLoadVersion++;
     imp.sharedPath = e.target.value.trim(); imp.sharedContent = imp.sharedName = "";
     imp.sharedLocked = false;
+    delete importReviews.shared;
     delete imp.results.shared; render();
   };
   $("#sharedFile").onchange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    if (imp.busy) { e.target.value = ""; toast("진행 중인 가져오기가 끝난 뒤 파일을 선택하세요"); return; }
+    const version = ++sharedLoadVersion;
+    imp.sharedContent = imp.sharedName = imp.sharedPath = "";
+    delete imp.results.shared;
+    delete importReviews.shared;
+    $("#impOut-shared").textContent = "";
+    document.querySelectorAll('[data-src-run="shared"], [data-src-preview="shared"]').forEach((b) => { b.disabled = true; });
     const status = $("#sharedFileStatus");
     try {
       if (file.size > 50000000) throw new Error("50MB 이하의 메모 파일을 선택하세요.");
       const content = (await file.text()).replace(/^\uFEFF/, "");
-      await openShared(content, file.name, status);
+      if (version !== sharedLoadVersion) return;
+      await openShared(content, file.name, status, version);
     } catch (err) {
       e.target.value = "";
-      if (status.isConnected) status.textContent = "파일 확인 실패: " + err.message;
+      if (version === sharedLoadVersion && status.isConnected) status.textContent = "파일 확인 실패: " + err.message;
     }
   };
   $("#impSharedPw").value = imp.sharedPassword;
@@ -1559,6 +1383,11 @@ async function renderImport(version = renderVersion) {
   $("#expPreview").onclick = doExportPreview;
   $("#expSave").onclick = doExportSave;
   $("#expCopy").onclick = doExportCopy;
+  ["expQ", "expTag", "expSince", "expUntil", "expArchived"].forEach((id) => {
+    $("#" + id).addEventListener("input", invalidateExportReview);
+  });
+  document.querySelectorAll("#expTagRow [data-tag], #expClearScope").forEach((b) => b.addEventListener("click", invalidateExportReview));
+  paintExportReview();
   $("#impMin").onchange = (e) => { imp.minChars = +e.target.value || 0; };
   $("#impUpdate").onchange = (e) => { imp.update = e.target.checked; };
   $("#impPreviewAll").onclick = () => doImport(true, "all");
@@ -1731,12 +1560,14 @@ function paintDocumentResult() {
 }
 
 // 고른 파일의 겉면을 확인하고 미리보기까지. 암호화된 파일이면 비밀번호를 받을 때까지 멈춘다.
-async function openShared(content, name, status) {
+async function openShared(content, name, status, version = ++sharedLoadVersion) {
   const info = await api("/api/import/shared/describe", {
     method: "POST", body: { content, password: imp.sharedPassword || null },
   });
+  if (version !== sharedLoadVersion || !status.isConnected) return;
   Object.assign(imp, { sharedContent: content, sharedName: name, sharedPath: "", sharedLocked: !!info.needs_password });
   delete imp.results.shared;
+  delete importReviews.shared;
   if (!info.needs_password) {
     toast(`${name} · 메모 ${info.count}건${info.encrypted ? " · 암호 해제됨" : ""}${info.note ? " · " + info.note : ""}`);
   }
@@ -1747,6 +1578,96 @@ async function openShared(content, name, status) {
 }
 
 // ---------------------------------------------------------------- 내보내기
+// A shared, paginated picker keeps checks across searches and pages.
+function memoPicker(target, review, changed = () => {}) {
+  if (!target) return;
+  target.innerHTML = `<div style="margin-top:12px;padding:12px;background:var(--panel-2);border-radius:8px">
+    <div class="row"><input type="search" data-picker-search aria-label="목록에서 제목·본문 검색" placeholder="목록에서 제목·본문 검색" style="flex:1" />
+      <label class="status"><input type="checkbox" data-picker-only /> 선택한 메모만</label></div>
+    <div class="row" style="margin:8px 0"><button class="btn" data-picker-all>검색 결과 선택</button>
+      <button class="btn" data-picker-none>검색 결과 해제</button><span class="status" data-picker-count aria-live="polite"></span></div>
+    <div data-picker-list style="max-height:410px;overflow:auto"></div>
+    <div class="row" style="margin-top:8px"><button class="btn" data-picker-prev>이전</button>
+      <span class="status" data-picker-page></span><button class="btn" data-picker-next>다음</button></div></div>`;
+  let offset = 0;
+  const expanded = new Set();
+  const find = (s) => target.querySelector(s);
+  const matches = () => {
+    const q = find("[data-picker-search]").value.trim().toLocaleLowerCase();
+    return review.items.filter((m) => (!find("[data-picker-only]").checked || review.selected.has(m.key)) &&
+      (!q || `${m.title}\n${m.body}`.toLocaleLowerCase().includes(q)));
+  };
+  function draw() {
+    const rows = matches();
+    const list = find("[data-picker-list]");
+    const scroll = list.scrollTop, focused = document.activeElement?.dataset.pick;
+    offset = Math.min(offset, Math.max(0, Math.floor((rows.length - 1) / 50) * 50));
+    find("[data-picker-count]").textContent = `전체 ${review.items.length}건 중 ${review.selected.size}건 선택 · 검색 결과 ${rows.length}건`;
+    find("[data-picker-list]").innerHTML = rows.slice(offset, offset + 50).map((m) => `<div style="padding:9px 0;border-bottom:1px solid var(--line)">
+      <label style="display:flex;gap:8px;align-items:baseline"><input type="checkbox" data-pick="${esc(m.key)}" ${review.selected.has(m.key) ? "checked" : ""} ${m.eligible ? "" : "disabled"} />
+        <span style="overflow-wrap:anywhere">${esc(m.title || "(제목 없음)")}</span></label>
+      <div class="meta">${esc((m.created_at || "").slice(0, 10))} · ${esc(m.status || ({web:"직접 작성",cli:"직접 작성",shared:"받은 메모",evernote:"에버노트",files:"파일",sticky:"스티커 메모",samsung:"삼성 노트",redmine:"Redmine"})[m.source] || "메모")}${m.tags?.length ? " · " + m.tags.map((t) => "#" + esc(t)).join(" ") : ""}</div>
+      ${(m.warnings || []).map((w) => `<div class="note" style="color:var(--warn)">${esc(w)}</div>`).join("")}
+      <details data-picker-detail="${esc(m.key)}" ${expanded.has(m.key) ? "open" : ""}><summary class="status">본문 확인</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:13px">${esc(m.body)}</pre></details>
+      </div>`).join("") || '<div class="status">해당하는 메모가 없습니다.</div>';
+    find("[data-picker-page]").textContent = rows.length ? `${offset + 1}–${Math.min(offset + 50, rows.length)} / ${rows.length}건` : "0건";
+    find("[data-picker-prev]").disabled = offset === 0;
+    find("[data-picker-next]").disabled = offset + 50 >= rows.length;
+    target.querySelectorAll("[data-pick]").forEach((c) => {
+      c.onchange = () => { c.checked ? review.selected.add(c.dataset.pick) : review.selected.delete(c.dataset.pick); draw(); changed(); };
+      if (c.dataset.pick === focused) c.focus({ preventScroll: true });
+    });
+    list.scrollTop = scroll;
+    target.querySelectorAll("[data-picker-detail]").forEach((d) => {
+      d.ontoggle = () => { if (d.isConnected) d.open ? expanded.add(d.dataset.pickerDetail) : expanded.delete(d.dataset.pickerDetail); };
+    });
+  }
+  find("[data-picker-search]").oninput = () => { offset = 0; draw(); };
+  find("[data-picker-only]").onchange = () => { offset = 0; draw(); };
+  find("[data-picker-all]").onclick = () => { matches().filter((m) => m.eligible).forEach((m) => review.selected.add(m.key)); draw(); changed(); };
+  find("[data-picker-none]").onclick = () => { matches().forEach((m) => review.selected.delete(m.key)); draw(); changed(); };
+  find("[data-picker-prev]").onclick = () => { offset -= 50; draw(); };
+  find("[data-picker-next]").onclick = () => { offset += 50; draw(); };
+  draw();
+  changed();
+}
+
+function exportSignature(payload) {
+  const { note, ...scope } = payload;
+  return JSON.stringify(scope);
+}
+function invalidateExportReview() {
+  exportPreviewVersion++;
+  exportReview = null;
+  paintExportReview();
+  if ($("#expOut")) $("#expOut").textContent = "조건이 바뀌었습니다. 목록을 다시 확인하세요.";
+}
+function paintExportReview() {
+  const el = $("#expReview");
+  if (!el) return;
+  if (!exportReview) {
+    el.innerHTML = '<div class="note">먼저 목록을 확인하고 보낼 메모를 체크하세요. 한 번에 최대 1,000건.</div>';
+    $("#expSave").textContent = "파일로 저장";
+    $("#expCopy").textContent = "내용 복사";
+    return;
+  }
+  memoPicker(el, exportReview, () => {
+    $("#expSave").textContent = `선택 ${exportReview.selected.size}건 파일로 저장`;
+    $("#expCopy").textContent = `선택 ${exportReview.selected.size}건 복사`;
+  });
+}
+async function reviewedExportPayload() {
+  const payload = exportPayload();
+  if (!exportReview || exportReview.signature !== exportSignature(payload)) {
+    await doExportPreview();
+    toast("보낼 메모를 확인한 뒤 저장 또는 복사를 눌러주세요");
+    return null;
+  }
+  if (!exportReview.selected.size) throw new Error("보낼 메모를 하나 이상 선택하세요.");
+  const items = exportReview.items.filter((m) => exportReview.selected.has(m.key));
+  return { ...payload, ids: items.map((m) => m.id), revisions: Object.fromEntries(items.map((m) => [m.id, m.revision])) };
+}
+
 // 입력칸에서 바로 읽는다 — 타이핑 직후 눌러도 방금 친 값이 반영돼야 한다.
 function exportPayload() {
   if (!$("#expQ")) return {};
@@ -1777,23 +1698,20 @@ function expError(msg) {
 }
 
 async function doExportPreview() {
+  const host = $("#expReview");
+  const version = ++exportPreviewVersion;
+  exportReview = null;
+  paintExportReview();
   expBusy("고르는 중…");
   try {
-    const r = await api("/api/export/preview", { method: "POST", body: exportPayload() });
-    if (!r.count) {
-      $("#expOut").innerHTML = `<div class="status" style="margin-top:9px">조건에 맞는 메모가 없습니다.</div>`;
-      return;
-    }
-    const rows = r.items.map((m) => `<div class="meta">· ${esc((m.created_at || "").slice(0, 10))}
-      ${esc(m.title || "")} ${m.source && m.source !== "web" ? `<span class="badge">${esc(m.source)}</span>` : ""}</div>`).join("");
-    $("#expOut").innerHTML = `<div style="margin-top:10px;padding:10px 12px;background:var(--panel-2);border-radius:8px">
-      <div><b style="color:var(--accent)">${r.count}건</b>이 나갑니다
-        <span class="meta">· ${(r.bytes / 1024).toFixed(1)}KB · ${esc(r.filename)}</span></div>
-      <div style="margin-top:6px;max-height:230px;overflow:auto">${rows}</div>
-      ${r.count > r.items.length ? `<div class="meta" style="margin-top:5px">… 외 ${r.count - r.items.length}건</div>` : ""}
-      <div class="note" style="margin-top:7px">저장 위치: ${esc(r.default_dir)}</div>
-    </div>`;
-  } catch (err) { expError(err.message); }
+    const payload = exportPayload(), signature = exportSignature(payload);
+    const r = await api("/api/export/preview", { method: "POST", body: payload });
+    if (version !== exportPreviewVersion || !host?.isConnected || signature !== exportSignature(exportPayload())) return;
+    const items = r.items.map((m) => ({ ...m, key: String(m.id), eligible: true }));
+    exportReview = { items, selected: new Set(items.map((m) => m.key)), signature };
+    paintExportReview();
+    $("#expOut").innerHTML = `<div class="note">${r.count}건을 찾았습니다. 체크된 메모만 내보냅니다.${payload.q ? " 의미 검색 결과이므로 관련 없는 메모는 체크를 해제하세요." : ""}<br>저장 위치: ${esc(r.default_dir)}</div>`;
+  } catch (err) { if (version === exportPreviewVersion && host?.isConnected) expError(err.message); }
 }
 
 function exportLockNote(encrypted) {
@@ -1806,8 +1724,10 @@ async function doExportSave() {
   try {
     const password = exportPassword();
     if (password === null) return;
+    const payload = await reviewedExportPayload();
+    if (!payload) return;
     expBusy(password ? "암호화해서 저장하는 중…" : "파일로 저장하는 중…");
-    const r = await api("/api/export", { method: "POST", body: { ...exportPayload(), password } });
+    const r = await api("/api/export", { method: "POST", body: { ...payload, password } });
     $("#expOut").innerHTML = `<div style="margin-top:10px;padding:10px 12px;background:var(--panel-2);border-radius:8px">
       <div><b style="color:var(--accent-2)">메모 ${r.count}건을 내보냈습니다.</b></div>
       <div class="meta" style="margin-top:4px;word-break:break-all">${esc(r.path)} · ${(r.bytes / 1024).toFixed(1)}KB</div>
@@ -1825,8 +1745,10 @@ async function doExportCopy() {
   try {
     const password = exportPassword();
     if (password === null) return;
+    const payload = await reviewedExportPayload();
+    if (!payload) return;
     expBusy(password ? "암호화하는 중…" : "만드는 중…");
-    const r = await api("/api/export/content", { method: "POST", body: { ...exportPayload(), password } });
+    const r = await api("/api/export/content", { method: "POST", body: { ...payload, password } });
     await navigator.clipboard.writeText(r.content);
     $("#expOut").innerHTML = `<div class="status" style="margin-top:9px">메모 ${r.count}건을 복사했습니다 —
       메신저에 붙여넣어 보내세요. 받는 쪽은 이 내용을 .json 파일로 저장하면 됩니다.<br>${exportLockNote(r.encrypted)}</div>`;
@@ -1847,10 +1769,26 @@ function redminePayload() {
   };
 }
 
+function importSignature(source) {
+  return JSON.stringify([source === "evernote" ? evernoteFile.version : [imp.sharedName, imp.sharedPath, imp.sharedPassword],
+    imp.minChars, imp.update, imp.tags]);
+}
+
 async function doImport(dry, source = "all") {
   if (imp.busy) { toast("진행 중인 가져오기가 끝날 때까지 기다려주세요"); return; }
+  const selectable = ["evernote", "shared"].includes(source);
+  const review = importReviews[source];
+  if (!dry && selectable) {
+    if (!review || review.signature !== importSignature(source)) {
+      await doImport(true, source);
+      toast("목록을 확인하고 필요한 메모를 체크한 뒤 가져오세요");
+      return;
+    }
+    if (!review.selected.size) { toast("가져올 메모를 하나 이상 선택하세요"); return; }
+  }
+  const signature = importSignature(source);
   imp.busy = true;
-  const buttons = [...document.querySelectorAll("[data-src-run], [data-src-preview], #impRunAll, #impPreviewAll")];
+  const buttons = [...document.querySelectorAll("[data-src-run], [data-src-preview], #impRunAll, #impPreviewAll, #sharedFile, #evernoteFile, #impShared, #impSharedPw, #impMin, #impUpdate, #impTagRow button")];
   const disabledBefore = buttons.map((b) => b.disabled);
   buttons.forEach((b) => { b.disabled = true; });
   const targets = source === "all"
@@ -1863,24 +1801,33 @@ async function doImport(dry, source = "all") {
   const body = {
     source, path: imp.path || null, shared_path: imp.sharedPath || null, shared_content: imp.sharedContent || null,
     shared_password: imp.sharedPassword || null,
+    evernote_content: evernoteFile.content || null,
+    review: selectable,
+    ...(!dry && selectable ? { selected_keys: [...review.selected], revision: review.revision } : {}),
     min_chars: imp.minChars, update_existing: imp.update, tags: imp.tags,
     redmine: redminePayload(),
   };
   try {
-    const r = { total: 0, total_updated: 0 };
+    const r = { total: 0, total_updated: 0, total_corrected_times: 0 };
     for (const name of targets) {
       const part = await api(dry ? "/api/import/preview" : "/api/import/run", { method: "POST", body: { ...body, source: name } });
       part.results.forEach((x) => {
         const res = { ...x, dry_run: part.dry_run };
+        if (selectable) {
+          if (dry && !x.error && x.revision) {
+            importReviews[x.source] = { items: x.items, selected: new Set(x.items.filter((m) => m.eligible).map((m) => m.key)), revision: x.revision, signature };
+          } else delete importReviews[x.source];
+        }
         imp.results[x.source] = res;
         paintResult(x.source, res);
         completed.add(x.source);
       });
       r.total += part.total;
       r.total_updated += part.total_updated;
+      r.total_corrected_times += part.total_corrected_times || 0;
     }
     if (!dry) {
-      const parts = [r.total ? `${r.total}건 가져옴` : "", r.total_updated ? `${r.total_updated}건 갱신` : ""].filter(Boolean);
+      const parts = [r.total ? `${r.total}건 가져옴` : "", r.total_updated ? `${r.total_updated}건 갱신` : "", r.total_corrected_times ? `${r.total_corrected_times}건 시간 바로잡음` : ""].filter(Boolean);
       toast(parts.length ? `${parts.join(" · ")} — 정리는 백그라운드에서 진행됩니다` : "새로 가져오거나 바뀐 메모가 없습니다");
       loadSidebar();
       loadTags();   // 붙인 태그의 건수가 바로 반영돼야 한다
@@ -1915,15 +1862,22 @@ function paintResult(name, x) {
     x.skipped_short ? `너무짧음 ${x.skipped_short}` : "",
   ].filter(Boolean).join(" · ");
   const updated = x.updated ? ` · <b style="color:var(--warn)">${x.updated}건 갱신</b>` : "";
+  const corrected = x.corrected_times ? ` · ${x.corrected_times}건 시간 ${x.dry_run ? "바로잡기" : "바로잡음"}` : "";
 
   el.innerHTML = `<div style="margin-top:9px;padding:9px 11px;background:var(--panel-2);border-radius:8px">
     <div><span class="meta">${head}</span> — 원본 ${x.found}건 →
-      <b style="color:var(--accent)">${x.importable}건</b>${updated}
+      <b style="color:var(--accent)">${x.importable}건</b>${updated}${corrected}
       ${x.dry_run ? '<span class="meta">(아직 저장 안 함)</span>' : '<span class="meta">저장됨</span>'}
       ${skips ? `<span class="meta">· ${skips}</span>` : ""}</div>
     ${x.median_chars ? `<div class="meta">본문 길이 중앙값 ${x.median_chars}자 · 최대 ${x.max_chars}자</div>` : ""}
-    ${x.samples.length ? `<div class="meta" style="margin-top:5px">${x.samples.map((s) => `· ${esc(s)}`).join("<br/>")}</div>` : ""}
+    ${(x.warnings || []).map((w) => `<div class="note" style="color:var(--warn)">${esc(w)}</div>`).join("")}
+    ${x.samples.length && !importReviews[name] ? `<div class="meta" style="margin-top:5px">${x.samples.map((s) => `· ${esc(s)}`).join("<br/>")}</div>` : ""}
+    ${x.dry_run && importReviews[name] ? '<div data-import-picker></div>' : ""}
   </div>`;
+  if (x.dry_run && importReviews[name]) memoPicker(el.querySelector("[data-import-picker]"), importReviews[name], () => {
+    const button = document.querySelector(`[data-src-run="${name}"]`);
+    if (button) button.textContent = `선택 ${importReviews[name].selected.size}건 가져오기`;
+  });
 }
 
 // ---------------------------------------------------------------- 내 태그 관리
@@ -2432,7 +2386,8 @@ async function openMemo(id, hit = null) {
   if (request !== memoRequest) return;
   state.memo = m;
   $("#dTitle").textContent = m.title;
-  $("#dMeta").textContent = fmt(m.created_at);
+  $("#dMeta").textContent = `작성 ${fmt(m.created_at)}` +
+    (m.updated_at && m.updated_at !== m.created_at ? ` · 수정 ${fmt(m.updated_at)}` : "");
   $("#dBody").value = m.body;
   $("#dTagInput").value = "";
   $("#dTagMessage").textContent = "";
@@ -2501,7 +2456,7 @@ document.addEventListener("keydown", (e) => {
 });
 window.addEventListener("beforeunload", (e) => {
   localDraft($("#capture").value);
-  if (detailDirty() || docImport.dirty || docImport.saving || $("#capture").value !== draftSaved || captureSaving) {
+  if (genDirty() || gen.busy || detailDirty() || docImport.dirty || docImport.saving || $("#capture").value !== draftSaved || captureSaving) {
     e.preventDefault(); e.returnValue = "";
   }
 });
