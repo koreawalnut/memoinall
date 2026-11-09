@@ -208,6 +208,49 @@ function setGenBusy(busy) {
   if (!busy) paintGenPicker();
 }
 function genProgress(text = "") { if ($("#genProgress")) $("#genProgress").textContent = text; }
+
+// AI 응답은 한 번에 받으므로 진행률은 알 수 없다. 대신 멈추지 않았다는 신호(움직임·경과 시간)와
+// 무엇을 보냈는지를 보여 준다. 화면 오른쪽 아래에 고정해 스크롤하거나 다른 화면으로 가도 보인다.
+const aiWait = { started: 0, timer: null, hideTimer: null };
+function aiWaitStart(label, detail) {
+  clearInterval(aiWait.timer); clearTimeout(aiWait.hideTimer);
+  aiWait.started = Date.now();
+  let el = $("#aiWait");
+  if (!el) { el = document.createElement("div"); el.id = "aiWait"; document.body.append(el); }
+  el.className = "ai-wait";
+  // 읽어 주는 프로그램이 매초 시간을 읽지 않도록, 알릴 문장(role=status)과 시간을 나눈다.
+  el.innerHTML = `<span class="ai-spinner" aria-hidden="true"></span>
+    <div class="ai-wait-text"><div role="status"><b>${esc(label)}</b></div>
+      <div class="note">${esc(detail)}</div><div class="note" id="aiWaitHint"></div></div>
+    <span class="meta ai-wait-time" id="aiWaitTime" aria-hidden="true">0초</span>
+    <div class="ai-wait-bar" aria-hidden="true"><i></i></div>`;
+  aiWait.timer = setInterval(aiWaitTick, 1000);
+}
+function aiWaitTick() {
+  const s = Math.floor((Date.now() - aiWait.started) / 1000);
+  if ($("#aiWaitTime")) $("#aiWaitTime").textContent = s < 60 ? `${s}초` : `${Math.floor(s / 60)}분 ${s % 60}초`;
+  const hint = s >= 60 ? "응답이 오래 걸리고 있습니다. PC에서 돌리는 AI(Ollama 등)나 자료가 많으면 몇 분 걸릴 수 있습니다."
+    : s >= 10 ? "AI가 답을 쓰고 있습니다. 다른 화면으로 가도 계속 진행되고, 끝나면 알려 드립니다." : "";
+  if ($("#aiWaitHint") && $("#aiWaitHint").textContent !== hint) $("#aiWaitHint").textContent = hint;
+}
+// 끝났을 때 AI 정리 화면이 아니면 결과로 가는 버튼을 잠시 남긴다.
+function aiWaitStop(message = "", ok = true) {
+  clearInterval(aiWait.timer); aiWait.timer = null;
+  const el = $("#aiWait");
+  if (!el) return;
+  if (!message || state.tab === "generate") { el.remove(); return; }
+  el.className = "ai-wait done";
+  el.innerHTML = `<div class="ai-wait-text" role="status"><b>${esc(message)}</b></div>
+    <button class="btn ${ok ? "primary" : ""}" id="aiWaitOpen">결과 보기</button><button class="btn ghost" id="aiWaitClose" aria-label="알림 닫기">×</button>`;
+  $("#aiWaitOpen").onclick = () => { el.remove(); goTab("generate"); };
+  $("#aiWaitClose").onclick = () => el.remove();
+  aiWait.hideTimer = setTimeout(() => el.remove(), 30000);
+}
+function genWaitDetail() {
+  if (gen.collection) return `${gen.collection.title} · ${colNum(gen.collection.rows)}행 집계를 보냈습니다`;
+  const n = gen.review ? gen.review.selected.size : gen.memoIds?.length;
+  return n ? `선택한 메모 ${n}건으로 정리합니다` : "관련 메모를 찾아 정리합니다";
+}
 function invalidatePlan(reset = false) {
   gen.plan = null;
   if (reset) gen.queries = null;
@@ -230,6 +273,7 @@ async function planGenerate() {
   if (gen.busy) return;
   refreshGenDay();
   gen.busy = true; setGenBusy(true); genProgress("참고할 메모를 찾는 중입니다…");
+  aiWaitStart("참고할 메모를 찾는 중", "요청에 맞는 검색어를 만들고 관련 메모를 찾습니다");
   try {
     const payload = genPayload(); delete payload.source_revisions;
     let plan;
@@ -247,7 +291,7 @@ async function planGenerate() {
     gen.planKey = JSON.stringify(genPayload());
     renderPlanPanel(); genProgress(!incoming.length && gen.scope?.tags?.length ? "고른 태그에 맞는 메모를 찾지 못했습니다. 태그를 바꾸거나 해제해 주세요." : "");
   } catch (e) { genProgress(e.message); }
-  finally { gen.busy = false; setGenBusy(false); }
+  finally { gen.busy = false; setGenBusy(false); aiWaitStop(); }
 }
 
 function renderPlanPanel() {
@@ -348,10 +392,14 @@ async function runGenerate() {
   if (!gen.instruction.trim()) { toast("정리할 내용을 먼저 적어주세요"); $("#genInput")?.focus(); return; }
   if (gen.busy) return;
   refreshGenDay();
-  gen.busy = true; setGenBusy(true); genProgress("메모를 읽고 정리하는 중입니다…");
+  gen.busy = true; setGenBusy(true); genProgress("정리하는 중입니다. 오른쪽 아래에서 진행 상황을 볼 수 있습니다.");
+  aiWaitStart("AI로 정리하는 중", genWaitDetail());
+  let finished = "", ok = true;
   try {
     await flushGenDraft();
     const r = await api("/api/generate", { method: "POST", body: genPayload() });
+    finished = r.output ? "AI 정리가 끝났습니다" : "정리하지 못했습니다";
+    ok = !!r.output;
     if (r.output) {
       adoptGenResult(r); gen.showSources = false; gen.plan = r; gen.queries = r.queries || [];
       if (!gen.review && !gen.collection) gen.review = { items: r.candidates || [], selected: new Set((r.candidates || []).map((m) => m.key)) };
@@ -364,8 +412,8 @@ async function runGenerate() {
       gen.planKey = JSON.stringify(genPayload());
       gen.showSources = true; renderPlanPanel(); genProgress(r.reason || "정리한 내용이 없습니다.");
     }
-  } catch (e) { genProgress(e.message); }
-  finally { gen.busy = false; setGenBusy(false); }
+  } catch (e) { genProgress(e.message); finished = "정리하지 못했습니다"; ok = false; }
+  finally { gen.busy = false; setGenBusy(false); aiWaitStop(finished, ok); }
 }
 
 function adoptGenResult(r) {
@@ -481,6 +529,8 @@ async function genAction(action) {
   gen.busy = true; setGenBusy(true); gen.error = "";
   const initial = gen.output;
   genProgress(action === "refine" ? "요청에 맞게 다듬는 중입니다…" : "저장하는 중입니다…");
+  if (action === "refine") aiWaitStart("요청대로 다듬는 중", `‘${gen.followup.trim().slice(0, 40)}’ · 현재 내용과 참고했던 자료로 다듬습니다`);
+  let finished = action === "refine" ? "다듬기가 끝났습니다" : "", ok = true;
   try {
     await flushGenDraft();
     const endpoint = action === "refine" ? "refine" : "save";
@@ -493,8 +543,9 @@ async function genAction(action) {
     if (action === "refine" && !r.refine_error) gen.followup = "";
     if (state.tab === "generate") { renderGenOutput(); loadGenHistory(); }
     genProgress(r.refine_error || "");
-  } catch (e) { gen.error = e.message; draftStatus(); genProgress(e.message); }
-  finally { gen.busy = false; setGenBusy(false); }
+    if (r.refine_error && finished) { finished = "다듬지 못했습니다"; ok = false; }
+  } catch (e) { gen.error = e.message; draftStatus(); genProgress(e.message); if (finished) { finished = "다듬지 못했습니다"; ok = false; } }
+  finally { gen.busy = false; setGenBusy(false); if (action === "refine") aiWaitStop(finished, ok); }
 }
 
 async function showGenVersion() {
