@@ -44,7 +44,8 @@ def main():
             if path.endswith("/draft") and switches["fail_draft"]:
                 route.fulfill(status=503, content_type="application/json", body=json.dumps({"detail": "테스트 저장 실패"}))
                 return
-            response = client.request(request.method, path, content=request.post_data_buffer)
+            sent = {"content-type": request.headers["content-type"]} if "content-type" in request.headers else {}
+            response = client.request(request.method, path, content=request.post_data_buffer, headers=sent)
             headers = {k: v for k, v in response.headers.items() if k not in {"content-length", "content-encoding"}}
             route.fulfill(status=response.status_code, headers=headers, body=response.content)
 
@@ -53,8 +54,9 @@ def main():
         page.locator('[data-tab="generate"]').click()
         expect(page.locator("#genInput")).to_be_visible()
         assert not page.locator("#workflowBar").evaluate("el => el.open")
-        assert not any(path == "/api/generate/workflows" for path in requests)
         expect(page.locator("#workflowSaveCurrent")).not_to_be_visible()
+        expect(page.locator("[data-workflow-quick]")).to_have_count(0)
+        expect(page.locator("#workflowQuickSave")).to_be_visible()
         artifact = Path(__file__).resolve().parents[1] / "artifacts" / "ux-review"
         artifact.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(artifact / "workflows-default.png"))
@@ -76,7 +78,8 @@ def main():
         assert calls == []
         first = workflows.all_workflows()[0]
         expect(page.locator("#genInput")).to_have_value("회의 내용을 주간보고로 정리해줘")
-        print("OK optional collapsed entry; settings save without changing the AI draft or calling a model")
+        expect(page.locator(f'[data-workflow-quick="{first["id"]}"]')).to_have_text("우리 팀 주간보고")
+        print("OK saved request appears as a one-click button; saving does not change the draft or call a model")
 
         page.locator("#workflowManage").click()
         with page.expect_download() as download_info:
@@ -115,7 +118,7 @@ def main():
         expect(page.locator("#workflowDialog")).not_to_be_visible()
         second = next(w for w in workflows.all_workflows() if w["name"] == "동료의 주간보고")
         page.set_viewport_size({"width": 1280, "height": 960})
-        page.locator("#workflowUse").click()
+        page.locator(f'[data-workflow-quick="{second["id"]}"]').click()
         expect(page.locator("#genScope")).to_contain_text("#다른팀 · 이번 주")
         assert calls == []
         page.locator("#genPlan").click()
@@ -161,6 +164,24 @@ def main():
         expect(page.locator("#workflowDialog")).not_to_be_visible()
         assert len(workflows.all_workflows()) == 1 and store.stats()["memos"] == 4
         print("OK applying tasks preserves previous drafts; failed save blocks replacement; deletion leaves memos intact")
+
+        # 취합 자료로 정리하는 중에는 자료 연결을 그대로 두고 요청문·형식만 넣는다.
+        import io
+        from openpyxl import Workbook
+        book = Workbook(); book.active.append(["부서", "금액"]); book.active.append(["영업", 100])
+        data = io.BytesIO(); book.save(data)
+        job = client.post("/api/collections/jobs", json={"title": "11월"}).json()["id"]
+        client.post(f"/api/collections/jobs/{job}/files", params={"path": "a.xlsx"}, content=data.getvalue())
+        preview = client.post(f"/api/collections/jobs/{job}/preview", json={"rules": {}}).json()
+        saved = client.post(f"/api/collections/jobs/{job}/commit", json={"rules": {}, "revision": preview["revision"]}).json()
+        page.evaluate("c => startCollectionGenerate(c)", {"id": saved["collection_id"], "version": 1, "title": "11월", "files": 1, "rows": 1})
+        expect(page.locator("#genScope")).to_contain_text("사용할 자료: 11월")
+        page.locator(f'[data-workflow-quick="{first["id"]}"]').click()
+        expect(page.locator("#genInput")).to_have_value("회의 내용을 주간보고로 정리해줘")
+        expect(page.locator("#genFormat")).to_have_value("report")
+        expect(page.locator("#genScope")).to_contain_text("사용할 자료: 11월")
+        expect(page.locator("#genProgress")).to_contain_text("태그·기간 조건을 쓰지 않습니다")
+        print("OK saved requests keep the attached Excel collection")
         assert not errors, errors
         browser.close()
 

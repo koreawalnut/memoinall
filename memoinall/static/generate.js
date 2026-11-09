@@ -108,10 +108,12 @@ function genMemosUrl(query = "", offset = 0) {
 }
 
 async function renderGenerate(version = renderVersion) {
-  const [{ formats, llm_ready, periods }, history, tagList] = await Promise.all([
+  const [{ formats, llm_ready, periods }, history, tagList, saved] = await Promise.all([
     api("/api/generate/formats"), api("/api/generate/history"), api("/api/generate/tags"),
+    api("/api/generate/workflows").catch(() => ({ items: workflowState.items })),
   ]);
   if (version !== renderVersion) return;
+  workflowState.items = saved.items;
   gen.tagChoices = tagList.items;
   gen.formats = formats; gen.periods = periods;
   if (!gen.initialized) {
@@ -135,6 +137,7 @@ async function renderGenerate(version = renderVersion) {
         ${llm_ready ? "" : '<br>AI를 연결하면 바로 정리할 수 있어요. <a href="#" id="genSettings">AI 연결하기</a>'}</div>
       ${workflowBarHTML()}
       <textarea class="gen-input" id="genInput" aria-label="정리할 내용" placeholder="${usingCollection ? "예) 부서별 신청금액과 미처리 내역을 정리해줘" : "예) 이번 주 업무를 팀 공유용으로 정리해줘"}">${esc(gen.instruction)}</textarea>
+      ${workflowQuickHTML()}
       ${usingCollection ? `<div class="row" style="margin:10px 0" id="genStarters">${GEN_COLLECTION_STARTERS.map((s, i) => `<button class="btn ghost" data-gen-starter="${i}">${esc(s.label)}</button>`).join("")}</div>
       <div class="row gen-collection" style="margin:10px 0"><span class="status">숫자는 앱이 포함 행 전체로 계산한 값만 AI에 전달합니다. 원문 행은 읽을 분량 안에서 일부만 실을 수 있습니다.</span>
         <span class="spacer"></span><button class="btn ghost" id="genCollectionView">취합표 보기</button><button class="btn ghost" id="genCollectionClear">메모로 정리하기</button></div>` : ""}

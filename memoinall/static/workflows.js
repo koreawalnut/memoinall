@@ -1,5 +1,26 @@
-// Saved task settings stay out of the main flow until the user opens this row.
+// 저장한 업무(자주 쓰는 요청)는 입력칸 아래 버튼으로 바로 고른다. 관리·공유는 접힌 칸에서 한다.
 const workflowState = { items: [], selected: "", editing: null, baseline: "", busy: false };
+const WORKFLOW_QUICK = 8;
+
+function workflowQuickHTML() {
+  return `<div class="row workflow-quick" id="workflowQuick" style="margin:10px 0"></div>`;
+}
+
+function paintWorkflowQuick() {
+  const host = $("#workflowQuick");
+  if (!host) return;
+  const items = workflowState.items, disabled = gen.busy || workflowState.busy ? "disabled" : "";
+  host.innerHTML = `${items.length ? '<span class="status">자주 쓰는 요청</span>' : ""}
+    ${items.slice(0, WORKFLOW_QUICK).map((w) => `<button class="btn ghost" data-workflow-quick="${w.id}" title="${esc(w.instruction)}" ${disabled}>${esc(w.name)}</button>`).join("")}
+    ${items.length > WORKFLOW_QUICK ? `<button class="btn ghost" id="workflowQuickMore" ${disabled}>전체 ${items.length}개</button>` : ""}
+    <button class="btn ghost" id="workflowQuickSave" ${disabled}>＋ ${items.length ? "이 요청도 저장" : "지금 요청을 자주 쓰는 요청으로 저장"}</button>`;
+  host.querySelectorAll("[data-workflow-quick]").forEach((b) => { b.onclick = () => useWorkflow(b.dataset.workflowQuick); });
+  if ($("#workflowQuickMore")) $("#workflowQuickMore").onclick = () => { $("#workflowBar").open = true; $("#workflowChoice").focus(); };
+  $("#workflowQuickSave").onclick = () => {
+    if (!gen.instruction.trim()) { toast("저장할 요청을 먼저 적어주세요"); $("#genInput")?.focus(); return; }
+    openWorkflowDialog(true);
+  };
+}
 
 function workflowBarHTML() {
   return `<details class="capture-options" id="workflowBar" style="margin:10px 0">
@@ -11,6 +32,7 @@ function workflowBarHTML() {
 }
 
 function paintWorkflowBar() {
+  paintWorkflowQuick();
   const select = $("#workflowChoice");
   if (!select) return;
   select.innerHTML = `<option value="">${workflowState.items.length ? "불러올 업무 선택" : "저장한 업무가 없습니다"}</option>` +
@@ -33,7 +55,7 @@ function bindWorkflows() {
     catch (err) { if ($("#workflowStatus")) $("#workflowStatus").textContent = err.message; }
   };
   $("#workflowChoice").onchange = (e) => { workflowState.selected = e.target.value; paintWorkflowBar(); };
-  $("#workflowUse").onclick = useWorkflow;
+  $("#workflowUse").onclick = () => useWorkflow();
   $("#workflowSaveCurrent").onclick = () => openWorkflowDialog(true);
   $("#workflowManage").onclick = () => openWorkflowDialog(false);
 }
@@ -45,11 +67,19 @@ function currentWorkflow() {
     until: s.until || null, person: s.person || null, budget: gen.budget };
 }
 
-async function useWorkflow() {
-  if (gen.busy || !workflowState.selected) return;
+async function useWorkflow(id = workflowState.selected) {
+  if (gen.busy || !id) return;
   gen.busy = true; setGenBusy(true);
   try {
-    const w = await api(`/api/generate/workflows/${workflowState.selected}`);
+    const w = await api(`/api/generate/workflows/${id}`);
+    if (gen.collection) {
+      // 취합 자료로 정리하는 중이면 자료 연결은 그대로 두고 요청문·형식만 바꾼다.
+      gen.instruction = w.instruction; gen.format = w.format; gen.budget = w.budget;
+      $("#genInput").value = w.instruction; $("#genFormat").value = w.format; $("#genBudget").value = String(w.budget);
+      invalidatePlan(true);
+      genProgress(`‘${w.name}’ 요청을 넣었습니다. 취합 자료에는 저장한 태그·기간 조건을 쓰지 않습니다.`);
+      return;
+    }
     await flushGenDraft();
     ++gen.finderVersion;
     Object.assign(gen, { instruction: w.instruction, format: w.format, budget: w.budget,
