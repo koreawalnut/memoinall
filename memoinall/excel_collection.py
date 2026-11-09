@@ -479,7 +479,21 @@ def _layout(job: Job, fi: int, si: int, header_row: int | None) -> dict:
         else:
             index = found
     header = rows[index][1] if rows else []
-    data = rows[index + 1:]
+    sub = _sub_header(rows, index)
+    if sub:
+        # 2줄 머리글: 아래 칸에 이름이 있으면 그것(예: 재사용유형 → 신규·수정), 없으면 세로 병합된 위 이름.
+        lower = rows[index + 1][1]
+        header = [(lower[j] if j < len(lower) and lower[j] else None) or (header[j] if j < len(header) else None)
+                  for j in range(max(len(header), len(lower)))]
+    start = index + (2 if sub else 1)
+    data = rows[start:]
+    # 표에서 한참 떨어진 아래쪽 내용(작성자·비고 메모 등)은 표의 행이 아니다.
+    far_rows, previous = [], rows[start - 1][0] if rows else 0
+    for i, (row_no, _) in enumerate(data):
+        if row_no - previous - 1 >= ROW_GAP:
+            far_rows, data = data[i:], data[:i]
+            break
+        previous = row_no
     width = max([len(header)] + [len(c) for _, c in data])
     filled = [0] * width
     numeric = [0] * width
@@ -488,8 +502,28 @@ def _layout(job: Job, fi: int, si: int, header_row: int | None) -> dict:
             if cell:
                 filled[j] += 1
                 numeric[j] += _numeric_like(cell)
-    names, seen = [], Counter()
+    # 표 오른쪽으로 빈 열이 COL_GAP 개 넘게 이어진 뒤에 있는 열도 표가 아니다.
+    limit, run, started = width, 0, False
     for j in range(width):
+        if (j < len(header) and header[j]) or filled[j]:
+            if started and run >= COL_GAP:
+                limit = j - run
+                break
+            started, run = True, 0
+        else:
+            run += 1
+    far_columns = [_letter(j) for j in range(limit, width) if (j < len(header) and header[j]) or filled[j]]
+    notes = []
+    if sub:
+        notes.append(f"{rows[index][0]}~{rows[index + 1][0]}행이 2줄 머리글이라, 병합된 위 칸 대신 아래 칸 이름을 항목으로 썼어요.")
+    if far_rows:
+        first = next((c[1] for c in far_rows[0][1] if c), "")
+        notes.append(f"표에서 {ROW_GAP}행 넘게 떨어진 아래쪽 {len(far_rows)}행({far_rows[0][0]}행"
+                     + (f" ‘{first[:20]}’" if first else "") + " 부터)은 표가 아니라서 뺐어요.")
+    if far_columns:
+        notes.append(f"표 오른쪽으로 {COL_GAP}열 넘게 떨어진 {', '.join(far_columns[:5])}{' 외' if len(far_columns) > 5 else ''}열은 표가 아니라서 뺐어요.")
+    names, seen = [], Counter()
+    for j in range(limit):
         cell = header[j] if j < len(header) else None
         text = _SPACE_RE.sub(" ", cell[1]).strip() if cell else ""
         if not text and not filled[j]:
@@ -510,11 +544,36 @@ def _layout(job: Job, fi: int, si: int, header_row: int | None) -> dict:
         if reason:
             first = next((c[1] for c in cells if c), "")
             special.append({"index": i, "row": row_no, "reason": reason, "text": first[:40]})
-    layout = {"index": index, "auto": auto, "invalid": invalid, "header_row": rows[index][0] if rows else None,
-              "names": names, "count": len(data), "special": special,
+    layout = {"index": index, "start": start, "auto": auto, "invalid": invalid,
+              "header_row": rows[index][0] if rows else None,
+              "header_label": f"{rows[index][0]}~{rows[index + 1][0]}행" if sub else (f"{rows[index][0]}행" if rows else ""),
+              "names": names, "count": len(data), "special": special, "notes": notes,
               "special_index": {s["index"]: s["reason"] for s in special}}
     job.cache[key] = layout
     return layout
+
+
+ROW_GAP = 100
+COL_GAP = 10
+
+
+def _sub_header(rows: list, index: int) -> bool:
+    """머리글 바로 아래 행이 병합된 묶음 머리글의 하위 이름인지.
+
+    병합 정보 없이도 판단할 수 있게, 위 칸이 비어 있는(가로로 병합된) 자리에 글자가 있고
+    그 행이 글자만으로 이뤄져 있으며 아래 데이터 행보다 덜 채워져 있을 때로 본다.
+    """
+    if index + 1 >= len(rows):
+        return False
+    upper_no, upper = rows[index]
+    lower_no, lower = rows[index + 1]
+    filled = [j for j, c in enumerate(lower) if c]
+    if lower_no != upper_no + 1 or not filled or any(lower[j][0] != "s" for j in filled):
+        return False
+    if not any(j >= len(upper) or not upper[j] for j in filled):
+        return False
+    following = rows[index + 2:index + 7]
+    return not following or max(sum(1 for c in r if c) for _, r in following) > len(filled)
 
 
 def normalize_rules(raw) -> dict:
@@ -659,6 +718,7 @@ def analyze(job: Job, raw_rules=None, *, full: bool = False) -> dict:
     for e in entries:
         sv = e["sheet"]
         sv["header_row"] = e["layout"]["header_row"]
+        sv["header_label"] = e["layout"]["header_label"]
         sv["auto_header_row"] = _row_no(job, e, e["layout"]["auto"])
         sv["data_rows"] = e["layout"]["count"]
         sv.setdefault("rows", 0)
@@ -746,6 +806,8 @@ def _sheet_issues(e: dict, fields: list, ref_fields: set, ref_numeric: dict) -> 
         # 빠르게 쓰는 것이 우선이다. 찾은 머리글 행을 그대로 쓰고, 다르면 바꿀 수 있게 알려만 준다.
         issues.append({"kind": "header", "blocking": False, "row": layout["header_row"],
                        "message": f"표 위 제목을 건너뛰고 {layout['header_row']}행을 항목 이름으로 썼어요."})
+    for note in layout["notes"]:
+        issues.append({"kind": "note", "blocking": False, "message": note})
     targets = e["targets"]
     auto = e.get("auto", {})
     used = Counter(t for t in targets if t is not None)
@@ -828,7 +890,7 @@ def _preview(job: Job, e: dict) -> dict:
     columns = [n["index"] for n in layout["names"]]
     start = max(0, layout["index"] - 3)
     above = [{"row": n, "cells": [_display(c, j) for j in columns]} for n, c in rows[start:layout["index"]]]
-    data = rows[layout["index"] + 1:layout["index"] + 1 + PREVIEW_ROWS]
+    data = rows[layout["start"]:layout["start"] + min(PREVIEW_ROWS, layout["count"])]
     return {"above": above, "header": [n["name"] for n in layout["names"]],
             "rows": [{"row": n, "cells": [_display(c, j) for j in columns]} for n, c in data]}
 
@@ -850,7 +912,7 @@ def _rows(job: Job, selected: list, fields: list) -> dict:
         sources.append({"file": e["file"]["path"], "sheet": e["sheet"]["name"], "header_row": layout["header_row"]})
         present = {t for t in e["targets"] if t is not None}
         exclude_special = special_choice(e["rule"]) == "exclude"
-        for i, (row_no, cells) in enumerate(sheet_rows[layout["index"] + 1:]):
+        for i, (row_no, cells) in enumerate(sheet_rows[layout["start"]:layout["start"] + layout["count"]]):
             values = [None if f in present else MISSING for f in range(len(fields))]
             for n, target in zip(layout["names"], e["targets"]):
                 if target is not None and n["index"] < len(cells):

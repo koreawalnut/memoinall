@@ -287,7 +287,6 @@ def main() -> int:
     changed["영업1팀.xlsx"] = book_bytes(lambda b: (sales1(b), b["신청내역"].append(["영업1팀", "추가", 1000, "미처리"])))
     for path, data in changed.items():
         excel_collection.add_file(job2, path, data)
-    r2 = excel_collection.analyze(job2, reuse)
     r3 = excel_collection.analyze(job2, reuse)
     check("다시 취합도 확인 없이 진행", r3["summary"]["blocking"] == 0 and r3["summary"]["rows"] == 11, r3["summary"])
     v2 = collection_store.commit(job2.id, reuse, r3["revision"], "11월 신청 내역")
@@ -296,6 +295,57 @@ def main() -> int:
     memo_after = store.get_memo(saved["memo_id"])["body"]
     check("대표 메모 갱신 · 태그 유지", "2번째 취합" in memo_after and "#11월" in memo_after, memo_after)
     check("이전 AI 결과는 당시 버전", ai_history.get(saved_ai["history_id"])["collection"]["version"] == 1)
+
+    section("2줄 머리글 · 동떨어진 행/열")
+
+    def merged(book, title=False):
+        ws = book.active
+        top = 2 if title else 1
+        if title:
+            ws.append(["프로그램 변경 내역"])
+        ws.append(["관련 프로그램ID 및 파일명", "재사용유형", None, "접수일자", "예정일자", "완료일자"])
+        ws.append([None, "신규", "수정", None, None, None])
+        ws.merge_cells(start_row=top, start_column=2, end_row=top, end_column=3)
+        for col in (1, 4, 5, 6):
+            ws.merge_cells(start_row=top, start_column=col, end_row=top + 1, end_column=col)
+        ws.append(["INST.TXXM_TKLECTPSN", 0, 0, "2025.12.30", "2026.01.02", "2026.01.02"])
+        ws.append(["INST.TXXM_DMACCT", 1, 0, "2025.12.30", "2026.01.02", "2026.01.02"])
+        ws.append(["INST.TXXM_ACCT_APPR, INST.TXXD_ACCT_APPR", 0, 2, "2025.12.30", "2026.01.02", "2026.01.02"])
+        ws.cell(row=top + 4, column=20).value = "담당자 메모"   # 표 오른쪽 한참 떨어진 칸
+        ws.cell(row=top + 150, column=1).value = "작성자: 홍길동"  # 표 아래 한참 떨어진 행
+
+    job3 = excel_collection.create_job("변경 내역")
+    excel_collection.add_file(job3, "a.xlsx", book_bytes(merged))
+    excel_collection.add_file(job3, "b.xlsx", book_bytes(lambda b: merged(b, title=True)))
+    m = excel_collection.analyze(job3, {})
+    check("병합된 위 머리글 대신 아래 이름(신규·수정)",
+          m["fields"] == ["관련 프로그램ID 및 파일명", "신규", "수정", "접수일자", "예정일자", "완료일자"], m["fields"])
+    check("2줄 머리글은 데이터 행이 아님", m["summary"]["rows"] == 6 and m["summary"]["blocking"] == 0, m["summary"])
+    sheet_a = m["files"][0]["sheets"][0]
+    notes = " ".join(i["message"] for i in sheet_a["issues"])
+    check("머리글 표시는 1~2행", sheet_a["header_label"] == "1~2행", sheet_a.get("header_label"))
+    check("아래쪽 동떨어진 행은 빼고 알림", "작성자" in notes and "100행" in notes, notes)
+    check("오른쪽 동떨어진 열은 빼고 알림", "T열" in notes and "열 T" not in m["fields"], notes)
+    check("제목 + 2줄 머리글도 인식", m["files"][1]["sheets"][0]["header_label"] == "2~3행", m["files"][1]["sheets"][0].get("header_label"))
+    full = excel_collection.analyze(job3, {}, full=True)
+    first = full["rows"][0][4]
+    check("행 값이 아래 머리글 기준으로 정렬", first[1] == ("n", "0", "0") and first[3][1] == "2025.12.30", first)
+    excel_collection.cancel_job(job3.id)
+
+    def gap(rows_gap):
+        j = excel_collection.create_job("간격")
+        def build(b):
+            ws = b.active
+            ws.append(["이름", "값"])
+            ws.append(["가", 1])
+            ws.cell(row=2 + rows_gap + 1, column=1).value = "나"
+            ws.cell(row=2 + rows_gap + 1, column=2).value = 2
+        excel_collection.add_file(j, "g.xlsx", book_bytes(build))
+        out = excel_collection.analyze(j, {})["summary"]["rows"]
+        excel_collection.cancel_job(j.id)
+        return out
+    check("빈 행 99개 사이는 같은 표", gap(99) == 2)
+    check("빈 행 100개 넘게 떨어지면 제외", gap(100) == 1)
 
     section("구형 .xls")
     try:

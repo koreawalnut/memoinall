@@ -189,7 +189,7 @@ function colPreviewTable(s, withAbove = false) {
   const cells = (row, tag = "td") => row.cells.map((c) => `<${tag}>${esc(c)}</${tag}>`).join("");
   return `<div class="col-scroll"><table class="col-table"><thead>
     ${withAbove ? p.above.map((r) => `<tr class="col-dim"><td>${r.row}</td>${cells(r)}</tr>`).join("") : ""}
-    <tr><th>${s.header_row}행</th>${p.header.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead>
+    <tr><th>${esc(s.header_label || s.header_row + "행")}</th>${p.header.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead>
     <tbody>${p.rows.map((r) => `<tr><td class="col-dim">${r.row}</td>${cells(r)}</tr>`).join("") || '<tr><td colspan="99" class="col-dim">아래에 행이 없습니다.</td></tr>'}</tbody></table></div>`;
 }
 
@@ -222,6 +222,7 @@ function colIssueHTML(s, x) {
       <input type="number" min="1" id="colHeader-${k}" data-col-header="${k}" data-focus="header:${k}" value="${x.row || ""}" style="width:90px" />
       <button class="btn" data-col-header-ok="${k}" data-focus="headerok:${k}">${x.blocking ? "이 행을 항목 이름으로 사용" : "행 바꾸기"}</button></div></div>`;
   }
+  if (x.kind === "note") return `<div class="${cls}">${esc(x.message)}</div>`;
   if (x.kind === "special") {
     return `<div class="${cls}"><div>${esc(x.message)}</div><ul>${x.rows.map((r) => `<li>${r.row}행 · ${esc(r.reason)}${r.text ? ` · ‘${esc(r.text)}’` : ""}</li>`).join("")}
       ${x.count > x.rows.length ? `<li>외 ${x.count - x.rows.length}행</li>` : ""}</ul>
@@ -234,7 +235,7 @@ function colIssueHTML(s, x) {
 
 function colSheetHTML(s, multi) {
   const k = esc(s.key);
-  const title = `시트 ‘${esc(s.name)}’ · ${colNum(s.selected ? s.rows : s.data_rows)}행 · 항목 이름 ${s.header_row}행`;
+  const title = `시트 ‘${esc(s.name)}’ · ${colNum(s.selected ? s.rows : s.data_rows)}행 · 항목 이름 ${esc(s.header_label || s.header_row + "행")}`;
   const notes = s.notes.map((n) => `<span class="note"> · ${esc(n)}</span>`).join("");
   const head = multi
     ? `<label class="col-check"><input type="checkbox" data-col-sheet="${k}" data-focus="sheet:${k}" ${s.selected ? "checked" : ""} /> ${title}</label>${notes}`
