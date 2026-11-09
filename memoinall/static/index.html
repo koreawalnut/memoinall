@@ -78,7 +78,8 @@
   .t-teal   { --tc: #2b9c9c; }
   .t-pink   { --tc: #cf5fa0; }
 
-  main { padding: 20px 24px 60px; max-width: 1000px; width: 100%; }
+  /* min-width:0 — 넓은 표가 그리드 칸을 밀어 화면 전체가 옆으로 밀리지 않게, 표 안에서만 스크롤한다. */
+  main { padding: 20px 24px 60px; max-width: 1000px; width: 100%; min-width: 0; }
   .capture { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; }
   .capture textarea {
     width: 100%; min-height: 92px; resize: vertical; background: transparent;
@@ -275,6 +276,44 @@
     padding: 9px 18px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 99;
   }
   .toast.show { opacity: 1; }
+
+  /* 엑셀 폴더 취합 — 단계 표시, 파일별 확인, 합쳐진 표 */
+  .col-steps { display: flex; gap: 24px; list-style: none; padding: 0; margin: 4px 0 16px; color: var(--dim); flex-wrap: wrap; font-size: 14px; }
+  .col-steps li { padding-bottom: 6px; border-bottom: 2px solid transparent; }
+  .col-steps [aria-current="step"] { color: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .col-check { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
+  .col-check input { accent-color: var(--accent); width: 16px; height: 16px; flex: none; }
+  .col-input { flex: 1; min-width: 0; background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; }
+  .col-summary { font-size: 15px; margin: 4px 0 8px; }
+  .col-file { border-top: 1px solid var(--line); padding: 12px 0; }
+  .col-file .note, .col-sheet .note { color: var(--dim); font-size: 13.5px; }
+  .col-sheet { margin: 8px 0 0 24px; }
+  .col-issue { margin: 8px 0; padding: 12px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line)); border-radius: 8px;
+    background: color-mix(in srgb, var(--warn) 7%, transparent); }
+  .col-issue ul { margin: 6px 0 8px; padding-left: 18px; }
+  .col-map-row { margin: 8px 0; }
+  .col-map-row select { max-width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; }
+  .col-warn { color: var(--warn); font-size: 14px; margin-top: 10px; }
+  .col-warn-text { color: var(--warn); }
+  .col-badge-warn { color: var(--warn); border-color: var(--warn); }
+  .col-badge-ok { color: var(--accent-2); border-color: var(--accent-2); }
+  .col-scroll { max-width: 100%; overflow-x: auto; margin: 8px 0; }
+  .col-main { max-height: 62vh; overflow-y: auto; }
+  .col-table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  .col-table th, .col-table td { border-bottom: 1px solid var(--line); padding: 6px 9px; text-align: left; white-space: nowrap; vertical-align: top; }
+  .col-table th { background: var(--panel-2); color: var(--dim); font-weight: 500; position: sticky; top: 0; }
+  .col-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .col-table .col-total td { font-weight: 600; border-top: 2px solid var(--line); }
+  .col-dim { color: var(--dim); }
+  .col-bad { color: var(--warn); }
+  .col-small { padding: 2px 8px; font-size: 12.5px; }
+  .col-issues { margin-top: 14px; padding: 12px 14px; border-left: 3px solid var(--warn); background: var(--panel-2); border-radius: 0 8px 8px 0; font-size: 14px; }
+  .col-issues ul { margin: 6px 0 0; padding-left: 18px; }
+  .col-progress { margin-top: 14px; }
+  .col-saved { display: block; width: 100%; text-align: left; white-space: normal; margin-bottom: 6px; }
+  .col-saved .meta { display: block; white-space: normal; }
+  .col-target { border-color: var(--accent); }
+  @media (max-width: 600px) { .col-sheet { margin-left: 0; } .col-steps { gap: 12px; font-size: 13px; } }
 </style>
 </head>
 <body>
@@ -364,6 +403,7 @@
     <button class="btn" id="dEdit">고치기</button>
     <button class="btn primary" id="dSave" hidden>저장</button>
     <button class="btn ghost" id="dPack">이 메모로 문서 만들기</button>
+    <button class="btn" id="dCollection" hidden>취합표 보기</button>
     <span class="spacer"></span>
     <button class="btn ghost" id="dDelete" style="color:var(--danger)">삭제</button>
     <button class="btn ghost" id="dClose">닫기</button>
@@ -374,6 +414,7 @@
 
 <script src="/static/generate.js"></script>
 <script src="/static/workflows.js"></script>
+<script src="/static/collections.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 // tags 는 조회 조건(AND). tag 하나만 쓰던 시절의 사이드바 클릭도 여기로 모은다.
@@ -575,15 +616,19 @@ const TABS = [
     title: "메모 가져오기·공유", lead: "다른 앱에 적은 메모를 가져오거나, 필요한 기록을 동료에게 전달하세요." },
   { id: "settings", icon: "⚙️", name: "설정", sub: "AI·검색",
     title: "설정", lead: "어떤 AI 를 쓸지, 검색용 임베딩은 어떤 상태인지 여기서 봅니다." },
+  // 메뉴에는 없다. 가져오기·공유 → 문서 가져오기에서 연다.
+  { id: "collect", hidden: true, parent: "import", icon: "📊", name: "엑셀 폴더 취합",
+    title: "엑셀 폴더 취합", lead: "같은 항목을 가진 엑셀을 한 표로 모으고, AI로 정리할 수 있어요." },
 ];
 const TAB_BY_ID = Object.fromEntries(TABS.filter((t) => t.id).map((t) => [t.id, t]));
 
 function renderTabs() {
-  const button = (t) => `<button class="tab ${state.tab === t.id ? "on" : ""}" data-tab="${t.id}"${state.tab === t.id ? ' aria-current="page"' : ""}>${esc(t.name)}</button>`;
-  const secondary = TABS.find((t) => !t.primary && t.id === state.tab);
+  const current = TAB_BY_ID[state.tab]?.parent || state.tab;
+  const button = (t) => `<button class="tab ${current === t.id ? "on" : ""}" data-tab="${t.id}"${current === t.id ? ' aria-current="page"' : ""}>${esc(t.name)}</button>`;
+  const secondary = TABS.find((t) => !t.primary && !t.hidden && t.id === current);
   $("#tabs").innerHTML = TABS.filter((t) => t.primary).map(button).join("")
     + `<details class="nav-more" id="moreMenu"><summary class="tab ${secondary ? "on" : ""}">${secondary ? esc(secondary.name) : "더 보기"} <span aria-hidden="true">⌄</span></summary>
-         <div class="more-items">${TABS.filter((t) => !t.primary).map(button).join("")}</div></details>`;
+         <div class="more-items">${TABS.filter((t) => !t.primary && !t.hidden).map(button).join("")}</div></details>`;
   $("#tabs").querySelectorAll("[data-tab]").forEach((b) => {
     b.onclick = () => { goTab(b.dataset.tab); };
   });
@@ -732,7 +777,7 @@ async function render() {
   try {
     const views = {
       feed: renderFeed, todos: renderTodos, clusters: renderClusters, rollup: renderRollup,
-      generate: renderGenerate, import: renderImport, settings: renderSettings,
+      generate: renderGenerate, import: renderImport, settings: renderSettings, collect: renderCollect,
     };
     await (views[state.tab] || renderFeed)(version);
   } catch (e) {
@@ -754,6 +799,7 @@ function cardHTML(m) {
   const f = m.facets || {};
   const badges = [
     m.source === "ai" ? '<span class="badge">AI로 정리</span>' : "",
+    m.source === "collection" ? '<span class="badge">엑셀 취합</span>' : "",
     m.why ? `<span class="badge why">${esc(m.why)}</span>` : "",
     ...(f.tag || []).slice(0, 5).map((t) => `<span class="badge tag">#${esc(t)}</span>`),
     ...(f.person || []).slice(0, 3).map((p) => `<span class="badge person">@${esc(p)}</span>`),
@@ -1108,7 +1154,9 @@ async function renderImport(version = renderVersion) {
       <h3>파일을 메모로 가져오기</h3>
       <div class="desc">엑셀·PDF·한글 파일의 텍스트를 읽습니다. 내용을 확인하고 필요한 부분만 메모로 저장하세요.</div>
       <label for="documentFile" class="status">문서 선택 (파일당 20MB 이하)</label>
-      <div style="margin:8px 0"><button class="btn" type="button" id="chooseDocument">파일 선택</button></div>
+      <div class="row" style="margin:8px 0"><button class="btn" type="button" id="chooseDocument">파일 선택</button>
+        <button class="btn" type="button" id="openCollect">엑셀 폴더 취합</button>
+        <span class="status">${col.job || col.upload ? "취합 중인 작업이 있습니다" : "부서별 엑셀을 한 표로 모으기"}</span></div>
       <input id="documentFile" type="file" accept=".xlsx,.xlsm,.xls,.pdf,.hwp,.hwpx,.txt,.md" hidden />
       <div id="documentPreview" aria-live="polite"></div>
     </div>
@@ -1301,6 +1349,7 @@ async function renderImport(version = renderVersion) {
   paintExchangeSection();
   $("#documentFile").onchange = (e) => { if (e.target.files[0]) previewDocument(e.target.files[0]); };
   $("#chooseDocument").onclick = () => $("#documentFile").click();
+  $("#openCollect").onclick = openCollect;
   paintDocumentPreview();
   $("#evernoteFile").onchange = async (e) => {
     const file = e.target.files[0];
@@ -2414,6 +2463,11 @@ async function openMemo(id, hit = null) {
     ? `<div class="side-h">비슷한 메모</div><ul style="padding:0">${m.similar.map((s) => `<li data-memo="${s.id}" style="list-style:none;color:var(--dim);cursor:pointer;padding:2px 0">· ${esc(s.title)} <span class="meta">${fmt(s.created_at)}</span></li>`).join("")}</ul>`
     : "";
   $("#dSimilar").querySelectorAll("[data-memo]").forEach((li) => (li.onclick = () => openMemo(+li.dataset.memo)));
+  // 엑셀 취합의 대표 메모는 표 자체로 이어진다. 메모 본문은 요약일 뿐이다.
+  const collection = m.source === "collection" && /^collection:(\d+)$/.exec(m.external_id || "");
+  $("#dCollection").hidden = !collection;
+  $("#dCollection").dataset.id = collection ? collection[1] : "";
+  $("#dPack").textContent = collection ? "이 자료를 AI로 정리" : "이 메모로 문서 만들기";
   if (!$("#detail").open) $("#detail").showModal();
   // 창이 열린 뒤라야 위치를 잴 수 있다 — 닫혀 있으면 높이가 전부 0 이라 안 움직인다.
   paintDoc(m, hit);
@@ -2455,8 +2509,14 @@ $("#dDelete").onclick = async () => {
 };
 $("#dPack").onclick = () => {
   if (gen.busy) { toast("진행 중인 생성이 끝난 뒤 다시 시도하세요"); return; }
-  const m = state.memo;
-  if (closeDetail()) startGenerate([m.id], `"${m.title}" 내용을 정리해줘`);
+  const m = state.memo, collection = $("#dCollection").dataset.id;
+  if (!closeDetail()) return;
+  if (collection) colStartAi(+collection);
+  else startGenerate([m.id], `"${m.title}" 내용을 정리해줘`);
+};
+$("#dCollection").onclick = () => {
+  const id = +$("#dCollection").dataset.id;
+  if (id && closeDetail()) colOpen(id);
 };
 
 document.addEventListener("keydown", (e) => {
@@ -2467,7 +2527,8 @@ document.addEventListener("keydown", (e) => {
 });
 window.addEventListener("beforeunload", (e) => {
   localDraft($("#capture").value);
-  if (genDirty() || gen.busy || detailDirty() || docImport.dirty || docImport.saving || $("#capture").value !== draftSaved || captureSaving) {
+  if (genDirty() || gen.busy || detailDirty() || docImport.dirty || docImport.saving || $("#capture").value !== draftSaved || captureSaving
+      || col.upload || col.preview) {
     e.preventDefault(); e.returnValue = "";
   }
 });

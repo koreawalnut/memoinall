@@ -262,7 +262,26 @@ def _install_downloader(window) -> None:
             log.exception("파일 저장 실패")
             return False
 
-    window.expose(save)
+    def save_bytes(encoded: str, suggested: str):
+        """엑셀처럼 이진 파일. 웹 화면이 base64 로 넘긴다."""
+        import base64
+
+        try:
+            data = base64.b64decode(encoded, validate=True)
+            kind = "엑셀 통합 문서 (*.xlsx)" if suggested.lower().endswith(".xlsx") else "모든 파일 (*.*)"
+            result = window.create_file_dialog(
+                webview.SAVE_DIALOG, save_filename=suggested, file_types=(kind, "모든 파일 (*.*)")
+            )
+            if not result:
+                return False
+            path = result if isinstance(result, str) else result[0]
+            Path(path).write_bytes(data)
+            return True
+        except Exception:
+            log.exception("파일 저장 실패")
+            return False
+
+    window.expose(save, save_bytes)
 
 
 def _notify(message: str) -> None:

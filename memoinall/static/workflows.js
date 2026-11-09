@@ -54,7 +54,7 @@ async function useWorkflow() {
     ++gen.finderVersion;
     Object.assign(gen, { instruction: w.instruction, format: w.format, budget: w.budget,
       scope: { tags: [...w.tags], period: w.period, since: w.since, until: w.until, person: w.person },
-      memoIds: null, review: null, plan: null, queries: null, output: null, body: "", savedDraft: "",
+      memoIds: null, review: null, plan: null, queries: null, output: null, body: "", savedDraft: "", collection: null,
       editing: false, initialized: true, error: "", followup: "", oldVersion: null, periodDay: genToday() });
     await render();
     const missing = w.tags.filter((t) => !gen.tagChoices.some((x) => x.name === t));

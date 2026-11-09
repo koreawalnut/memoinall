@@ -40,6 +40,10 @@ LLM에 그대로 먹일 수 있는 근거 묶음으로 뽑아 쓰는 개인 메�
 엑셀·PDF·한글 문서는 같은 화면의 **파일을 메모로 가져오기**에서 선택하세요.
 텍스트를 미리 보고 수정한 뒤 원하는 시트·페이지·구역만 저장할 수 있습니다.
 지원 범위와 설치 방법은 [문서 파일 가져오기](docs/document-import.md)를 참고하세요.
+부서별로 받은 같은 양식의 엑셀은 **엑셀 폴더 취합**에서 폴더를 골라 한 표로 모읍니다.
+제목 줄·합계 행·이름이 다른 열은 확인한 뒤 합치고, 결과 표의 행마다 원본 파일·시트·행을 확인할 수 있습니다.
+합계·건수는 앱이 전체 행으로 계산하며, **엑셀로 저장**하거나 **이 자료를 AI로 정리**로 보고서 초안을 만들 수 있습니다.
+취합 자료는 대표 메모 하나로 목록에 보입니다. [설계와 구현 범위](docs/excel-folder-collection-design.md)
 AI 문서의 **인수인계서** 형식은 배경·현재 상태·결정·남은 할 일·참고 자료를 정리합니다.
 AI 정리 화면에서는 **메모 고르기**로 자료를 추가·제외하고, 결과를 **직접 수정**하거나 **다듬기**로 이어서 고칠 수 있습니다.
 결과와 수정 내용은 **이전 결과**에 자동 보관되며, **메모로 저장**하면 내 메모에 추가됩니다. [사용법](docs/ai-editing.md)
@@ -421,6 +425,8 @@ python tests/test_importers.py          # 임포터 35종 (합성 DB + 실데이
 python tests/test_generate.py           # 프로바이더·설정·생성 111종 (가짜 SDK 로)
 python tests/test_desktop.py            # ONNX 임베더·데스크톱 36종
 python tests/test_redmine.py            # Redmine 65종 (가짜 서버를 띄워 실제 소켓으로)
+python tests/test_collections.py        # 엑셀 폴더 취합: 읽기·확인·저장·집계·내보내기·AI 근거
+python tests/test_collection_ui.py      # 엑셀 폴더 취합 화면 흐름 (playwright)
 ```
 
 `test_generate.py` 는 각 어댑터가 **실제로 어떤 파라미터를 보내는지**까지 검사합니다 —
@@ -449,6 +455,9 @@ memoinall/
   api.py         FastAPI 라우트
   cli.py         CLI
   importers/     가져오기 (스티커 메모 / Samsung Notes / Redmine / 텍스트 폴더)
+  excel_collection.py    엑셀 폴더 취합: 파일 읽기 · 머리글/열 연결/합계 행 확인 (확정 전 작업은 메모리)
+  collection_store.py    확정한 취합표 저장 · 버전 · 대표 메모
+  collection_analysis.py 전체 행 집계(Decimal) · 확인 사항 · AI 근거 · 엑셀 내보내기
   static/        웹 UI (단일 HTML, 외부 의존성 없음)
 
 desktop_main.py  데스크톱 진입점 (PyInstaller 가 묶는 파일)

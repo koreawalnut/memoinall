@@ -10,18 +10,23 @@ import time
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
+from urllib.parse import quote
+
 from fastapi import Body, FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from . import (
     config,
     ai_history,
+    collection_analysis,
+    collection_store,
     context,
     db,
     documents,
     embed,
+    excel_collection,
     exchange,
     generate,
     importers,
@@ -660,6 +665,100 @@ def document_save(payload: dict = Body(...)):
         raise HTTPException(400, str(exc))
 
 
+# --------------------------------------------------------------------------- 엑셀 폴더 취합
+# 폴더 경로를 받는 API 는 두지 않는다. 브라우저가 고른 폴더 안의 파일을 상대 경로와 함께
+# 하나씩 올리고, 서버는 발급한 작업 ID 로만 묶는다. 확정 전 작업은 메모리에만 있다.
+
+
+def _collection_action(callback, *args, **kwargs):
+    try:
+        return callback(*args, **kwargs)
+    except (excel_collection.JobNotFound, collection_store.NotFound) as exc:
+        raise HTTPException(404, str(exc).strip("'\""))
+    except collection_store.Conflict as exc:
+        raise HTTPException(409, str(exc))
+    except excel_collection.CollectionError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/collections/jobs")
+def collection_job_create(payload: dict = Body(default={})):
+    collection_id = payload.get("collection_id")
+    if isinstance(collection_id, int) and not isinstance(collection_id, bool):
+        _collection_action(collection_store.get, collection_id)  # 다시 취합할 자료가 남아 있는지 먼저 확인
+    job = _collection_action(excel_collection.create_job, payload.get("title") or "", collection_id, payload.get("skipped"))
+    return {"id": job.id, "limits": {"files": excel_collection.MAX_FILES, "bytes": excel_collection.MAX_TOTAL_BYTES,
+                                     "file_bytes": excel_collection.MAX_FILE_BYTES,
+                                     "cells": excel_collection.MAX_TOTAL_CELLS}}
+
+
+@app.post("/api/collections/jobs/{job_id}/files")
+async def collection_job_file(job_id: str, request: Request, path: str = Query(..., max_length=300)):
+    job = _collection_action(excel_collection.get_job, job_id)
+    _collection_action(excel_collection.clean_path, path)
+    chunks, size = [], 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > excel_collection.MAX_FILE_BYTES:
+            # 큰 파일도 '읽지 못한 파일'로 목록에 남긴다. 조용히 건너뛰지 않는다.
+            return _collection_action(excel_collection.add_failed, job, path, size,
+                                      "20MB 이하의 파일만 취합할 수 있습니다. 파일을 나눠 저장하세요.")
+        chunks.append(chunk)
+    return await run_in_threadpool(_collection_action, excel_collection.add_file, job, path, b"".join(chunks))
+
+
+@app.post("/api/collections/jobs/{job_id}/preview")
+def collection_job_preview(job_id: str, payload: dict = Body(default={})):
+    job = _collection_action(excel_collection.get_job, job_id)
+    return _collection_action(excel_collection.analyze, job, payload.get("rules"))
+
+
+@app.post("/api/collections/jobs/{job_id}/commit")
+def collection_job_commit(job_id: str, payload: dict = Body(...)):
+    return _collection_action(collection_store.commit, job_id, payload.get("rules"), payload.get("revision"),
+                              payload.get("title"), payload.get("tags"))
+
+
+@app.post("/api/collections/jobs/{job_id}/cancel")
+def collection_job_cancel(job_id: str):
+    return {"cancelled": excel_collection.cancel_job(job_id)}
+
+
+@app.get("/api/collections")
+def collection_list(limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
+    return collection_store.list_collections(limit, offset)
+
+
+@app.get("/api/collections/{collection_id}")
+def collection_get(collection_id: int):
+    return _collection_action(collection_store.get, collection_id)
+
+
+@app.delete("/api/collections/{collection_id}")
+def collection_delete(collection_id: int):
+    out = _collection_action(collection_store.delete, collection_id)
+    collection_analysis.forget(collection_id)
+    return out
+
+
+@app.get("/api/collections/{collection_id}/versions/{version}")
+def collection_summary(collection_id: int, version: int, group_by: str | None = None, measure: str | None = None):
+    return _collection_action(collection_analysis.summary, collection_id, version, group_by, measure)
+
+
+@app.get("/api/collections/{collection_id}/versions/{version}/rows")
+def collection_rows(collection_id: int, version: int, offset: int = Query(0, ge=0),
+                    limit: int = Query(50, ge=1, le=200), excluded: bool = False):
+    return _collection_action(collection_analysis.rows_page, collection_id, version, offset, limit, excluded=excluded)
+
+
+@app.get("/api/collections/{collection_id}/versions/{version}/export")
+def collection_export(collection_id: int, version: int, group_by: str | None = None, measure: str | None = None):
+    data, name = _collection_action(collection_analysis.export_xlsx, collection_id, version, group_by, measure)
+    return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f"attachment; filename=\"collection.xlsx\"; filename*=UTF-8''{quote(name)}"})
+
+
 # --------------------------------------------------------------------------- 설정
 
 
@@ -756,6 +855,7 @@ def _generate_request(payload: dict, instruction: str, *, run: bool = False):
         memo_ids=_memo_ids(payload.get("memo_ids")),
         source_revisions=payload.get("source_revisions"),
         period=payload.get("period"),
+        collection=payload.get("collection"),
     )
     try:
         if run:

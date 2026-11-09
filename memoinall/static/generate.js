@@ -3,7 +3,13 @@ const gen = { instruction: "", format: "auto", budget: 6000, queries: null, plan
   busy: false, memoIds: null, scope: null, review: null, showSources: false, initialized: false,
   editing: false, body: "", savedDraft: "", draftSaving: false, draftTask: Promise.resolve(), draftTimer: null,
   error: "", followup: "", historyOffset: 0, historyQuery: "", finderVersion: 0, oldVersion: null,
-  tagChoices: [], formats: [], periods: {}, periodDay: "" };
+  tagChoices: [], formats: [], periods: {}, periodDay: "", collection: null };
+// 취합 자료로 정리할 때의 시작 문구. 요청문 아래에는 이 세 가지만 둔다.
+const GEN_COLLECTION_STARTERS = [
+  { label: "현황 요약", format: "brief", text: "취합 자료의 현황을 요약해줘. 전체 합계와 묶음별 차이, 확인이 필요한 점을 함께 알려줘." },
+  { label: "확인할 내용 찾기", format: "list", text: "취합 자료에서 확인할 내용을 찾아줘. 빈칸·값 확인 필요·중복 같은 확인 사항과 후속 확인이 필요한 행을 정리해줘." },
+  { label: "보고서 초안", format: "report", text: "취합 자료를 바탕으로 보고서 초안을 써줘. 집계표를 근거로 현황, 확인 사항, 후속 할 일을 정리해줘." },
+];
 
 function genToday() { const d = new Date(); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; }
 function genPeriod() { return gen.scope?.period || (gen.scope?.since || gen.scope?.until ? "custom" : "all"); }
@@ -29,12 +35,30 @@ async function startGenerate(ids, instruction) {
   gen.busy = true; setGenBusy(true);
   try { await flushGenDraft(); } catch { toast("수정 내용을 보관하지 못했습니다. 다시 시도해 주세요"); return; }
   finally { gen.busy = false; setGenBusy(false); }
-  Object.assign(gen, { instruction, memoIds: ids, scope: null, queries: null, plan: null, output: null,
+  Object.assign(gen, { instruction, memoIds: ids, scope: null, queries: null, plan: null, output: null, collection: null,
     review: null, body: "", savedDraft: "", editing: false, initialized: true, error: "", followup: "", oldVersion: null, periodDay: genToday() });
   await goTab("generate");
 }
 
+// 취합 자료의 한 버전을 고정해 정리한다. 메모 검색·태그 범위는 쓰지 않는다.
+async function startCollectionGenerate(collection, instruction = "") {
+  if (gen.busy) { toast("진행 중인 정리가 끝난 뒤 다시 선택하세요"); return; }
+  gen.busy = true; setGenBusy(true);
+  try { await flushGenDraft(); } catch { toast("수정 내용을 보관하지 못했습니다. 다시 시도해 주세요"); return; }
+  finally { gen.busy = false; setGenBusy(false); }
+  Object.assign(gen, { instruction, format: "auto", memoIds: null, scope: null, queries: null, plan: null, output: null,
+    review: null, body: "", savedDraft: "", editing: false, initialized: true, error: "", followup: "", oldVersion: null,
+    periodDay: genToday(), collection });
+  await goTab("generate");
+}
+
+function genCollectionLabel(c = gen.collection) {
+  return `사용할 자료: ${c.title} · 파일 ${c.files}개 · ${colNum(c.rows)}행 (${c.version}번째 취합)`
+    + (c.group_by ? ` · ${c.group_by}별${c.measure ? " " + c.measure : ""} 집계` : "");
+}
+
 function genScopeLabel() {
+  if (gen.collection) return genCollectionLabel();
   const count = gen.review ? gen.review.selected.size : gen.memoIds?.length;
   const s = gen.scope;
   const relative = s?.period && !["all", "custom"].includes(s.period);
@@ -96,8 +120,10 @@ async function renderGenerate(version = renderVersion) {
       const r = await api(`/api/generate/history/${history.items[0].id}`);
       if (version !== renderVersion) { gen.initialized = false; return; }
       adoptGenResult(r); gen.instruction = r.instruction; gen.format = r.format; gen.scope = r.scope || null;
+      gen.collection = r.collection || null;
     }
   }
+  const usingCollection = !!gen.collection;
   $("#view").innerHTML = `
     <details class="panel" id="genHistory"><summary>이전 결과</summary>
       <div class="row" style="margin:12px 0"><input type="search" id="genHistorySearch" aria-label="이전 결과 찾기" placeholder="이전에 요청한 내용으로 찾기" style="flex:1" /></div>
@@ -108,8 +134,11 @@ async function renderGenerate(version = renderVersion) {
       <div class="desc" style="margin-top:10px">원하는 내용을 적으면 메모를 찾아 정리합니다. 만든 결과는 자동으로 보관됩니다.
         ${llm_ready ? "" : '<br>AI를 연결하면 바로 정리할 수 있어요. <a href="#" id="genSettings">AI 연결하기</a>'}</div>
       ${workflowBarHTML()}
-      <textarea class="gen-input" id="genInput" aria-label="정리할 내용" placeholder="예) 이번 주 업무를 팀 공유용으로 정리해줘">${esc(gen.instruction)}</textarea>
-      <details class="capture-options" id="genTagFilter" style="margin:12px 0" ${gen.scope?.tags?.length ? "open" : ""}>
+      <textarea class="gen-input" id="genInput" aria-label="정리할 내용" placeholder="${usingCollection ? "예) 부서별 신청금액과 미처리 내역을 정리해줘" : "예) 이번 주 업무를 팀 공유용으로 정리해줘"}">${esc(gen.instruction)}</textarea>
+      ${usingCollection ? `<div class="row" style="margin:10px 0" id="genStarters">${GEN_COLLECTION_STARTERS.map((s, i) => `<button class="btn ghost" data-gen-starter="${i}">${esc(s.label)}</button>`).join("")}</div>
+      <div class="row gen-collection" style="margin:10px 0"><span class="status">숫자는 앱이 포함 행 전체로 계산한 값만 AI에 전달합니다. 원문 행은 읽을 분량 안에서 일부만 실을 수 있습니다.</span>
+        <span class="spacer"></span><button class="btn ghost" id="genCollectionView">취합표 보기</button><button class="btn ghost" id="genCollectionClear">메모로 정리하기</button></div>` : ""}
+      <details class="capture-options" id="genTagFilter" style="margin:12px 0" ${gen.scope?.tags?.length ? "open" : ""} ${usingCollection ? "hidden" : ""}>
         <summary>태그로 범위 좁히기 · <span class="meta" id="genTagCount"></span></summary>
         <div class="note" style="margin-top:8px">여러 개를 고르면 <b>그 태그가 모두 붙은 메모만</b> 찾습니다. 태그를 바꾸면 참고할 메모를 다시 고릅니다.</div>
         <div class="tagrow" id="genSelectedTags" style="margin-top:8px"></div>
@@ -118,9 +147,9 @@ async function renderGenerate(version = renderVersion) {
         <div class="note" id="genTagMore"></div>
       </details>
       <div class="row" style="margin:10px 0"><label for="genFormat">형식</label><select id="genFormat">${formats.map((f) => `<option value="${f.key}" ${gen.format === f.key ? "selected" : ""}>${esc(f.label)}</option>`).join("")}</select>
-        <span class="spacer"></span><button class="btn" id="genPlan">메모 고르기</button><button class="btn primary" id="genRun">${llm_ready ? "정리하기" : "요청문 만들기"}</button></div>
+        <span class="spacer"></span><button class="btn" id="genPlan" ${usingCollection ? "hidden" : ""}>메모 고르기</button><button class="btn primary" id="genRun">${llm_ready ? "정리하기" : "요청문 만들기"}</button></div>
       <div class="note" id="genScope">${esc(genScopeLabel())}</div>
-      <details class="capture-options" style="margin-top:12px"><summary>찾을 범위 바꾸기</summary>
+      <details class="capture-options" style="margin-top:12px" id="genScopeOptions" ${usingCollection ? "hidden" : ""}><summary>찾을 범위 바꾸기</summary>
         <div class="row" style="margin:10px 0"><button class="btn" id="genAll">전체 메모에서 찾기</button><button class="btn" id="genFiltered">현재 검색 범위로 찾기</button></div>
         <div class="row" style="margin:10px 0"><label for="genPeriod">기간</label><select id="genPeriod">${genPeriodOptions()}</select></div>
         <div class="row" id="genDates" style="margin:10px 0"><input type="date" id="genSince" aria-label="정리할 작성 시작일" /><span>~</span><input type="date" id="genUntil" aria-label="정리할 작성 종료일" /></div>
@@ -146,6 +175,15 @@ async function renderGenerate(version = renderVersion) {
   };
   $("#genPlan").onclick = planGenerate; $("#genRun").onclick = runGenerate;
   $("#genNew").onclick = () => startGenerate(null, "");
+  document.querySelectorAll("[data-gen-starter]").forEach((b) => {
+    b.onclick = () => {
+      const s = GEN_COLLECTION_STARTERS[+b.dataset.genStarter];
+      gen.instruction = s.text; gen.format = s.format;
+      $("#genInput").value = s.text; $("#genFormat").value = s.format; invalidatePlan(true); $("#genInput").focus();
+    };
+  });
+  if ($("#genCollectionView")) $("#genCollectionView").onclick = () => colOpen(gen.collection.id, gen.collection.version);
+  if ($("#genCollectionClear")) $("#genCollectionClear").onclick = () => { if (!gen.busy) startGenerate(null, gen.instruction); };
   if ($("#genSettings")) $("#genSettings").onclick = (e) => { e.preventDefault(); goTab("settings"); };
   let historyTimer;
   $("#genHistorySearch").oninput = (e) => {
@@ -174,6 +212,11 @@ function invalidatePlan(reset = false) {
   updateGenPromptVisibility();
 }
 function genPayload() {
+  if (gen.collection) {
+    const c = gen.collection;
+    return { instruction: gen.instruction.trim(), format: gen.format, budget: gen.budget,
+      collection: { id: c.id, version: c.version, group_by: c.group_by || null, measure: c.measure || null } };
+  }
   const items = gen.review?.items.filter((m) => gen.review.selected.has(m.key));
   return { instruction: gen.instruction.trim(), format: gen.format, budget: gen.budget,
     queries: gen.queries, memo_ids: items ? items.map((m) => m.id) : gen.memoIds,
@@ -207,6 +250,20 @@ async function planGenerate() {
 function renderPlanPanel() {
   if (!$("#genPlanOut")) return;
   if ($("#genScope")) $("#genScope").textContent = genScopeLabel();
+  if (gen.collection) {
+    // 메모를 고르지 않는다. AI 에 넘길 집계·원문을 그대로 보여 주고 복사할 수 있게만 한다.
+    const p = gen.plan;
+    $("#genPlanOut").innerHTML = p?.prompt ? `<details class="panel" id="genReferences" ${gen.showSources ? "open" : ""}>
+      <summary>AI에 전달할 내용</summary><div class="note" style="margin-top:10px">앱이 포함 행 전체로 계산한 집계와 일부 원문 행입니다. AI를 연결하지 않았다면 복사해서 다른 AI에 붙여 넣을 수 있습니다.</div>
+      <div id="genPromptChanged" class="note">요청을 바꿨습니다. 요청문 복사를 누르면 현재 요청으로 다시 만듭니다.</div>
+      <pre id="genPromptText" class="pack">${esc(p.prompt)}</pre><button class="btn" id="copyGenPrompt">요청문 복사</button></details>` : "";
+    if ($("#genReferences")) {
+      $("#genReferences").ontoggle = (e) => { if (e.target.isConnected) gen.showSources = e.target.open; };
+      $("#copyGenPrompt").onclick = copySelectedGenPrompt;
+    }
+    updateGenPromptVisibility();
+    return;
+  }
   if (!gen.review) { $("#genPlanOut").innerHTML = ""; return; }
   const p = gen.plan;
   $("#genPlanOut").innerHTML = `<details class="panel" id="genReferences" ${gen.showSources ? "open" : ""}>
@@ -294,13 +351,13 @@ async function runGenerate() {
     const r = await api("/api/generate", { method: "POST", body: genPayload() });
     if (r.output) {
       adoptGenResult(r); gen.showSources = false; gen.plan = r; gen.queries = r.queries || [];
-      if (!gen.review) gen.review = { items: r.candidates || [], selected: new Set((r.candidates || []).map((m) => m.key)) };
+      if (!gen.review && !gen.collection) gen.review = { items: r.candidates || [], selected: new Set((r.candidates || []).map((m) => m.key)) };
       gen.planKey = JSON.stringify(genPayload());
       if (state.tab === "generate") { renderPlanPanel(); renderGenOutput(); loadGenHistory(); }
       genProgress();
     } else {
       gen.plan = r;
-      if (!gen.review) gen.review = { items: r.candidates || [], selected: new Set((r.candidates || []).map((m) => m.key)) };
+      if (!gen.review && !gen.collection) gen.review = { items: r.candidates || [], selected: new Set((r.candidates || []).map((m) => m.key)) };
       gen.planKey = JSON.stringify(genPayload());
       gen.showSources = true; renderPlanPanel(); genProgress(r.reason || "정리한 내용이 없습니다.");
     }
@@ -335,20 +392,56 @@ async function flushGenDraft() {
   return gen.draftTask;
 }
 
+// 목록 번호처럼 숫자 근거가 아닌 것은 빼고, 취합 집계에 없는 숫자만 골라 보여 준다.
+function genNumberKey(text) {
+  let t = text.replace(/,/g, "").replace(/^\+/, "");
+  const negative = t.startsWith("-");
+  if (negative) t = t.slice(1);
+  let [whole, frac = ""] = t.split(".");
+  whole = whole.replace(/^0+(?=\d)/, ""); frac = frac.replace(/0+$/, "");
+  const out = (whole || "0") + (frac ? "." + frac : "");
+  return (negative && out !== "0" ? "-" : "") + out;
+}
+function genUnverifiedNumbers(text, known) {
+  const set = new Set(known || []), out = [];
+  for (const m of text.matchAll(/(?<![\w.])[+-]?\d[\d,]*(?:\.\d+)?/g)) {
+    const lineStart = text.lastIndexOf("\n", m.index - 1) + 1;
+    if (!text.slice(lineStart, m.index).trim() && /^[.)]/.test(text.slice(m.index + m[0].length))) continue;
+    const key = genNumberKey(m[0].replace(/,$/, ""));
+    if (!set.has(key) && !out.includes(m[0])) out.push(m[0]);
+  }
+  return out;
+}
+function genNumberCheck(r) {
+  if (!r.collection?.known_numbers) return "";
+  const unknown = genUnverifiedNumbers(gen.body, r.collection.known_numbers);
+  return unknown.length
+    ? `<div class="note" id="genNumberCheck" style="color:var(--warn)">취합 집계에서 확인되지 않은 숫자 ${unknown.length}개: ${esc(unknown.slice(0, 10).join(", "))}${unknown.length > 10 ? " 외" : ""}. AI가 새로 계산했거나 잘못 옮긴 값일 수 있으니 취합표와 비교해 주세요.</div>`
+    : '<div class="note" id="genNumberCheck">본문의 숫자는 모두 취합 집계·원문에 있는 값입니다.</div>';
+}
+
 function renderGenOutput() {
   const host = $("#genOut"), r = gen.output;
   if (!host) return;
   if (!r || (!r.output && !r.history_id)) { host.innerHTML = ""; return; }
   const ids = new Set((r.sources || []).map((s) => s.id));
   const content = esc(gen.body).replace(/\[M(\d+)\]/g, (text, id) => ids.has(+id)
-    ? `<a href="#" data-output-source="${id}" title="참고한 메모 열기">${text}</a>` : text);
+    ? `<a href="#" data-output-source="${id}" title="참고한 메모 열기">${text}</a>` : text)
+    .replace(/\[C(\d+)\]/g, (text, id) => r.collection && +id === r.collection.id
+      ? `<a href="#" data-output-collection="${id}" title="취합표 열기">${text}</a>` : text);
+  const used = r.collection ? `${esc(genCollectionLabel(r.collection))} · 출처를 누르면 취합표가 열립니다`
+    : `참고한 메모 ${(r.sources || []).length}건 · 출처를 누르면 원문이 열립니다`;
+  const basis = r.collection
+    ? `<details style="margin-top:12px"><summary>사용한 취합 자료 (${r.collection.version}번째 취합 당시 근거)</summary><pre class="pack">${esc(r.collection.material || "")}</pre></details>`
+    : `<details style="margin-top:12px"><summary>참고했던 메모</summary>${(r.sources || []).map((s) => `<details style="margin:8px 0"><summary>${esc(s.title)} · ${esc((s.created_at || "").slice(0, 10))}</summary><pre class="pack">${esc(s.text)}</pre></details>`).join("")}</details>`;
   host.innerHTML = `<div class="panel">
     <div class="row"><h3 style="margin:0">정리한 내용</h3><span class="spacer"></span>
       <button class="btn" id="genEdit" ${gen.editing ? "hidden" : ""}>직접 수정</button><button class="btn" id="genDone" ${gen.editing ? "" : "hidden"}>수정 완료</button>
       <button class="btn primary" id="genMemo">${r.memo_id && gen.body === r.output ? "저장한 메모 열기" : "메모로 저장"}</button></div>
     <div class="note" id="genDraftStatus" aria-live="polite" style="margin:9px 0"></div>
     ${gen.editing ? `<textarea id="genBody" aria-label="정리한 내용 수정" maxlength="200000" style="width:100%;min-height:300px;font:inherit;line-height:1.7;padding:12px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px">${esc(gen.body)}</textarea>` : `<pre class="pack" style="max-height:none">${content}</pre>`}
-    <div class="row" style="margin:10px 0"><button class="btn ghost" id="copyOut">복사</button><button class="btn ghost" id="dlOut">파일로 저장</button><span class="meta">참고한 메모 ${(r.sources || []).length}건 · 출처를 누르면 원문이 열립니다</span></div>
+    ${genNumberCheck(r)}
+    <div class="row" style="margin:10px 0"><button class="btn ghost" id="copyOut">복사</button><button class="btn ghost" id="dlOut">파일로 저장</button><span class="meta" style="white-space:normal">${used}</span></div>
     <div style="border-top:1px solid var(--line);padding-top:14px;margin-top:14px">
       <label for="genFollowup"><b>어떻게 바꿀까요?</b></label>
       <div class="row" style="margin:8px 0">${["더 짧게", "보고용으로", "표로 정리"].map((s) => `<button class="btn ghost" data-gen-quick="${s}">${s}</button>`).join("")}</div>
@@ -356,14 +449,16 @@ function renderGenOutput() {
       <div class="note">현재 내용과 참고했던 메모로 다듬습니다. 이전 내용도 남겨둡니다.</div>
     </div>
     <details style="margin-top:16px"><summary>이전 내용 보기</summary><select id="genOldSelect" aria-label="이전 내용 선택" style="max-width:100%;margin:10px 0"><option value="">확인할 내용을 고르세요</option>${(r.versions || []).map((v) => `<option value="${v.version}">${v.version} · ${esc(({ generated:"처음 정리", edited:"직접 수정", refined:"AI로 다듬기", restored:"되돌린 내용" })[v.kind] || "정리")} · ${esc(v.request || fmt(v.created_at))}</option>`).join("")}</select><div id="genOldPreview"></div></details>
-    <details style="margin-top:12px"><summary>참고했던 메모</summary>${(r.sources || []).map((s) => `<details style="margin:8px 0"><summary>${esc(s.title)} · ${esc((s.created_at || "").slice(0, 10))}</summary><pre class="pack">${esc(s.text)}</pre></details>`).join("")}</details>
+    ${basis}
   </div>`;
   host.querySelectorAll("[data-output-source]").forEach((a) => { a.onclick = (e) => { e.preventDefault(); openMemo(+a.dataset.outputSource); }; });
+  host.querySelectorAll("[data-output-collection]").forEach((a) => { a.onclick = (e) => { e.preventDefault(); colOpen(r.collection.id, r.collection.version); }; });
   $("#genEdit").onclick = () => { gen.editing = true; renderGenOutput(); $("#genBody").focus(); };
   $("#genDone").onclick = () => genAction("save");
   $("#genMemo").onclick = () => r.memo_id && gen.body === r.output ? openMemo(r.memo_id) : genAction("memo");
   if ($("#genBody")) $("#genBody").oninput = (e) => {
     gen.body = e.target.value; gen.error = ""; draftStatus();
+    if ($("#genNumberCheck")) $("#genNumberCheck").outerHTML = genNumberCheck(r);
     $("#genMemo").textContent = r.memo_id && gen.body === r.output ? "저장한 메모 열기" : "메모로 저장";
     clearTimeout(gen.draftTimer); gen.draftTimer = setTimeout(() => flushGenDraft().catch(() => {}), 400);
   };
@@ -453,6 +548,7 @@ async function openGenHistory(id) {
     const r = await api(`/api/generate/history/${id}`);
     adoptGenResult(r); gen.instruction = r.instruction; gen.format = r.format;
     gen.memoIds = null; gen.review = gen.plan = gen.queries = null; gen.scope = r.scope || null; gen.followup = "";
+    gen.collection = r.collection || null;
     if (state.tab === "generate") await render();
   } catch (e) { genProgress(e.message); }
   finally { gen.busy = false; setGenBusy(false); }

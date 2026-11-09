@@ -8,7 +8,7 @@ from . import db, store
 
 MAX_BODY = 200_000
 PACK_KEYS = ("instruction", "format", "queries", "query_method", "budget_tokens", "used_tokens",
-             "sources", "dropped", "prompt", "provider", "memo_ids", "scope")
+             "sources", "dropped", "prompt", "provider", "memo_ids", "scope", "collection")
 
 
 class Conflict(ValueError):
@@ -129,8 +129,15 @@ def save_as_memo(result_id, version) -> dict:
     external_id = f"ai-result:{result_id}:{version}"
     memo_id = current["memo_id"] or store.find_by_external("ai", external_id)
     if memo_id is None:
-        references = "\n".join(f"- [M{s['id']}] {s['title']}" for s in current.get("sources", []))
-        body = current["output"] + "\n\n---\nAI로 정리한 메모\n참고한 메모:\n" + (references or "없음")
+        collection = current.get("collection")
+        if collection:
+            # 메모를 공유해도 상대 PC에는 이 취합 자료가 없다. 어떤 자료·버전이었는지 글로 남긴다.
+            references = (f"- [C{collection['id']}] {collection['title']} · {collection['version']}번째 취합"
+                          f" · 파일 {collection['files']}개 · {collection['rows']:,}행")
+            body = current["output"] + "\n\n---\nAI로 정리한 메모\n사용한 취합 자료:\n" + references
+        else:
+            references = "\n".join(f"- [M{s['id']}] {s['title']}" for s in current.get("sources", []))
+            body = current["output"] + "\n\n---\nAI로 정리한 메모\n참고한 메모:\n" + (references or "없음")
         try:
             memo_id = store.add_memo(body, source="ai", external_id=external_id)["id"]
         except sqlite3.IntegrityError:

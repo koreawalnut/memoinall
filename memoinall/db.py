@@ -122,6 +122,41 @@ CREATE TABLE IF NOT EXISTS workflows (
     version INTEGER NOT NULL DEFAULT 1,
     updated_at TEXT NOT NULL
 );
+
+-- 엑셀 폴더 취합. 확정한 표만 보관하고 원본 파일은 복제하지 않는다.
+-- 다시 취합하면 새 버전을 만들고, 이전 AI 결과는 당시 버전을 계속 가리킨다.
+CREATE TABLE IF NOT EXISTS collections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    memo_id INTEGER REFERENCES memos(id) ON DELETE SET NULL,
+    current_version INTEGER NOT NULL DEFAULT 0,
+    rules_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS collection_versions (
+    collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    fields_json TEXT NOT NULL,
+    sources_json TEXT NOT NULL,
+    stats_json TEXT NOT NULL,
+    rules_json TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    PRIMARY KEY (collection_id, version)
+);
+CREATE TABLE IF NOT EXISTS collection_rows (
+    collection_id INTEGER NOT NULL,
+    version INTEGER NOT NULL,
+    seq INTEGER NOT NULL,
+    src INTEGER NOT NULL,
+    row_no INTEGER NOT NULL,
+    included INTEGER NOT NULL DEFAULT 1,
+    reason TEXT NOT NULL DEFAULT '',
+    cells_json TEXT NOT NULL,
+    PRIMARY KEY (collection_id, version, seq),
+    FOREIGN KEY (collection_id, version) REFERENCES collection_versions(collection_id, version) ON DELETE CASCADE
+);
 """
 
 
