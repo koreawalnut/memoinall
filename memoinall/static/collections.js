@@ -3,7 +3,7 @@
 const col = {
   step: 1, includeSub: false, target: null, job: null, title: "", tags: "",
   rules: { files: {}, sheets: {} }, preview: null, previewVersion: 0, upload: null,
-  busy: false, error: "", notices: [], issuesOnly: false, saved: null, view: null,
+  busy: false, error: "", notices: [], issuesOnly: false, saved: null, view: null, openAdjusted: new Set(),
 };
 const COL_EXCEL = /\.(xlsx|xlsm|xls)$/i;
 const COL_LIMITS = { files: 100, bytes: 200000000, fileBytes: 20000000 };
@@ -17,7 +17,7 @@ function colNum(value) {
 }
 function colSheetRule(key) { return (col.rules.sheets[key] ||= {}); }
 function colReset() {
-  Object.assign(col, { job: null, preview: null, rules: { files: {}, sheets: {} }, notices: [], error: "", issuesOnly: false, busy: false });
+  Object.assign(col, { job: null, preview: null, rules: { files: {}, sheets: {} }, notices: [], error: "", issuesOnly: false, busy: false, openAdjusted: new Set() });
 }
 async function colDiscardJob() {
   const id = col.job;
@@ -195,7 +195,7 @@ function colPreviewTable(s, withAbove = false) {
 
 function colColumnsHTML(s) {
   const fields = col.preview.fields;
-  const shown = s.columns.filter((c) => c.extra || c.problem || c.mapped || c.target === null);
+  const shown = s.columns.filter((c) => c.extra || c.problem || c.mapped || c.auto || c.target === null);
   const missing = s.missing.length ? `<div class="note">이 파일에 없는 항목: ${s.missing.map((m) => `‘${esc(m)}’`).join(", ")} → 빈칸으로 둡니다.</div>` : "";
   return `<div class="col-map">${shown.map((c) => {
     const at = s.columns.indexOf(c), samples = (s.preview?.rows || []).map((r) => r.cells[at]).filter(Boolean).slice(0, 3);
@@ -213,23 +213,23 @@ function colColumnsHTML(s) {
   }).join("")}${missing}</div>`;
 }
 
+// 저장을 막는 문제(blocking)만 '확인 필요'로 보여 준다. 나머지는 앱이 알아서 맞춘 내용이라 접어 두고, 필요할 때만 바꾼다.
 function colIssueHTML(s, x) {
-  const k = esc(s.key);
+  const k = esc(s.key), cls = x.blocking ? "col-issue" : "col-issue col-info";
   if (x.kind === "header") {
-    return `<div class="col-issue"><b>항목 이름이 있는 행을 확인해 주세요</b><div>${esc(x.message)}</div>${colPreviewTable(s, true)}
+    return `<div class="${cls}">${x.blocking ? "<b>항목 이름이 있는 행을 확인해 주세요</b>" : ""}<div>${esc(x.message)}</div>${colPreviewTable(s, true)}
       <div class="row" style="margin:8px 0 0"><label for="colHeader-${k}">항목 이름 행</label>
       <input type="number" min="1" id="colHeader-${k}" data-col-header="${k}" data-focus="header:${k}" value="${x.row || ""}" style="width:90px" />
-      <button class="btn" data-col-header-ok="${k}" data-focus="headerok:${k}">이 행을 항목 이름으로 사용</button></div></div>`;
+      <button class="btn" data-col-header-ok="${k}" data-focus="headerok:${k}">${x.blocking ? "이 행을 항목 이름으로 사용" : "행 바꾸기"}</button></div></div>`;
   }
   if (x.kind === "special") {
-    return `<div class="col-issue"><b>${esc(x.message)}</b><ul>${x.rows.map((r) => `<li>${r.row}행 · ${esc(r.reason)}${r.text ? ` · ‘${esc(r.text)}’` : ""}</li>`).join("")}
+    return `<div class="${cls}"><div>${esc(x.message)}</div><ul>${x.rows.map((r) => `<li>${r.row}행 · ${esc(r.reason)}${r.text ? ` · ‘${esc(r.text)}’` : ""}</li>`).join("")}
       ${x.count > x.rows.length ? `<li>외 ${x.count - x.rows.length}행</li>` : ""}</ul>
-      <div class="row" style="margin:0"><button class="btn primary" data-col-special="${k}" data-value="exclude" data-focus="spx:${k}">이 행 빼고 취합</button>
-      <button class="btn" data-col-special="${k}" data-value="include" data-focus="spi:${k}">일반 행으로 포함</button></div></div>`;
+      <div class="row" style="margin:0">${x.included
+        ? `<button class="btn" data-col-special="${k}" data-value="exclude" data-focus="spx:${k}">다시 빼기</button>`
+        : `<button class="btn" data-col-special="${k}" data-value="include" data-focus="spi:${k}">빼지 말고 일반 행으로 포함</button>`}</div></div>`;
   }
-  return `<div class="col-issue"><b>${x.kind === "conflict" ? "항목 연결을 확인해 주세요" : "같은 항목인가요?"}</b><div>${esc(x.message)}</div>${colColumnsHTML(s)}
-    ${x.kind === "structure" ? `<div class="row" style="margin:8px 0 0"><button class="btn" data-col-confirm="${k}" data-focus="ok:${k}">이대로 사용</button>
-      <span class="note">새 항목은 별도 열로 두고, 없는 항목은 빈칸으로 둡니다.</span></div>` : ""}</div>`;
+  return `<div class="${cls}">${x.kind === "conflict" ? "<b>항목 연결을 확인해 주세요</b>" : ""}<div>${esc(x.message)}</div>${colColumnsHTML(s)}</div>`;
 }
 
 function colSheetHTML(s, multi) {
@@ -240,8 +240,11 @@ function colSheetHTML(s, multi) {
     ? `<label class="col-check"><input type="checkbox" data-col-sheet="${k}" data-focus="sheet:${k}" ${s.selected ? "checked" : ""} /> ${title}</label>${notes}`
     : `<div class="note">${title}${notes}</div>`;
   if (!s.selected) return `<div class="col-sheet">${head}</div>`;
-  const issues = s.issues.filter((x) => !col.issuesOnly || x.blocking);
-  return `<div class="col-sheet">${head}${issues.map((x) => colIssueHTML(s, x)).join("")}
+  const blocking = s.issues.filter((x) => x.blocking), adjusted = s.issues.filter((x) => !x.blocking);
+  const key = s.key, open = col.openAdjusted.has(key);
+  return `<div class="col-sheet">${head}${blocking.map((x) => colIssueHTML(s, x)).join("")}
+    ${adjusted.length && !col.issuesOnly ? `<details class="capture-options" data-col-adjusted="${esc(key)}" ${open ? "open" : ""}><summary>자동으로 맞춘 내용 ${adjusted.length}개 · 다르면 여기서 바꾸세요</summary>
+      ${adjusted.map((x) => colIssueHTML(s, x)).join("")}</details>` : ""}
     <details class="capture-options"><summary>미리보기</summary>${colPreviewTable(s)}</details></div>`;
 }
 
@@ -292,7 +295,7 @@ function paintCollectReview(keep = false) {
   $("#view").innerHTML = `${colSteps()}
     <div class="panel">
       <div class="row"><label for="colTitle" class="status">자료 이름</label><input id="colTitle" class="col-input" maxlength="100" data-focus="title" value="${esc(col.title)}" /></div>
-      <div class="col-summary"><b>${s.files}개 파일 · ${colNum(s.rows)}행</b>${s.blocking ? ` · <span class="col-warn-text">확인 필요 ${s.blocking}개</span>` : ""}${s.failed ? ` · 읽지 못한 파일 ${s.failed}개` : ""}${s.excluded ? ` · 제외 ${s.excluded}개` : ""}</div>
+      <div class="col-summary"><b>${s.files}개 파일 · ${colNum(s.rows)}행</b>${s.blocking ? ` · <span class="col-warn-text">확인 필요 ${s.blocking}개</span>` : ""}${s.failed ? ` · 읽지 못한 파일 ${s.failed}개` : ""}${s.excluded ? ` · 제외 ${s.excluded}개` : ""}${s.adjusted ? ` · <span class="meta">자동으로 맞춘 내용 ${s.adjusted}개</span>` : ""}</div>
       ${col.target ? `<div class="note">‘${esc(col.target.title)}’의 새 버전으로 저장합니다. 이전 버전과 그 AI 결과는 그대로 남습니다.</div>` : ""}
       ${col.notices.map((n) => `<div class="note">${esc(n)}</div>`).join("")}
       ${colSheetGroupsHTML(col.groups)}
@@ -362,8 +365,8 @@ function bindCollectReview() {
   document.querySelectorAll("[data-col-suggest]").forEach((b) => {
     b.onclick = () => colUpdate(() => { (colSheetRule(b.dataset.colSuggest).mapping ||= {})[b.dataset.col] = b.dataset.target; });
   });
-  document.querySelectorAll("[data-col-confirm]").forEach((b) => {
-    b.onclick = () => colUpdate(() => { colSheetRule(b.dataset.colConfirm).confirmed = true; });
+  document.querySelectorAll("[data-col-adjusted]").forEach((d) => {
+    d.ontoggle = () => { if (d.open) col.openAdjusted.add(d.dataset.colAdjusted); else col.openAdjusted.delete(d.dataset.colAdjusted); };
   });
   $("#colRestart").onclick = async () => {
     if (!confirm("확인한 내용을 버리고 다른 폴더를 선택할까요?")) return;

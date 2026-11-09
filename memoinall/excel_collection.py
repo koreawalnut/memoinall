@@ -618,18 +618,22 @@ def analyze(job: Job, raw_rules=None, *, full: bool = False) -> dict:
         return field_index[key]
 
     def targets_of(e) -> list:
-        mapping = e["rule"].get("mapping", {})
+        mapping, auto = e["rule"].get("mapping", {}), e.get("auto", {})
         out = []
         for n in e["layout"]["names"]:
             m = mapping.get(str(n["index"]))
+            if m is None:
+                m = auto.get(n["index"])
             out.append(None if m == "-" else ensure(m or n["name"]))
         return out
 
     ref_fields: set[int] = set()
     ref_numeric: dict[int, float] = {}
+    ref_names: list[str] = []
     if reference is not None:
         reference["targets"] = targets_of(reference)
         ref_fields = {t for t in reference["targets"] if t is not None}
+        ref_names = [fields[t]["name"] for t in reference["targets"] if t is not None]
         for n, t in zip(reference["layout"]["names"], reference["targets"]):
             if t is not None:
                 ref_numeric[t] = n["numeric"] / max(n["filled"], 1)
@@ -638,6 +642,7 @@ def analyze(job: Job, raw_rules=None, *, full: bool = False) -> dict:
         if e not in selected:
             continue
         if "targets" not in e:
+            e["auto"] = _auto_map(e, ref_names)
             e["targets"] = targets_of(e)
         blocking += _sheet_issues(e, fields, ref_fields, ref_numeric)
 
@@ -647,7 +652,7 @@ def analyze(job: Job, raw_rules=None, *, full: bool = False) -> dict:
         view["rows"] = 0
     for e in selected:
         layout = e["layout"]
-        excluded = len(layout["special"]) if e["rule"].get("special") == "exclude" else 0
+        excluded = len(layout["special"]) if special_choice(e["rule"]) == "exclude" else 0
         e["sheet"]["rows"] = layout["count"] - excluded
         e["file"]["rows"] += e["sheet"]["rows"]
         rows_total += e["sheet"]["rows"]
@@ -666,7 +671,9 @@ def analyze(job: Job, raw_rules=None, *, full: bool = False) -> dict:
         v["reason"] = "사용자가 제외" if not v["selected"] else "취합할 시트 없음"
     if rows_total == 0:
         blocking += 1
+    adjusted = sum(1 for e in selected for i in e["sheet"]["issues"] if not i["blocking"])
     summary = {
+        "adjusted": adjusted,
         "found": len(files) + len(skipped),
         "files": len(included_files),
         "excluded": len(excluded_files),
@@ -686,6 +693,43 @@ def analyze(job: Job, raw_rules=None, *, full: bool = False) -> dict:
     return result
 
 
+AUTO_MATCH = 0.75
+
+
+def special_choice(rule: dict) -> str:
+    """합계·반복 머리글 후보는 따로 정하지 않으면 뺀다. 이미 더한 값을 다시 더하지 않기 위해서다."""
+    return rule.get("special", "exclude")
+
+
+def _auto_map(e: dict, ref_names: list[str]) -> dict:
+    """이 시트에 없는 기준 항목과 이름이 비슷한 열을 묻지 않고 연결한다.
+
+    이름 핵심이 같거나(공백·괄호 차이), 동의어이거나, 한쪽이 다른 쪽을 포함할 때만 연결한다.
+    단위가 다르면(원/천원) 연결하지 않는다. 사용자가 직접 고른 열은 건드리지 않는다.
+    """
+    mapping = e["rule"].get("mapping", {})
+    names = e["layout"]["names"]
+    own = set()
+    for n in names:
+        m = mapping.get(str(n["index"]))
+        if m != "-":
+            own.add(name_key(m or n["name"]))
+    missing = [r for r in ref_names if name_key(r) not in own]
+    open_columns = [n for n in names if str(n["index"]) not in mapping and not n["generated"]
+                    and n["key"] not in {name_key(r) for r in ref_names}]
+    pairs = sorted(((similarity(n["name"], m), -n["index"], m) for n in open_columns for m in missing), reverse=True)
+    auto, used_columns, used_fields = {}, set(), set()
+    for score, negative_index, target in pairs:
+        if score < AUTO_MATCH:
+            break
+        if -negative_index in used_columns or target in used_fields:
+            continue
+        auto[-negative_index] = target
+        used_columns.add(-negative_index)
+        used_fields.add(target)
+    return auto
+
+
 def _row_no(job: Job, e: dict, index: int):
     rows = job.files[e["fi"]]["sheets"][e["si"]]["rows"]
     return rows[index][0] if 0 <= index < len(rows) else None
@@ -699,15 +743,18 @@ def _sheet_issues(e: dict, fields: list, ref_fields: set, ref_numeric: dict) -> 
         issues.append({"kind": "header", "blocking": True, "row": layout["header_row"],
                        "message": f"{rule['header_row']}행에는 내용이 없습니다. 항목 이름이 있는 행을 다시 지정하세요."})
     elif layout["index"] > 0 and "header_row" not in rule:
-        issues.append({"kind": "header", "blocking": True, "row": layout["header_row"],
-                       "message": f"표 위에 제목이 있어요. 항목 이름이 있는 행: {layout['header_row']}행"})
+        # 빠르게 쓰는 것이 우선이다. 찾은 머리글 행을 그대로 쓰고, 다르면 바꿀 수 있게 알려만 준다.
+        issues.append({"kind": "header", "blocking": False, "row": layout["header_row"],
+                       "message": f"표 위 제목을 건너뛰고 {layout['header_row']}행을 항목 이름으로 썼어요."})
     targets = e["targets"]
+    auto = e.get("auto", {})
     used = Counter(t for t in targets if t is not None)
     columns, extra = [], []
     for n, target in zip(layout["names"], targets):
         column = {"index": n["index"], "letter": n["letter"], "name": n["name"], "problem": n["problem"],
                   "target": fields[target]["name"] if target is not None else None,
-                  "mapped": str(n["index"]) in mapping, "extra": target is not None and target not in ref_fields,
+                  "mapped": str(n["index"]) in mapping, "auto": n["index"] in auto,
+                  "extra": target is not None and target not in ref_fields,
                   "suggestion": None, "unit_warning": ""}
         if target is not None and column["mapped"]:
             ua, ub = unit_of(n["name"]), unit_of(fields[target]["name"])
@@ -744,28 +791,27 @@ def _sheet_issues(e: dict, fields: list, ref_fields: set, ref_numeric: dict) -> 
         issues.append({"kind": "conflict", "blocking": True,
                        "message": "한 시트의 여러 열이 같은 항목에 연결되어 있어요: " + ", ".join(f"‘{c}’" for c in conflicts)
                                   + ". 한 열은 다른 항목으로 바꾸거나 제외하세요."})
-    if (extra or missing or problems) and not rule.get("confirmed"):
+    linked = [c for c in columns if c["auto"]]
+    if (linked or extra or missing or problems) and not rule.get("confirmed"):
+        # 자동으로 맞춘 내용은 알려만 준다. 저장을 막지 않는다.
         parts = []
-        if any(c["suggestion"] for c in extra):
-            parts.append("이름이 다른 항목이 있어요. 같은 항목인지 확인해 주세요.")
-        plain_extra = [c["name"] for c in extra if not c["suggestion"]]
-        if plain_extra:
-            parts.append("추가 열: " + ", ".join(f"‘{n}’" for n in plain_extra) + " (새 항목으로 유지)")
+        if linked:
+            parts.append("이름이 비슷해 같은 항목으로 합쳤어요: " + ", ".join(f"‘{c['name']}’ → ‘{c['target']}’" for c in linked))
+        if extra:
+            parts.append("새 항목으로 추가: " + ", ".join(f"‘{c['name']}’" for c in extra))
         if missing:
-            parts.append("이 파일에는 " + ", ".join(f"‘{m}’" for m in missing) + "이(가) 없어요 (빈칸으로 둡니다)")
+            parts.append("이 파일에 없는 항목은 빈칸: " + ", ".join(f"‘{m}’" for m in missing))
         if problems:
-            parts.append("항목 이름을 확인해 주세요: " + ", ".join(
-                f"{c['letter']}열 {'이름 없음' if c['problem'] == 'empty' else '이름 중복'} → ‘{c['name']}’" for c in problems))
-        issues.append({"kind": "structure", "blocking": True, "message": " · ".join(parts)})
-    if layout["special"] and "special" not in rule:
+            parts.append("이름 없는·중복 열은 " + ", ".join(f"‘{c['name']}’" for c in problems) + "(으)로 이름을 붙였어요")
+        issues.append({"kind": "structure", "blocking": False, "message": " · ".join(parts)})
+    if layout["special"]:
         shown = layout["special"][:SPECIAL_SHOWN]
-        kinds = sorted({s["reason"] for s in layout["special"]})
-        issues.append({"kind": "special", "blocking": True, "count": len(layout["special"]),
+        kinds = " · ".join(sorted({s["reason"] for s in layout["special"]}))
+        included = special_choice(rule) == "include"
+        issues.append({"kind": "special", "blocking": False, "count": len(layout["special"]), "included": included,
                        "rows": [{"row": s["row"], "reason": s["reason"], "text": s["text"]} for s in shown],
-                       "message": f"{' · '.join(kinds)}으로 보이는 {len(layout['special'])}행이 있어요. 합산 전에 포함 여부를 정해 주세요."})
-    elif layout["special"]:
-        sv["notes"].append(f"합계·반복 머리글 후보 {len(layout['special'])}행: "
-                           + ("취합에서 제외" if rule["special"] == "exclude" else "일반 행으로 포함"))
+                       "message": f"{kinds}으로 보이는 {len(layout['special'])}행" + (
+                           "을 일반 행으로 포함했어요." if included else "은 빼고 취합해요.")})
     for issue in issues:
         blocking += issue["blocking"]
     return blocking
@@ -803,7 +849,7 @@ def _rows(job: Job, selected: list, fields: list) -> dict:
         src = len(sources)
         sources.append({"file": e["file"]["path"], "sheet": e["sheet"]["name"], "header_row": layout["header_row"]})
         present = {t for t in e["targets"] if t is not None}
-        exclude_special = e["rule"].get("special") == "exclude"
+        exclude_special = special_choice(e["rule"]) == "exclude"
         for i, (row_no, cells) in enumerate(sheet_rows[layout["index"] + 1:]):
             values = [None if f in present else MISSING for f in range(len(fields))]
             for n, target in zip(layout["names"], e["targets"]):

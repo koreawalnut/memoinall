@@ -166,33 +166,41 @@ def main() -> int:
     other2 = next(s for s in s2v if s["name"] == "참고")
     check("다른 구조 시트는 기본 제외", other2["selected"] is False and other2["notes"], other2)
     check("제목 아래 머리글 자동 인식(3행)", main2["header_row"] == 3, main2.get("header_row"))
-    kinds2 = {i["kind"] for i in main2["issues"]}
-    check("제목·합계 행은 확인 필요", {"header", "special"} <= kinds2, kinds2)
+    notes2 = {i["kind"]: i for i in main2["issues"]}
+    check("제목·합계 행은 알아서 처리(저장을 막지 않음)", {"header", "special"} <= set(notes2)
+          and not any(i["blocking"] for i in main2["issues"]), main2["issues"])
     sup = by_path["지원팀.xlsx"]["sheets"][0]
-    sug = [c for c in sup["columns"] if c["suggestion"]]
-    check("비슷한 열 이름 제안(요청액→신청금액)", sug and sug[0]["name"] == "요청액(원)" and sug[0]["suggestion"] == "신청금액(원)", sup["columns"])
-    check("확인 전에는 연결하지 않음", sug and sug[0]["target"] == "요청액(원)")
-    check("확인 필요가 남으면 저장 불가", p["summary"]["blocking"] >= 3, p["summary"])
+    linked = [c for c in sup["columns"] if c["auto"]]
+    check("비슷한 열 이름은 묻지 않고 연결(요청액→신청금액)",
+          len(linked) == 1 and linked[0]["name"] == "요청액(원)" and linked[0]["target"] == "신청금액(원)", sup["columns"])
+    check("자동 연결한 열은 따로 항목을 만들지 않음", "요청액(원)" not in p["fields"], p["fields"])
+    check("추가 열(사번)은 새 항목으로 두고 막지 않음", "사번" in p["fields"] and not any(i["blocking"] for i in sup["issues"]), sup["issues"])
+    check("확인 없이 바로 저장 가능", p["summary"]["blocking"] == 0 and p["summary"]["adjusted"] >= 3, p["summary"])
     check("읽지 못한 파일 수", p["summary"]["failed"] == 2, p["summary"])
-    try:
-        collection_store.commit(job.id, {}, p["revision"], "11월 신청 내역")
-        check("확인 전 저장 거절", False)
-    except excel_collection.CollectionError:
-        check("확인 전 저장 거절", True)
+    check("합계 행은 기본으로 빼고 셈", p["summary"]["rows"] == 3 + 4 + 3, p["summary"])
 
     key2, key3 = main2["key"], sup["key"]
-    rules = {"sheets": {
-        key2: {"header_row": 3, "special": "exclude"},
-        key3: {"mapping": {"2": "신청금액(원)"}},
-    }}
+    rules = {"sheets": {key2: {"special": "include"}}}
     p2 = excel_collection.analyze(job, rules)
-    sup2 = next(f for f in p2["files"] if f["path"] == "지원팀.xlsx")["sheets"][0]
-    check("연결 후에도 추가 열(사번)은 확인 필요", any(i["kind"] == "structure" for i in sup2["issues"]), sup2["issues"])
-    rules["sheets"][key3]["confirmed"] = True
-    p3 = excel_collection.analyze(job, rules)
-    check("모두 확인하면 저장 가능", p3["summary"]["blocking"] == 0, [(f["path"], [i["message"] for s in f["sheets"] for i in s["issues"]]) for f in p3["files"]])
-    check("규칙이 바뀌면 revision 도 바뀜", p3["revision"] != p2["revision"])
-    check("행 수(합계 행 제외)", p3["summary"]["rows"] == 3 + 4 + 3, p3["summary"])
+    check("합계 행을 포함하도록 바꿀 수 있음", p2["summary"]["rows"] == 11, p2["summary"])
+    check("규칙이 바뀌면 revision 도 바뀜", p2["revision"] != p["revision"])
+    clash = excel_collection.analyze(job, {"sheets": {key3: {"mapping": {"1": "신청금액(원)", "2": "신청금액(원)"}}}})
+    check("두 열을 같은 항목에 연결하면 저장을 막음", clash["summary"]["blocking"] >= 1, clash["summary"])
+    keep = excel_collection.analyze(job, {"sheets": {key3: {"mapping": {"2": ""}}}})
+    check("사용자가 따로 두기로 한 열은 자동 연결하지 않음", "요청액(원)" in keep["fields"], keep["fields"])
+
+    def two(a, b):
+        j = excel_collection.create_job("구분")
+        excel_collection.add_file(j, "a.xlsx", book_bytes(lambda bk: [bk.active.append(r) for r in (["부서", a], ["가", 1])]))
+        excel_collection.add_file(j, "b.xlsx", book_bytes(lambda bk: [bk.active.append(r) for r in (["부서", b], ["나", 2])]))
+        fields = excel_collection.analyze(j, {})["fields"]
+        excel_collection.cancel_job(j.id)
+        return fields
+    check("단위가 다르면 합치지 않음(원/천원)", two("금액(원)", "금액(천원)") == ["부서", "금액(원)", "금액(천원)"])
+    check("다른 차수는 합치지 않음(1차/2차)", two("1차 금액", "2차 금액") == ["부서", "1차 금액", "2차 금액"])
+    check("공백·괄호만 다르면 합침", two("신청 금액", "신청금액") == ["부서", "신청 금액"])
+    p3 = p
+    rules = {}
     try:
         collection_store.commit(job.id, rules, p2["revision"], "11월 신청 내역")
         check("오래된 확인 화면으로 저장 거절", False)
@@ -280,20 +288,8 @@ def main() -> int:
     for path, data in changed.items():
         excel_collection.add_file(job2, path, data)
     r2 = excel_collection.analyze(job2, reuse)
-    check("새로 확인해야 할 것만 남음", r2["summary"]["blocking"] >= 1, r2["summary"])
-    for f in r2["files"]:
-        for sh in f["sheets"]:
-            if sh["selected"] and sh["issues"]:
-                entry = reuse["sheets"].setdefault(sh["key"], {})
-                for issue in sh["issues"]:
-                    if issue["kind"] == "special":
-                        entry["special"] = "exclude"
-                    if issue["kind"] == "structure":
-                        entry["confirmed"] = True
-                    if issue["kind"] == "header":
-                        entry["header_row"] = issue["row"]
     r3 = excel_collection.analyze(job2, reuse)
-    check("재취합 확인 완료", r3["summary"]["blocking"] == 0, r3["summary"])
+    check("다시 취합도 확인 없이 진행", r3["summary"]["blocking"] == 0 and r3["summary"]["rows"] == 11, r3["summary"])
     v2 = collection_store.commit(job2.id, reuse, r3["revision"], "11월 신청 내역")
     check("새 버전", v2["collection_id"] == cid and v2["version"] == 2 and v2["memo_id"] == saved["memo_id"], v2)
     check("이전 버전 유지", collection_analysis.summary(cid, 1)["rows"] == 10 and collection_analysis.summary(cid, 2)["rows"] == 11)
