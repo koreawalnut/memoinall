@@ -3,7 +3,26 @@ const gen = { instruction: "", format: "auto", budget: 6000, queries: null, plan
   busy: false, memoIds: null, scope: null, review: null, showSources: false, initialized: false,
   editing: false, body: "", savedDraft: "", draftSaving: false, draftTask: Promise.resolve(), draftTimer: null,
   error: "", followup: "", historyOffset: 0, historyQuery: "", finderVersion: 0, oldVersion: null,
-  tagChoices: [] };
+  tagChoices: [], formats: [], periods: {}, periodDay: "" };
+
+function genToday() { const d = new Date(); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; }
+function genPeriod() { return gen.scope?.period || (gen.scope?.since || gen.scope?.until ? "custom" : "all"); }
+function genPeriodOptions(selected = genPeriod()) {
+  return Object.entries(gen.periods).map(([key, label]) => `<option value="${key}" ${key === selected ? "selected" : ""}>${esc(label)}</option>`).join("");
+}
+function paintGenPeriod() {
+  if (!$("#genPeriod")) return;
+  $("#genPeriod").value = genPeriod(); $("#genDates").hidden = genPeriod() !== "custom";
+  $("#genSince").value = gen.scope?.since?.slice(0, 10) || ""; $("#genUntil").value = gen.scope?.until?.slice(0, 10) || "";
+}
+function refreshGenDay() {
+  const day = genToday(), changed = gen.periodDay && gen.periodDay !== day;
+  gen.periodDay = day;
+  if (changed && !["all", "custom"].includes(genPeriod())) {
+    gen.review = gen.memoIds = null; ++gen.finderVersion;
+    invalidatePlan(true); renderPlanPanel();
+  }
+}
 
 async function startGenerate(ids, instruction) {
   if (gen.busy) { toast("진행 중인 정리가 끝난 뒤 다시 선택하세요"); return; }
@@ -11,24 +30,26 @@ async function startGenerate(ids, instruction) {
   try { await flushGenDraft(); } catch { toast("수정 내용을 보관하지 못했습니다. 다시 시도해 주세요"); return; }
   finally { gen.busy = false; setGenBusy(false); }
   Object.assign(gen, { instruction, memoIds: ids, scope: null, queries: null, plan: null, output: null,
-    review: null, body: "", savedDraft: "", editing: false, initialized: true, error: "", followup: "", oldVersion: null });
+    review: null, body: "", savedDraft: "", editing: false, initialized: true, error: "", followup: "", oldVersion: null, periodDay: genToday() });
   await goTab("generate");
 }
 
 function genScopeLabel() {
   const count = gen.review ? gen.review.selected.size : gen.memoIds?.length;
   const s = gen.scope;
+  const relative = s?.period && !["all", "custom"].includes(s.period);
   const filters = s ? [...(s.tags || []).map((t) => "#" + t), s.person ? "@" + s.person : "",
-    s.since ? s.since + "부터" : "", s.until ? s.until + "까지" : ""].filter(Boolean) : [];
+    relative ? gen.periods[s.period] : "", !relative && s.since ? s.since + "부터" : "",
+    !relative && s.until ? s.until + "까지" : ""].filter(Boolean) : [];
   return [filters.length ? "찾을 범위: " + filters.join(" · ") : "",
     count !== undefined ? `선택한 메모 ${count}건만 사용` : ""].filter(Boolean).join(" — ") || "전체 메모에서 필요한 내용을 찾습니다";
 }
 
 function changeGenScope(scope) {
   if (gen.busy) return;
-  gen.scope = scope; gen.memoIds = gen.review = null;
+  gen.scope = scope; gen.memoIds = gen.review = null; gen.periodDay = genToday();
   ++gen.finderVersion;
-  invalidatePlan(true); renderPlanPanel(); paintGenTags(); setGenBusy(false);
+  invalidatePlan(true); renderPlanPanel(); paintGenTags(); paintGenPeriod(); setGenBusy(false);
   genProgress("범위를 바꿨습니다. 메모 고르기로 대상을 확인하거나 바로 정리할 수 있습니다.");
 }
 
@@ -58,16 +79,17 @@ function paintGenTags() {
 function genMemosUrl(query = "", offset = 0) {
   const s = gen.scope || {}, params = new URLSearchParams({ q: query, offset, limit: 20 });
   if (s.tags?.length) params.set("tags", s.tags.join(","));
-  for (const key of ["person", "since", "until"]) if (s[key]) params.set(key, s[key]);
+  for (const key of ["person", "since", "until", "period"]) if (s[key]) params.set(key, s[key]);
   return `/api/generate/memos?${params}`;
 }
 
 async function renderGenerate(version = renderVersion) {
-  const [{ formats, llm_ready }, history, tagList] = await Promise.all([
+  const [{ formats, llm_ready, periods }, history, tagList] = await Promise.all([
     api("/api/generate/formats"), api("/api/generate/history"), api("/api/generate/tags"),
   ]);
   if (version !== renderVersion) return;
   gen.tagChoices = tagList.items;
+  gen.formats = formats; gen.periods = periods;
   if (!gen.initialized) {
     gen.initialized = true;
     if (history.items.length) {
@@ -85,6 +107,7 @@ async function renderGenerate(version = renderVersion) {
       <div class="row"><h3 style="margin:0">무엇을 정리할까요?</h3><span class="spacer"></span><button class="btn ghost" id="genNew">새로 정리</button></div>
       <div class="desc" style="margin-top:10px">원하는 내용을 적으면 메모를 찾아 정리합니다. 만든 결과는 자동으로 보관됩니다.
         ${llm_ready ? "" : '<br>AI를 연결하면 바로 정리할 수 있어요. <a href="#" id="genSettings">AI 연결하기</a>'}</div>
+      ${workflowBarHTML()}
       <textarea class="gen-input" id="genInput" aria-label="정리할 내용" placeholder="예) 이번 주 업무를 팀 공유용으로 정리해줘">${esc(gen.instruction)}</textarea>
       <details class="capture-options" id="genTagFilter" style="margin:12px 0" ${gen.scope?.tags?.length ? "open" : ""}>
         <summary>태그로 범위 좁히기 · <span class="meta" id="genTagCount"></span></summary>
@@ -99,6 +122,8 @@ async function renderGenerate(version = renderVersion) {
       <div class="note" id="genScope">${esc(genScopeLabel())}</div>
       <details class="capture-options" style="margin-top:12px"><summary>찾을 범위 바꾸기</summary>
         <div class="row" style="margin:10px 0"><button class="btn" id="genAll">전체 메모에서 찾기</button><button class="btn" id="genFiltered">현재 검색 범위로 찾기</button></div>
+        <div class="row" style="margin:10px 0"><label for="genPeriod">기간</label><select id="genPeriod">${genPeriodOptions()}</select></div>
+        <div class="row" id="genDates" style="margin:10px 0"><input type="date" id="genSince" aria-label="정리할 작성 시작일" /><span>~</span><input type="date" id="genUntil" aria-label="정리할 작성 종료일" /></div>
         <label for="genBudget" class="status">읽을 분량</label> <select id="genBudget"><option value="6000">기본</option><option value="12000">넉넉히</option><option value="24000">많이</option></select>
         <div class="note">분량을 늘리면 처리 시간과 AI 사용량이 늘어날 수 있습니다.</div>
       </details><div class="status" id="genProgress" aria-live="polite"></div>
@@ -108,6 +133,11 @@ async function renderGenerate(version = renderVersion) {
   $("#genInput").onkeydown = (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); runGenerate(); } };
   $("#genFormat").onchange = (e) => { gen.format = e.target.value; invalidatePlan(); };
   $("#genBudget").onchange = (e) => { gen.budget = +e.target.value; invalidatePlan(); };
+  $("#genPeriod").onchange = (e) => changeGenScope({ ...gen.scope, period: e.target.value,
+    since: e.target.value === "custom" ? $("#genSince").value || null : null,
+    until: e.target.value === "custom" ? $("#genUntil").value || null : null });
+  $("#genSince").onchange = $("#genUntil").onchange = () => changeGenScope({ ...gen.scope, period: "custom",
+    since: $("#genSince").value || null, until: $("#genUntil").value || null });
   $("#genTagSearch").oninput = paintGenTags;
   $("#genTagClear").onclick = () => changeGenScope({ ...gen.scope, tags: [] });
   $("#genAll").onclick = () => changeGenScope(null);
@@ -125,13 +155,15 @@ async function renderGenerate(version = renderVersion) {
   $("#genHistoryPrev").onclick = () => { gen.historyOffset = Math.max(0, gen.historyOffset - 20); loadGenHistory(); };
   $("#genHistoryNext").onclick = () => { gen.historyOffset += 20; loadGenHistory(); };
   gen.historyOffset = 0; gen.historyQuery = ""; paintGenHistory(history);
-  paintGenTags(); renderPlanPanel(); renderGenOutput(); setGenBusy(gen.busy);
+  bindWorkflows(); paintGenPeriod(); paintGenTags(); renderPlanPanel(); renderGenOutput(); setGenBusy(gen.busy);
 }
 
 function setGenBusy(busy) {
   const empty = gen.review && !gen.review.selected.size;
   document.querySelectorAll("#genInput, #genFormat, #genBudget, #genPlan, #genRun, #genAll, #genFiltered, #genRun2, #genNew, #genEdit, #genDone, #genMemo, #genRefine, #genFollowup, #genOldSelect, #genRestore, #genBody, #genTagSearch, #genTagClear, [data-gen-tag], [data-gen-remove-tag], [data-gen-quick], [data-gen-history], #genPlanOut input, #genPlanOut button")
     .forEach((el) => { el.disabled = busy || (["genRun", "genRun2"].includes(el.id) && empty); });
+  document.querySelectorAll("#workflowBar button, #workflowBar select, #genPeriod, #genSince, #genUntil").forEach((el) => { el.disabled = busy; });
+  paintWorkflowBar();
   if (!busy) paintGenPicker();
 }
 function genProgress(text = "") { if ($("#genProgress")) $("#genProgress").textContent = text; }
@@ -150,6 +182,7 @@ function genPayload() {
 
 async function planGenerate() {
   if (gen.busy) return;
+  refreshGenDay();
   gen.busy = true; setGenBusy(true); genProgress("참고할 메모를 찾는 중입니다…");
   try {
     const payload = genPayload(); delete payload.source_revisions;
@@ -215,6 +248,7 @@ function updateGenPromptVisibility() {
 }
 async function copySelectedGenPrompt() {
   if (gen.busy) return;
+  refreshGenDay();
   if (!gen.instruction.trim()) { toast("정리할 내용을 먼저 적어주세요"); return; }
   gen.busy = true; setGenBusy(true);
   try {
@@ -228,6 +262,7 @@ async function copySelectedGenPrompt() {
   finally { gen.busy = false; setGenBusy(false); }
 }
 async function findGenMemos(offset) {
+  refreshGenDay();
   const host = $("#genFound"), query = $("#genFind")?.value || "", version = ++gen.finderVersion;
   if (!host) return;
   host.textContent = "찾는 중…";
@@ -252,6 +287,7 @@ async function findGenMemos(offset) {
 async function runGenerate() {
   if (!gen.instruction.trim()) { toast("정리할 내용을 먼저 적어주세요"); $("#genInput")?.focus(); return; }
   if (gen.busy) return;
+  refreshGenDay();
   gen.busy = true; setGenBusy(true); genProgress("메모를 읽고 정리하는 중입니다…");
   try {
     await flushGenDraft();

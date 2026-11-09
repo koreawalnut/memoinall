@@ -273,9 +273,14 @@ def build_pack(
     full_body: bool = True,
     memo_ids: list[int] | None = None,
     source_revisions: dict[str, str] | None = None,
+    period: str | None = None,
 ) -> dict:
     """생성 직전까지 — 질의 도출, 검색, 프롬프트 조립. LLM 호출은 안 한다."""
     budget_tokens = budget_tokens or settings.get_int("gen.budget_tokens", 6000)
+    if period is not None:
+        from .workflows import period_bounds
+
+        since, until = period_bounds(period, since, until)
     required_tags = store.tag_list(tag, tags)
     if memo_ids is not None:
         if not memo_ids:
@@ -348,7 +353,8 @@ def build_pack(
         "query_method": derived["method"],
         "topic": derived.get("topic", ""),
         "memo_ids": list(dict.fromkeys(memo_ids)) if memo_ids is not None else None,
-        "scope": {"tags": required_tags, "person": person, "since": since, "until": until},
+        "scope": {"tags": required_tags, "person": person, "since": since, "until": until,
+                  **({"period": period} if period is not None else {})},
         "budget_tokens": budget_tokens,
         "used_tokens": used,
         "sources": included,
@@ -405,7 +411,7 @@ def generate(instruction: str, **kwargs) -> dict:
     max_tokens = kwargs.pop("max_tokens", None)
     pack = build_pack(instruction, **kwargs)
 
-    if not pack["sources"] and any(pack["scope"].values()):
+    if not pack["sources"] and any(pack["scope"].get(key) for key in ("tags", "person", "since", "until")):
         return {**pack, "output": None, "reason": "선택한 범위에서 참고할 메모를 찾지 못했습니다. 태그나 검색 조건을 바꿔 주세요."}
 
     if not pack["sources"] and not instruction.strip():

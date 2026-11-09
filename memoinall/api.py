@@ -32,6 +32,7 @@ from . import (
     settings,
     store,
     tags,
+    workflows,
 )
 
 log = logging.getLogger(__name__)
@@ -729,6 +730,7 @@ def generate_formats():
         "formats": [{"key": k, **v} for k, v in generate.FORMATS.items()],
         "llm_ready": llm.available(),
         "provider": llm.current_label(),
+        "periods": workflows.PERIODS,
     }
 
 
@@ -753,6 +755,7 @@ def _generate_request(payload: dict, instruction: str, *, run: bool = False):
         until=payload.get("until"),
         memo_ids=_memo_ids(payload.get("memo_ids")),
         source_revisions=payload.get("source_revisions"),
+        period=payload.get("period"),
     )
     try:
         if run:
@@ -779,7 +782,13 @@ def generation_candidates(
     q: str = "", limit: int = Query(20, ge=1, le=50), offset: int = Query(0, ge=0, le=10000),
     tag: str | None = None, tag_csv: str | None = Query(None, alias="tags"),
     person: str | None = None, since: str | None = None, until: str | None = None,
+    period: str | None = None,
 ):
+    if period is not None:
+        try:
+            since, until = workflows.period_bounds(period, since, until)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
     scope = dict(tag=tag, tags=_csv(tag_csv), person=person, since=since, until=until)
     if q.strip():
         rows = search.search(q, limit=offset + limit + 1, **scope)[offset:]
@@ -791,6 +800,52 @@ def generation_candidates(
 @app.get("/api/generate/tags")
 def generation_tags():
     return {"items": tags.filter_choices()}
+
+
+def _workflow_action(callback, *args, **kwargs):
+    try:
+        return callback(*args, **kwargs)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc).strip("'"))
+    except workflows.Conflict as exc:
+        raise HTTPException(409, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.get("/api/generate/workflows")
+def workflow_list():
+    return {"items": workflows.all_workflows()}
+
+
+@app.post("/api/generate/workflows")
+def workflow_create(payload: dict = Body(...)):
+    return _workflow_action(workflows.save, payload)
+
+
+@app.post("/api/generate/workflows/preview")
+def workflow_preview(payload: dict = Body(...)):
+    return _workflow_action(workflows.preview, payload.get("content"))
+
+
+@app.post("/api/generate/workflows/export")
+def workflow_export(payload: dict = Body(...)):
+    return _workflow_action(workflows.export, payload)
+
+
+@app.get("/api/generate/workflows/{workflow_id}")
+def workflow_get(workflow_id: int):
+    return _workflow_action(workflows.get, workflow_id)
+
+
+@app.put("/api/generate/workflows/{workflow_id}")
+def workflow_update(workflow_id: int, payload: dict = Body(...)):
+    return _workflow_action(workflows.save, payload.get("settings"), workflow_id, payload.get("version"))
+
+
+@app.delete("/api/generate/workflows/{workflow_id}")
+def workflow_delete(workflow_id: int, version: int = Query(..., ge=1)):
+    return _workflow_action(workflows.delete, workflow_id, version)
 
 
 @app.get("/api/generate/history")

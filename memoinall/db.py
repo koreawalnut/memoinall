@@ -114,6 +114,14 @@ CREATE TABLE IF NOT EXISTS ai_versions (
     PRIMARY KEY (result_id, version)
 );
 CREATE INDEX IF NOT EXISTS idx_ai_results_updated ON ai_results(updated_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS workflows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    settings_json TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL
+);
 """
 
 

@@ -249,8 +249,9 @@ def _install_downloader(window) -> None:
 
     def save(content: str, suggested: str):
         try:
+            kind = "업무 설정 (*.json)" if suggested.lower().endswith(".json") else "마크다운 (*.md)"
             result = window.create_file_dialog(
-                webview.SAVE_DIALOG, save_filename=suggested, file_types=("마크다운 (*.md)", "모든 파일 (*.*)")
+                webview.SAVE_DIALOG, save_filename=suggested, file_types=(kind, "모든 파일 (*.*)")
             )
             if not result:
                 return False
