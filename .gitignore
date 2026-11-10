@@ -9,6 +9,9 @@ venv/
 
 # PyInstaller 빌드 산출물
 build/
-dist/
+dist/*
+!dist/installer/
+dist/installer/*
+!dist/installer/memoinall-Setup-0.1.0.exe
 *.manifest
 artifacts/ux-review/
