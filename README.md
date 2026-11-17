@@ -63,6 +63,12 @@ Gemini는 호출마다 요금이 들어 말하는 중 초안 없이 쉼마다 �
 받은 메모는 **가져오기·공유 → 동료와 주고받기 → 찾아보기**에서 .json 파일을 선택하세요.
 내보낼 때 비밀번호를 정하면 파일이 암호화되고(AES-256-GCM), 받는 쪽은 같은 비밀번호를 넣어야 열 수 있습니다.
 비밀번호는 파일과 다른 경로(전화·별도 메시지)로 알려주세요.
+휴대폰 앱의 메모는 **QR 찍기**(웹캠)로 받습니다.
+
+**휴대폰 앱**은 PC와 연결되지 않는 별도 버전입니다. 메모·일정은 그 휴대폰에만 저장됩니다.
+사내 정보 보호를 위해 주고받기는 **휴대폰 → PC 한 방향**(휴대폰 화면의 QR을 PC 웹캠으로)만 됩니다.
+홈 화면에 설치하는 웹 앱이라 iPhone·Android 모두 쓰고, 오프라인에서도 열립니다. AI 정리는 휴대폰에 넣은 API 키로 합니다.
+`python build_mobile.py`로 만든 폴더를 GitHub Pages에 올립니다. [휴대폰 앱 안내](docs/mobile.md)
 다른 앱의 메모는 **가져오기·공유 → 다른 앱에서 가져오기**에서 가져옵니다.
 에버노트는 **에버노트에서 가져오기**에서 `.enex` 파일을 선택하세요. 받은 파일과 보낼 메모 모두
 목록 검색·본문 확인·체크박스로 대상을 고를 수 있습니다. [지원 범위와 사용법](docs/import-sharing.md)을 참고하세요.
@@ -464,6 +470,9 @@ python tests/test_desktop.py            # ONNX 임베더·데스크톱 36종
 python tests/test_redmine.py            # Redmine 65종 (가짜 서버를 띄워 실제 소켓으로)
 python tests/test_collections.py        # 엑셀 폴더 취합: 읽기·확인·저장·집계·내보내기·AI 근거
 python tests/test_collection_ui.py      # 엑셀 폴더 취합 화면 흐름 (playwright)
+python tests/test_mobile.py             # 휴대폰 앱 빌드 · QR 형식 · PC와 공유 형식 일치 (Node 필요)
+python tests/test_mobile_ui.py          # 휴대폰 앱 전체 흐름 · 한 방향 확인 · 오프라인 (playwright)
+python tests/test_qr_share_ui.py        # PC 앱이 웹캠으로 휴대폰 QR 받기 · PC는 QR을 만들지 않음 (playwright)
 ```
 
 `test_generate.py` 는 각 어댑터가 **실제로 어떤 파라미터를 보내는지**까지 검사합니다 —
@@ -497,10 +506,13 @@ memoinall/
   collection_store.py    확정한 취합표 저장 · 버전 · 대표 메모
   collection_analysis.py 전체 행 집계(Decimal) · 확인 사항 · AI 근거 · 엑셀 내보내기
   static/        웹 UI (단일 HTML, 외부 의존성 없음)
+    qrshare.js   QR 주고받기 (휴대폰은 보여주기·PC는 찍기), vendor/ 에 QR 라이브러리(qrcode-generator·jsQR)
 
+mobile/          휴대폰 앱(PWA): 화면·IndexedDB 저장·공유 형식(exchange.js)·서비스 워커
 desktop_main.py  데스크톱 진입점 (PyInstaller 가 묶는 파일)
 memoinall.spec   PyInstaller 스펙 (torch 제외, WebView2 DLL 포함)
 build_exe.py     빌드 스크립트
+build_mobile.py  휴대폰 앱 폴더 만들기 (dist/mobile)
 ```
 
 ## 알려진 한계

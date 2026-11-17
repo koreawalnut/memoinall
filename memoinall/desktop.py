@@ -91,9 +91,9 @@ def _open_when_ready(window, port: int, closed, failed) -> None:
     try:
         if ready:
             log.info("메모 화면 연결 (%.3fs)", time.monotonic() - started)
-            # 화면 연결을 늦추지 않게 따로 돈다. 사용자가 🎤를 누르기 훨씬 전에 끝난다.
-            threading.Thread(target=_allow_local_microphone, args=(window, port), daemon=True,
-                             name="mic-permission").start()
+            # 화면 연결을 늦추지 않게 따로 돈다. 사용자가 🎤·QR 찍기를 누르기 훨씬 전에 끝난다.
+            threading.Thread(target=_allow_local_media, args=(window, port), daemon=True,
+                             name="media-permission").start()
             window.load_url(f"http://127.0.0.1:{port}/")
         else:
             log.error("서버가 뜨지 않았습니다.")
@@ -106,13 +106,13 @@ def _open_when_ready(window, port: int, closed, failed) -> None:
             log.exception("메모 화면 연결 실패")
 
 
-def _allow_local_microphone(window, port: int) -> None:
-    """메모 입력칸의 🎤 가 이 앱 화면에서는 권한 창 없이 마이크를 쓰게 한다.
+def _allow_local_media(window, port: int) -> None:
+    """메모 입력칸의 🎤(마이크)와 'QR 찍기'(웹캠)가 이 앱 화면에서는 권한 창 없이 동작하게 한다.
 
     WebView2 런타임 157 은 이걸 안 해도 127.0.0.1 의 마이크 요청을 허용했다(직접 확인).
     다만 기본 처리는 런타임 버전·회사 정책에 따라 권한 창을 띄울 수 있고, 이 앱은 실행할
     때마다 포트가 바뀌어 매번 새 사이트로 취급되므로 그러면 실행할 때마다 묻게 된다.
-    그래서 내 앱 주소(127.0.0.1:포트)의 마이크 요청만 명시적으로 허용하고, 나머지는
+    그래서 내 앱 주소(127.0.0.1:포트)의 마이크·카메라 요청만 명시적으로 허용하고, 나머지는
     WebView2 기본 처리에 맡긴다. 연결에 실패해도 기본 처리로 동작한다.
     """
     origin = f"http://127.0.0.1:{port}/"
@@ -122,21 +122,23 @@ def _allow_local_microphone(window, port: int) -> None:
         from Microsoft.Web.WebView2.Core import CoreWebView2PermissionKind, CoreWebView2PermissionState
         from System import Action
 
+        allowed = (CoreWebView2PermissionKind.Microphone, CoreWebView2PermissionKind.Camera)
+
         def on_permission(_sender, args):
             try:
-                if args.PermissionKind == CoreWebView2PermissionKind.Microphone and str(args.Uri).startswith(origin):
+                if args.PermissionKind in allowed and str(args.Uri).startswith(origin):
                     args.State = CoreWebView2PermissionState.Allow
             except Exception:
-                log.exception("마이크 권한 처리 실패")
+                log.exception("마이크·카메라 권한 처리 실패")
 
         def attach():
             window.native.webview.CoreWebView2.PermissionRequested += on_permission
 
         # WebView2 객체는 UI 스레드에서만 만질 수 있다.
         window.native.Invoke(Action(attach))
-        log.info("마이크 권한: %s 허용", origin)
+        log.info("마이크·카메라 권한: %s 허용", origin)
     except Exception:
-        log.exception("마이크 권한 연결 실패 — WebView2 기본 권한 창으로 동작합니다")
+        log.exception("마이크·카메라 권한 연결 실패 — WebView2 기본 권한 창으로 동작합니다")
 
 
 def run() -> int:

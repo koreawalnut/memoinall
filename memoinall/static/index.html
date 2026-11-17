@@ -484,6 +484,7 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+<script src="/static/qrshare.js"></script>
 <script src="/static/generate.js"></script>
 <script src="/static/workflows.js"></script>
 <script src="/static/collections.js"></script>
@@ -1505,6 +1506,11 @@ async function renderImport(version = renderVersion) {
         : "받은 .json 파일을 선택하면 내용을 미리 보여줍니다."}</div>
     </div>
     <div class="field" style="margin:9px 0 0;grid-template-columns:80px 1fr">
+      <label for="sharedQr">QR</label>
+      <div class="row" style="margin:0"><button class="btn" type="button" id="sharedQr">QR 찍기</button>
+        <span class="note">휴대폰 앱이 띄운 QR을 웹캠으로 찍어 받습니다. (휴대폰 → PC 한 방향만 됩니다)</span></div>
+    </div>
+    <div class="field" style="margin:9px 0 0;grid-template-columns:80px 1fr">
       <label>또는 경로</label>
       <input id="impShared" value="${esc(imp.sharedPath)}" placeholder="예) C:\\Users\\나\\Downloads\\memoinall-20260901-1200-12건.json" />
       <div class="note">동료가 <b>내보내기</b>로 만든 .json 파일. 이미 갖고 있는 내용은 알아서 건너뜁니다.</div>
@@ -1756,22 +1762,14 @@ async function renderImport(version = renderVersion) {
     const file = e.target.files[0];
     if (!file) return;
     if (imp.busy) { e.target.value = ""; toast("진행 중인 가져오기가 끝난 뒤 파일을 선택하세요"); return; }
-    const version = ++sharedLoadVersion;
-    imp.sharedContent = imp.sharedName = imp.sharedPath = "";
-    delete imp.results.shared;
-    delete importReviews.shared;
-    $("#impOut-shared").textContent = "";
-    document.querySelectorAll('[data-src-run="shared"], [data-src-preview="shared"]').forEach((b) => { b.disabled = true; });
-    const status = $("#sharedFileStatus");
-    try {
+    await loadShared(async () => {
       if (file.size > 50000000) throw new Error("50MB 이하의 메모 파일을 선택하세요.");
-      const content = (await file.text()).replace(/^\uFEFF/, "");
-      if (version !== sharedLoadVersion) return;
-      await openShared(content, file.name, status, version);
-    } catch (err) {
-      e.target.value = "";
-      if (version === sharedLoadVersion && status.isConnected) status.textContent = "파일 확인 실패: " + err.message;
-    }
+      return (await file.text()).replace(/^\uFEFF/, "");
+    }, file.name, { what: "파일", fail: () => { e.target.value = ""; } });
+  };
+  $("#sharedQr").onclick = () => {
+    if (imp.busy) { toast("진행 중인 가져오기가 끝난 뒤 QR을 찍으세요"); return; }
+    scanQrDialog((text) => loadShared(async () => text, "QR로 받은 메모", { what: "QR" }));
   };
   $("#impSharedPw").value = imp.sharedPassword;
   $("#impSharedPw").onchange = async (e) => {
@@ -1987,6 +1985,59 @@ function paintDocumentResult() {
       `<button class="btn ghost" data-document-memo="${m.id}" style="display:block;text-align:left;white-space:normal">${esc(m.title)}</button>`).join("")}</details>`;
   $("#documentGenerate").onclick = () => startGenerate(r.memos.map((m) => m.id), "가져온 문서를 바탕으로 핵심 내용과 할 일을 정리해줘");
   target.querySelectorAll("[data-document-memo]").forEach((b) => { b.onclick = () => openMemo(+b.dataset.documentMemo); });
+}
+
+// 받은 내용(파일·QR)을 새로 고른 것으로 놓고 미리보기까지. 앞서 고른 것의 결과는 버린다.
+async function loadShared(read, name, { what = "파일", fail = null } = {}) {
+  const version = ++sharedLoadVersion;
+  imp.sharedContent = imp.sharedName = imp.sharedPath = "";
+  delete imp.results.shared;
+  delete importReviews.shared;
+  if ($("#impOut-shared")) $("#impOut-shared").textContent = "";
+  document.querySelectorAll('[data-src-run="shared"], [data-src-preview="shared"]').forEach((b) => { b.disabled = true; });
+  const status = $("#sharedFileStatus");
+  try {
+    const content = await read();
+    if (version !== sharedLoadVersion) return;
+    await openShared(content, name, status, version);
+  } catch (err) {
+    if (fail) fail();
+    if (version === sharedLoadVersion && status?.isConnected) status.textContent = `${what} 확인 실패: ${err.message}`;
+  }
+}
+
+// ---------------------------------------------------------------- QR (휴대폰 앱 → PC)
+// 휴대폰 앱이 띄운 QR 을 웹캠으로 받기만 한다. 사내 정보 보호를 위해 PC 는 QR 을 만들지 않는다(한 방향).
+// 닫으면 카메라를 끈다.
+function qrDialog(title) {
+  let dlg = $("#qrDlg");
+  if (!dlg) {
+    dlg = document.createElement("dialog");
+    dlg.id = "qrDlg";
+    dlg.setAttribute("aria-labelledby", "qrDlgTitle");
+    dlg.style.width = "min(520px, 94vw)";
+    dlg.innerHTML = `<div class="dlg-h"><span class="card-title" id="qrDlgTitle"></span><span class="spacer"></span>
+      <button class="btn ghost" type="button" id="qrDlgClose">닫기</button></div><div class="dlg-b" id="qrDlgBody" style="max-height:82vh"></div>`;
+    document.body.appendChild(dlg);
+    $("#qrDlgClose").onclick = () => dlg.close();
+    dlg.addEventListener("close", () => { if (dlg._stop) dlg._stop(); dlg._stop = null; $("#qrDlgBody").innerHTML = ""; });
+  }
+  if (dlg._stop) dlg._stop();
+  dlg._stop = null;
+  $("#qrDlgTitle").textContent = title;
+  return dlg;
+}
+
+function scanQrDialog(onText) {
+  const dlg = qrDialog("휴대폰 QR 찍어서 받기");
+  $("#qrDlgBody").innerHTML = `<div id="qrDlgScan"></div>
+    <div class="note" style="margin-top:10px">휴대폰 앱에서 메모를 고르고 <b>PC로 보내기 → QR로 보여주기</b>를 누른 뒤 화면을 웹캠에 비추세요.
+      여러 장이면 자동으로 넘어가니 그대로 두면 됩니다.</div>`;
+  const scan = QrShare.scan($("#qrDlgScan"), {
+    onDone: (text) => { dlg.close(); onText(text); },
+  });
+  dlg._stop = () => scan.stop();
+  if (!dlg.open) dlg.showModal();
 }
 
 // 고른 파일의 겉면을 확인하고 미리보기까지. 암호화된 파일이면 비밀번호를 받을 때까지 멈춘다.
@@ -2218,7 +2269,7 @@ async function doImport(dry, source = "all") {
   }
   const signature = importSignature(source);
   imp.busy = true;
-  const buttons = [...document.querySelectorAll("[data-src-run], [data-src-preview], #impRunAll, #impPreviewAll, #sharedFile, #evernoteFile, #impShared, #impSharedPw, #impMin, #impUpdate, #impTagRow button")];
+  const buttons = [...document.querySelectorAll("[data-src-run], [data-src-preview], #impRunAll, #impPreviewAll, #sharedFile, #sharedQr, #evernoteFile, #impShared, #impSharedPw, #impMin, #impUpdate, #impTagRow button")];
   const disabledBefore = buttons.map((b) => b.disabled);
   buttons.forEach((b) => { b.disabled = true; });
   const targets = source === "all"
