@@ -1029,9 +1029,45 @@ $("#aiTest").onclick = async () => {
 };
 
 let installPrompt = null;
-window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installPrompt = e; if (S.tab === "settings") paintAppInfo(); });
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  paintInstallBanner();
+  if (S.tab === "settings") paintAppInfo();
+});
+window.addEventListener("appinstalled", () => { installPrompt = null; local.set("memoinall.installHidden", "1"); paintInstallBanner(); });
 const standalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+// 카카오톡·네이버·인스타그램 등 앱 안의 브라우저는 홈 화면 설치를 지원하지 않는다.
+const inAppBrowser = () => /KAKAOTALK|NAVER\(inapp|Instagram|FBAN|FBAV|\bLine\//i.test(navigator.userAgent);
+
+// 브라우저로 열었을 때 맨 위에 설치 방법을 보여준다. 설치한 앱으로 열었거나 닫았으면 숨긴다.
+function paintInstallBanner() {
+  const box = $("#installBanner");
+  if (standalone() || local.get("memoinall.installHidden") === "1") { box.hidden = true; return; }
+  box.hidden = false;
+  const inApp = inAppBrowser();
+  $("#installNow").hidden = !installPrompt || inApp;
+  $("#installHow").innerHTML = inApp
+    ? "지금은 다른 앱 안의 브라우저로 열려 있어 설치할 수 없습니다. 오른쪽 위 메뉴에서 <b>다른 브라우저로 열기</b>를 누르세요."
+    : installPrompt ? "아래 버튼을 누르면 바로 설치됩니다. 설치하면 인터넷 없이도 열립니다."
+    : isIos() ? "Safari 아래쪽의 공유 버튼 → <b>홈 화면에 추가</b>를 누르세요."
+    : "브라우저 메뉴(⋮) → <b>앱 설치</b> 또는 <b>홈 화면에 추가</b>를 누르세요.";
+}
+$("#installNow").onclick = async () => {
+  if (!installPrompt) return;
+  const prompt = installPrompt;
+  prompt.prompt();
+  let choice = null;
+  try { choice = await prompt.userChoice; } catch (_) { /* 브라우저가 알려주지 않으면 그대로 둔다 */ }
+  installPrompt = null;
+  if (choice && choice.outcome === "accepted") {
+    local.set("memoinall.installHidden", "1");
+    toast("설치했습니다 — 홈 화면의 memoinall 아이콘으로 여세요", 5000);
+  }
+  paintInstallBanner();
+};
+$("#installClose").onclick = () => { local.set("memoinall.installHidden", "1"); paintInstallBanner(); };
 
 async function paintAppInfo() {
   let storage = "확인할 수 없음", persisted = null;
@@ -1119,6 +1155,7 @@ async function init() {
   renderAllMemos();
   paintOnline();
   paintBackupInfo();
+  paintInstallBanner();
 }
 
 if ("serviceWorker" in navigator && (location.protocol === "https:" || ["localhost", "127.0.0.1"].includes(location.hostname))) {

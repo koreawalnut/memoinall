@@ -111,6 +111,41 @@ def main():
         expect(page.locator("#memoList .empty")).to_contain_text("아직 메모가 없습니다")
         fits()
 
+        # ---------------------------------------------------------- 설치 안내
+        banner = page.locator("#installBanner")
+        expect(banner).to_be_visible()
+        expect(page.locator("#installHow")).to_contain_text("앱 설치")
+        expect(page.locator("#installNow")).to_be_hidden()
+        page.evaluate("""() => { window.__prompted = 0;
+          const e = new Event('beforeinstallprompt', { cancelable: true });
+          e.prompt = () => { window.__prompted++; };
+          e.userChoice = Promise.resolve({ outcome: 'dismissed' });
+          window.dispatchEvent(e); }""")
+        expect(page.locator("#installNow")).to_be_visible()
+        expect(page.locator("#installHow")).to_contain_text("바로 설치")
+        page.locator("#installNow").click()
+        expect(page.locator("#installNow")).to_be_hidden()          # 한 번 쓴 설치 요청은 다시 쓸 수 없다
+        assert page.evaluate("window.__prompted") == 1
+        expect(banner).to_be_visible()                               # 설치를 취소했으니 안내는 남는다
+        page.locator("#installClose").click()
+        expect(banner).to_be_hidden()
+        page.reload()
+        expect(page.locator("#capture")).to_be_visible()
+        expect(banner).to_be_hidden()                                # 닫은 안내는 다시 나오지 않는다
+        kakao = browser.new_context(viewport={"width": 360, "height": 780}, is_mobile=True, has_touch=True,
+                                    user_agent="Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/131 Mobile KAKAOTALK 10.9.0")
+        kp = kakao.new_page()
+        kp.goto(base)
+        expect(kp.locator("#installHow")).to_contain_text("다른 브라우저로 열기")
+        kakao.close()
+        iphone = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True,
+                                     user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 Version/17.5 Mobile/15E148 Safari/604.1")
+        ip = iphone.new_page()
+        ip.goto(base)
+        expect(ip.locator("#installHow")).to_contain_text("홈 화면에 추가")
+        iphone.close()
+        print("OK install banner: one-tap install where the browser allows it, Safari and in-app-browser instructions, stays closed once closed")
+
         # ---------------------------------------------------------- 메모
         capture.fill("내일 오후 3시 결제 시스템 점검 회의 #회의 #결제\n자료는 김과장이 준비")
         expect(page.locator("#draftNote")).to_contain_text("자동 보관")

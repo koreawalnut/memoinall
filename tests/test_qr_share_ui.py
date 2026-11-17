@@ -1,7 +1,7 @@
 """PC 앱의 QR 받기 (휴대폰 → PC 한 방향).  python tests/test_qr_share_ui.py
 
 - 휴대폰이 띄운 QR(여러 장)을 Chromium 가짜 웹캠으로 찍어 받는다 → 기존 '받은 메모' 미리보기·가져오기.
-- PC 는 QR 을 만들지 않는다(사내 메모가 휴대폰으로 나가는 길이 없다).
+- PC 는 메모를 QR 로 만들지 않는다(사내 메모가 휴대폰으로 나가는 길이 없다). 그리는 QR 은 설치 주소뿐이다.
 - 비밀번호로 잠근 휴대폰 QR 은 비밀번호를 넣어야 열린다.
 Node 가 없으면 건너뛴다(QR 영상을 만들 때 실제 qrshare.js 를 Node 로 돌린다).
 """
@@ -88,13 +88,45 @@ def main():
         expect(picker.locator("[data-pick]:checked")).to_have_count(0)
         print("OK scanning the same QR again marks every memo as already imported")
 
-        # 한 방향: PC 는 QR 을 만들지 않는다 (사내 메모가 휴대폰으로 나가는 길을 두지 않는다)
+        # 한 방향: PC 는 메모를 QR 로 만들지 않는다 (사내 메모가 휴대폰으로 나가는 길을 두지 않는다)
         page.locator("#expPreview").click()
         expect(page.locator("#expReview [data-picker-count]")).to_contain_text("5건 선택")
         assert page.locator("#expQr").count() == 0
         assert page.evaluate("typeof qrcode") == "undefined"      # QR 을 그리는 라이브러리 자체를 싣지 않는다
         expect(page.locator("#sharedQr")).to_be_visible()
         print("OK one way only: the PC has no 'show as QR' and does not even load a QR drawing library")
+
+        # 휴대폰 앱 설치 QR — 설치 주소만 담는다. 찍기 창에서도 바로 열 수 있다.
+        read_canvas = """(sel) => { const c = document.querySelector(sel);
+          const img = c.getContext('2d').getImageData(0, 0, c.width, c.height);
+          const hit = jsQR(img.data, img.width, img.height); return hit && hit.data; }"""
+        page.locator("#sharedQr").click()
+        expect(dlg.locator("video")).to_be_visible()
+        page.locator("#qrToInstall").click()
+        expect(dlg.locator("#installQr")).to_be_visible()
+        expect(dlg.locator("video")).to_have_count(0)                  # 카메라는 꺼진다
+        default_url = "https://kbiwalnut.github.io/mobile/"
+        assert page.evaluate(read_canvas, "#installQr") == default_url
+        expect(dlg).to_contain_text("메모는 들어 있지 않습니다")
+        expect(page.locator("#installUrl")).to_have_text(default_url)
+        dlg.locator("#installUrlEdit summary").click()
+        page.locator("#installUrlInput").fill("http://intranet/mobile/")
+        page.locator("#installUrlForm button[type=submit]").click()
+        expect(page.locator("#installUrlNote")).to_contain_text("https://")
+        page.locator("#installUrlInput").fill("https://example.org/m/")
+        page.locator("#installUrlForm button[type=submit]").click()
+        expect(page.locator("#installUrl")).to_have_text("https://example.org/m/")
+        assert page.evaluate(read_canvas, "#installQr") == "https://example.org/m/"
+        page.locator("#installUrlReset").click()
+        expect(page.locator("#installUrl")).to_have_text(default_url)
+        page.locator("#qrDlgClose").click()
+        page.locator("#mobileInstall").click()
+        expect(dlg.locator("#installQr")).to_be_visible()
+        assert page.evaluate(read_canvas, "#installQr") == default_url
+        page.locator("#qrDlgClose").click()
+        assert client.put("/api/settings", json={"values": {"mobile.url": "javascript:alert(1)"}}).status_code == 400
+        assert page.locator("#expQr").count() == 0
+        print("OK install QR holds only the app address, opens from the scan window too, and the address can be changed (https only)")
 
         # 휴대폰이 비밀번호로 잠가 보낸 QR 도 같은 비밀번호 칸으로 연다
         body = "잠근 휴대폰 메모: 현장 배관 점검 결과와 보수 일정 협의 내용"

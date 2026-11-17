@@ -68,6 +68,7 @@ Gemini는 호출마다 요금이 들어 말하는 중 초안 없이 쉼마다 �
 **휴대폰 앱**은 PC와 연결되지 않는 별도 버전입니다. 메모·일정은 그 휴대폰에만 저장됩니다.
 사내 정보 보호를 위해 주고받기는 **휴대폰 → PC 한 방향**(휴대폰 화면의 QR을 PC 웹캠으로)만 됩니다.
 홈 화면에 설치하는 웹 앱이라 iPhone·Android 모두 쓰고, 오프라인에서도 열립니다. AI 정리는 휴대폰에 넣은 API 키로 합니다.
+휴대폰에는 **가져오기·공유 → 동료와 주고받기 → 휴대폰 앱 설치**의 QR을 찍어 설치합니다.
 `python build_mobile.py`로 만든 폴더를 GitHub Pages에 올립니다. [휴대폰 앱 안내](docs/mobile.md)
 다른 앱의 메모는 **가져오기·공유 → 다른 앱에서 가져오기**에서 가져옵니다.
 에버노트는 **에버노트에서 가져오기**에서 `.enex` 파일을 선택하세요. 받은 파일과 보낼 메모 모두
@@ -455,6 +456,7 @@ curl "http://127.0.0.1:8787/api/context.txt?q=결제+이슈&budget=3000"
 | `MEMOINALL_LLM_EFFORT` | `high` | `none`~`max`. `none` 은 추론 끄기 |
 | `MEMOINALL_STT_ENGINE` | `local` | 음성 입력 방식. `local`(로컬 Whisper) / `gemini` |
 | `MEMOINALL_STT_MODEL` | `small` | 로컬 Whisper 모델. `small` / `large-v3-turbo` |
+| `MEMOINALL_MOBILE_URL` | `https://kbiwalnut.github.io/mobile/` | ‘휴대폰 앱 설치’ QR에 담을 휴대폰 앱 주소 (https만) |
 
 모델을 바꾸면 청크에 기록된 모델명이 달라져 **자동으로 재임베딩**됩니다.
 
@@ -472,7 +474,7 @@ python tests/test_collections.py        # 엑셀 폴더 취합: 읽기·확인·
 python tests/test_collection_ui.py      # 엑셀 폴더 취합 화면 흐름 (playwright)
 python tests/test_mobile.py             # 휴대폰 앱 빌드 · QR 형식 · PC와 공유 형식 일치 (Node 필요)
 python tests/test_mobile_ui.py          # 휴대폰 앱 전체 흐름 · 한 방향 확인 · 오프라인 (playwright)
-python tests/test_qr_share_ui.py        # PC 앱이 웹캠으로 휴대폰 QR 받기 · PC는 QR을 만들지 않음 (playwright)
+python tests/test_qr_share_ui.py        # PC 앱이 웹캠으로 휴대폰 QR 받기 · 설치 주소 QR (playwright)
 ```
 
 `test_generate.py` 는 각 어댑터가 **실제로 어떤 파라미터를 보내는지**까지 검사합니다 —

@@ -10,7 +10,7 @@ import time
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, PlainTextResponse, Response
@@ -893,6 +893,16 @@ def collection_export(collection_id: int, version: int, group_by: str | None = N
 # --------------------------------------------------------------------------- 설정
 
 
+def _mobile_url(value) -> str:
+    """휴대폰 앱 주소. 설치·오프라인 실행은 HTTPS 에서만 되므로 https 주소만 받는다."""
+    url = str(value).strip()
+    parts = urlsplit(url)
+    if (parts.scheme != "https" or not parts.hostname or len(url) > 300
+            or any(ch.isspace() or ord(ch) < 32 for ch in url) or parts.username or parts.password):
+        raise HTTPException(400, "휴대폰 앱 주소는 https:// 로 시작하는 웹 주소여야 합니다.")
+    return url
+
+
 @app.get("/api/settings")
 def read_settings():
     return settings.public_view()
@@ -910,6 +920,8 @@ def write_settings(payload: dict = Body(...)):
         raise HTTPException(400, f"알 수 없는 음성 인식 엔진: {values['stt.engine']}")
     if values.get("stt.local.model") and values["stt.local.model"] not in stt.LOCAL_MODELS:
         raise HTTPException(400, f"알 수 없는 음성 인식 모델: {values['stt.local.model']}")
+    if values.get("mobile.url"):
+        values["mobile.url"] = _mobile_url(values["mobile.url"])
     settings.set_many(values)
     llm.reset()  # 캐시된 어댑터를 버려야 새 설정이 즉시 반영된다
     return settings.public_view()

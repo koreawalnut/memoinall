@@ -79,6 +79,8 @@
   mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1px; }
 
   /* 메모 */
+  .install { margin: 6px 0 10px; border-color: var(--accent); padding: 12px 8px 12px 14px; }
+  .install .row:last-child:has(> [hidden]) { display: none; }
   .capture { margin-top: 6px; }
   .capture textarea { min-height: 96px; max-height: 50vh; border: 0; padding: 4px 2px; background: transparent; }
   .capture textarea:focus-visible { outline: none; }
@@ -206,6 +208,14 @@
 <main class="wrap">
   <!-- 메모 -->
   <section id="tab-memos" data-tab="memos">
+    <div class="card install" id="installBanner" hidden>
+      <div class="row" style="flex-wrap:nowrap;align-items:flex-start">
+        <div style="flex:1;min-width:0"><b>홈 화면에 설치하면 앱처럼 씁니다</b>
+          <div class="note" id="installHow" style="margin-top:2px"></div></div>
+        <button class="btn ghost x" id="installClose" type="button" aria-label="설치 안내 닫기">×</button>
+      </div>
+      <div class="row" style="margin-top:8px"><button class="btn primary block" id="installNow" type="button" hidden>홈 화면에 설치</button></div>
+    </div>
     <div class="card capture">
       <textarea id="capture" aria-label="새 메모" placeholder="생각나는 대로 적으세요. #태그를 붙이면 태그로 모입니다."></textarea>
       <div class="row">

@@ -100,7 +100,8 @@ def build(out: Path) -> dict:
     # GitHub Pages 가 밑줄로 시작하는 파일을 숨기지 않게
     (out / ".nojekyll").write_text("", encoding="utf-8")
 
-    size = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())
+    size = sum(p.stat().st_size for p in out.rglob("*")
+               if p.is_file() and p.relative_to(out).parts[0] not in KEEP)
     return {"out": out, "version": version, "files": len(FILES) + 1, "bytes": size}
 
 

@@ -39,6 +39,8 @@ def _build_schema() -> dict[str, Entry]:
         "stt.engine": ("MEMOINALL_STT_ENGINE", "local", False),
         "stt.local.model": ("MEMOINALL_STT_MODEL", "small", False),
         "stt.gemini.model": (None, "gemini-2.5-flash", False),
+        # 휴대폰 앱(PWA)을 올린 주소. PC 의 '휴대폰 앱 설치' QR 에 이 주소만 담는다.
+        "mobile.url": ("MEMOINALL_MOBILE_URL", "https://kbiwalnut.github.io/mobile/", False),
         # Redmine 가져오기 — 주소/키는 매번 입력하지 않도록 저장한다.
         "import.redmine.url": ("REDMINE_URL", "", False),
         "import.redmine.api_key": ("REDMINE_API_KEY", "", True),

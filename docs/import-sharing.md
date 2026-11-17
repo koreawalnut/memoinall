@@ -70,7 +70,8 @@ python -m memoinall import --source evernote --evernote-file "C:\notes\archive.e
 받은 뒤의 확인·선택·중복 처리도 파일과 같습니다. 한 장에 한글 약 370자가 들어가고, 넘치면 여러 장으로 나뉘어
 자동으로 넘어갑니다(메모 10건 × 300자 ≈ 5장).
 
-사내 정보 보호를 위해 **PC는 QR을 만들지 않고, 휴대폰 앱은 PC 메모를 받지 않습니다.** 자세한 내용은 [휴대폰 앱](mobile.md)을 보세요.
+사내 정보 보호를 위해 **PC는 메모를 QR로 만들지 않고, 휴대폰 앱은 PC 메모를 받지 않습니다.**
+휴대폰 앱이 없다면 같은 화면의 **휴대폰 앱 설치**가 설치 주소만 담은 QR을 보여줍니다. 자세한 내용은 [휴대폰 앱](mobile.md)을 보세요.
 
 ## 검증
 
@@ -78,4 +79,4 @@ python -m memoinall import --source evernote --evernote-file "C:\notes\archive.e
 `tests/test_import_review_ui.py`는 Chromium에서 검색·페이지 이동·선택 유지와 실제 암호화 공유 파일의 내용을 확인합니다.
 기존 `test_api.py`, `test_importers.py`, `test_exchange.py`, `test_ui.py` 회귀 테스트도 함께 실행합니다.
 `tests/test_qr_share_ui.py`는 가짜 웹캠으로 휴대폰의 QR 여러 장(비밀번호로 잠근 것 포함)을 실제로 찍어 받고,
-PC에는 QR을 만드는 기능이 없는지 확인합니다.
+PC가 그리는 QR은 설치 주소뿐이고 메모를 QR로 내보내는 기능은 없는지 확인합니다.

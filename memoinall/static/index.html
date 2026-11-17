@@ -1508,6 +1508,7 @@ async function renderImport(version = renderVersion) {
     <div class="field" style="margin:9px 0 0;grid-template-columns:80px 1fr">
       <label for="sharedQr">QR</label>
       <div class="row" style="margin:0"><button class="btn" type="button" id="sharedQr">QR 찍기</button>
+        <button class="btn" type="button" id="mobileInstall">휴대폰 앱 설치</button>
         <span class="note">휴대폰 앱이 띄운 QR을 웹캠으로 찍어 받습니다. (휴대폰 → PC 한 방향만 됩니다)</span></div>
     </div>
     <div class="field" style="margin:9px 0 0;grid-template-columns:80px 1fr">
@@ -1771,6 +1772,7 @@ async function renderImport(version = renderVersion) {
     if (imp.busy) { toast("진행 중인 가져오기가 끝난 뒤 QR을 찍으세요"); return; }
     scanQrDialog((text) => loadShared(async () => text, "QR로 받은 메모", { what: "QR" }));
   };
+  $("#mobileInstall").onclick = showInstallQr;
   $("#impSharedPw").value = imp.sharedPassword;
   $("#impSharedPw").onchange = async (e) => {
     imp.sharedPassword = e.target.value;
@@ -2007,7 +2009,7 @@ async function loadShared(read, name, { what = "파일", fail = null } = {}) {
 }
 
 // ---------------------------------------------------------------- QR (휴대폰 앱 → PC)
-// 휴대폰 앱이 띄운 QR 을 웹캠으로 받기만 한다. 사내 정보 보호를 위해 PC 는 QR 을 만들지 않는다(한 방향).
+// 휴대폰 앱이 띄운 QR 을 웹캠으로 받기만 한다. 사내 정보 보호를 위해 PC 는 메모를 QR 로 만들지 않는다(한 방향).
 // 닫으면 카메라를 끈다.
 function qrDialog(title) {
   let dlg = $("#qrDlg");
@@ -2032,12 +2034,96 @@ function scanQrDialog(onText) {
   const dlg = qrDialog("휴대폰 QR 찍어서 받기");
   $("#qrDlgBody").innerHTML = `<div id="qrDlgScan"></div>
     <div class="note" style="margin-top:10px">휴대폰 앱에서 메모를 고르고 <b>PC로 보내기 → QR로 보여주기</b>를 누른 뒤 화면을 웹캠에 비추세요.
-      여러 장이면 자동으로 넘어가니 그대로 두면 됩니다.</div>`;
+      여러 장이면 자동으로 넘어가니 그대로 두면 됩니다.</div>
+    <div class="note" style="margin-top:6px">휴대폰 앱이 아직 없다면 <button class="btn ghost" type="button" id="qrToInstall">설치 QR 보기</button></div>`;
   const scan = QrShare.scan($("#qrDlgScan"), {
     onDone: (text) => { dlg.close(); onText(text); },
   });
   dlg._stop = () => scan.stop();
+  $("#qrToInstall").onclick = showInstallQr;
   if (!dlg.open) dlg.showModal();
+}
+
+// ---------------------------------------------------------------- 휴대폰 앱 설치 QR
+// QR 에는 휴대폰 앱 주소(설정 mobile.url)만 담는다 — 메모는 담지 않는다.
+// QR 을 그리는 라이브러리는 이 창을 열 때만 싣는다. 메모를 QR 로 내보내는 화면은 PC 에 없다.
+let qrLibLoading = null;
+function loadQrLib() {
+  if (typeof qrcode === "function") return Promise.resolve();
+  if (!qrLibLoading) {
+    qrLibLoading = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "/static/vendor/qrcode.js";
+      s.onload = () => (typeof qrcode === "function" ? resolve() : reject(new Error("QR 모듈을 불러오지 못했습니다.")));
+      s.onerror = () => { qrLibLoading = null; reject(new Error("QR 모듈을 불러오지 못했습니다.")); };
+      document.head.appendChild(s);
+    });
+  }
+  return qrLibLoading;
+}
+
+function drawUrlQr(canvas, url) {
+  const q = qrcode(0, "M");
+  q.addData(url, "Byte");
+  q.make();
+  const n = q.getModuleCount(), quiet = 4, scale = Math.max(4, Math.floor(480 / (n + quiet * 2)));
+  canvas.width = canvas.height = (n + quiet * 2) * scale;
+  const g = canvas.getContext("2d");
+  g.fillStyle = "#fff";
+  g.fillRect(0, 0, canvas.width, canvas.height);
+  g.fillStyle = "#000";
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) if (q.isDark(y, x)) g.fillRect((x + quiet) * scale, (y + quiet) * scale, scale, scale);
+  }
+}
+
+async function showInstallQr() {
+  const dlg = qrDialog("휴대폰 앱 설치");
+  $("#qrDlgBody").innerHTML = '<div class="status">불러오는 중…</div>';
+  if (!dlg.open) dlg.showModal();
+  try {
+    const [s] = await Promise.all([api("/api/settings"), loadQrLib()]);
+    if (dlg.open) paintInstallQr(s.settings["mobile.url"]);
+  } catch (err) {
+    $("#qrDlgBody").innerHTML = `<div class="status" style="color:var(--danger)">${esc(err.message)}</div>`;
+  }
+}
+
+function paintInstallQr(entry, { editing = false } = {}) {
+  const url = entry.value;
+  $("#qrDlgBody").innerHTML = `
+    <div class="note">휴대폰 카메라로 이 QR을 찍으면 설치 주소가 열립니다. QR에는 <b>주소만</b> 들어 있고 메모는 들어 있지 않습니다.</div>
+    <canvas id="installQr" role="img" aria-label="휴대폰 앱 설치 주소 QR"
+      style="display:block;width:min(100%,260px);aspect-ratio:1;image-rendering:pixelated;margin:14px auto;border-radius:8px;background:#fff"></canvas>
+    <div class="row" style="justify-content:center;margin:0 0 12px"><span id="installUrl" style="overflow-wrap:anywhere">${esc(url)}</span>
+      <button class="btn ghost" type="button" id="installCopy">주소 복사</button></div>
+    <ol class="note" style="margin:0 0 12px;padding-left:20px">
+      <li><b>Android</b>(Chrome·삼성 인터넷): 열린 화면 위쪽의 <b>홈 화면에 설치</b>를 누르거나, 브라우저 메뉴(⋮) → <b>앱 설치</b>.</li>
+      <li><b>iPhone</b>: <b>Safari</b>로 열고 공유 버튼 → <b>홈 화면에 추가</b>.</li>
+      <li>카카오톡·네이버 앱 안에서 열렸다면 <b>다른 브라우저로 열기</b>를 먼저 누르세요. 앱 안의 브라우저는 설치를 지원하지 않습니다.</li>
+    </ol>
+    <details id="installUrlEdit" ${editing ? "open" : ""}><summary class="status">주소 바꾸기</summary>
+      <form id="installUrlForm" class="row" style="margin-top:8px">
+        <input id="installUrlInput" value="${esc(url)}" aria-label="휴대폰 앱 주소" style="flex:1;min-width:220px" />
+        <button class="btn" type="submit">저장</button>
+        <button class="btn ghost" type="button" id="installUrlReset" ${entry.source === "기본값" ? "hidden" : ""}>기본 주소로</button>
+      </form>
+      <div class="note" id="installUrlNote">${entry.source === "기본값" ? "기본 주소를 쓰고 있습니다." : `기본 주소: ${esc(entry.default)}`}</div>
+    </details>`;
+  drawUrlQr($("#installQr"), url);
+  $("#installCopy").onclick = () => { navigator.clipboard.writeText(url); toast("주소를 복사했습니다"); };
+  const save = async (value) => {
+    try {
+      const r = await api("/api/settings", { method: "PUT", body: { values: { "mobile.url": value } } });
+      paintInstallQr(r.settings["mobile.url"], { editing: true });
+      toast("휴대폰 앱 주소를 저장했습니다");
+    } catch (err) {
+      $("#installUrlNote").textContent = err.message;
+      $("#installUrlNote").style.color = "var(--danger)";
+    }
+  };
+  $("#installUrlForm").onsubmit = (e) => { e.preventDefault(); save($("#installUrlInput").value.trim()); };
+  $("#installUrlReset").onclick = () => save("");
 }
 
 // 고른 파일의 겉면을 확인하고 미리보기까지. 암호화된 파일이면 비밀번호를 받을 때까지 멈춘다.
