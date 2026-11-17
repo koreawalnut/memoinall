@@ -37,6 +37,7 @@ from . import (
     search,
     settings,
     store,
+    stt,
     tags,
     todos,
     calendar_import,
@@ -905,6 +906,10 @@ def write_settings(payload: dict = Body(...)):
         raise HTTPException(400, f"알 수 없는 설정: {', '.join(unknown)}")
     if "llm.provider" in values and values["llm.provider"] not in providers.SPECS:
         raise HTTPException(400, f"알 수 없는 프로바이더: {values['llm.provider']}")
+    if values.get("stt.engine") and values["stt.engine"] not in stt.ENGINES:
+        raise HTTPException(400, f"알 수 없는 음성 인식 엔진: {values['stt.engine']}")
+    if values.get("stt.local.model") and values["stt.local.model"] not in stt.LOCAL_MODELS:
+        raise HTTPException(400, f"알 수 없는 음성 인식 모델: {values['stt.local.model']}")
     settings.set_many(values)
     llm.reset()  # 캐시된 어댑터를 버려야 새 설정이 즉시 반영된다
     return settings.public_view()
@@ -948,6 +953,53 @@ def test_llm(payload: dict = Body(default={})):
     """저장하기 전의 입력값으로도 테스트할 수 있다 — 잘못된 키를 커밋하지 않도록."""
     overrides = {k: payload.get(k) for k in ("api_key", "model", "base_url") if payload.get(k)}
     return llm.test_connection(payload.get("provider"), overrides)
+
+
+# --------------------------------------------------------------------------- 음성 입력
+
+
+@app.get("/api/stt/status")
+def stt_status():
+    return stt.status()
+
+
+@app.post("/api/stt/download")
+def stt_download(payload: dict = Body(default={})):
+    try:
+        stt.start_download(payload.get("model") or None)
+    except stt.SttError as exc:
+        raise HTTPException(400, str(exc))
+    return stt.status()
+
+
+@app.post("/api/stt/prepare")
+def stt_prepare():
+    """녹음 시작 신호. 말하는 동안 로컬 모델을 미리 올려 둔다."""
+    stt.prepare()
+    return {"ok": True}
+
+
+@app.post("/api/stt/transcribe")
+async def stt_transcribe(request: Request, partial: bool = False):
+    """16kHz 모노 WAV 한 구간을 받아 글로 옮긴다. 저장하지 않는다 — 입력칸에 넣는 건 화면이 한다.
+
+    partial=1 은 말하는 도중 보여 줄 초안(빠르게), 아니면 쉼에서 확정하는 본문(정확하게).
+    """
+    chunks, size = [], 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > stt.MAX_BYTES:
+            raise HTTPException(413, f"녹음은 한 번에 {stt.MAX_SECONDS // 60}분까지 옮길 수 있습니다.")
+        chunks.append(chunk)
+    try:
+        return await run_in_threadpool(lambda: stt.transcribe(b"".join(chunks), partial=partial))
+    except stt.SttError as exc:
+        raise HTTPException(400, str(exc))
+    except providers.ProviderError as exc:
+        raise HTTPException(502, f"Gemini 음성 변환 실패: {exc}")
+    except Exception as exc:
+        log.exception("음성 변환 실패")
+        raise HTTPException(500, f"음성 변환 실패: {type(exc).__name__}: {exc}")
 
 
 # --------------------------------------------------------------------------- 생성

@@ -17,7 +17,7 @@ CUDA 스텁까지 딸려와 1GB 를 넘고, onefile 은 실행할 때마다 그�
 
 import importlib.util
 import os
-from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_dynamic_libs, collect_submodules
 
 block_cipher = None
 onedir = os.environ.get("MEMOINALL_BUILD_ONEDIR") == "1"
@@ -81,6 +81,16 @@ for parser in ("icalendar", "recurring_ical_events", "x_wr_timezone"):
     hiddenimports += collect_submodules(parser)
 datas += collect_data_files("tzdata")
 
+# 음성 입력(로컬 Whisper). 있으면 넣는다 — 없으면 설정에서 Gemini 만 쓸 수 있다.
+#   ctranslate2 는 추론 DLL(약 60MB)을, faster_whisper 는 무음 구간 검출(VAD) onnx 를 데이터로 들고 있다.
+#   모델 가중치는 넣지 않는다. 처음 쓸 때 받아 ~/.memoinall/models/whisper 에 둔다.
+#   PyAV(ffmpeg, 약 68MB)는 아래 excludes 에서 뺀다. 파일 디코딩에만 쓰이고
+#   우리는 PCM 을 바로 넘기므로 필요 없다(stt._import_whisper_model 참고).
+if has("faster_whisper") and has("ctranslate2"):
+    binaries += collect_dynamic_libs("ctranslate2")
+    datas += collect_data_files("faster_whisper")
+    hiddenimports += ["faster_whisper", "ctranslate2", "ctranslate2._ext"]
+
 # 주고받기 파일 암호화. 쓸 때만 import 하므로 명시해야 exe 에 들어간다.
 if has("cryptography"):
     hiddenimports += ["cryptography.hazmat.primitives.ciphers.aead"]
@@ -92,6 +102,10 @@ excludes = [
     "scipy", "sklearn", "pandas", "matplotlib", "PIL",
     "chromadb", "IPython", "notebook", "jupyter",
     "tkinter", "test", "unittest", "pydoc_data",
+    # faster-whisper 가 끌어오는 것 중 쓰지 않는 것. PyAV 는 위 설명 참고.
+    # huggingface_hub 의 선택 의존성(pyarrow 85MB 등)은 모델 받기에만 쓰이는데,
+    # 우리는 모델을 직접 받으므로(stt._download) 필요 없다.
+    "av", "pyarrow", "hf_xet", "safetensors",
 ]
 
 a = Analysis(

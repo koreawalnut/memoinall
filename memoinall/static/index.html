@@ -95,6 +95,17 @@
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #0b0e14; font-weight: 600; }
   .btn.ghost { background: transparent; }
   .btn:disabled { opacity: .45; cursor: default; }
+  .btn.mic { align-self: stretch; display: inline-flex; align-items: center; justify-content: center;
+    padding: 0 9px; color: var(--dim); }
+  .btn.mic[data-state="idle"]:hover:not(:disabled) { color: var(--fg); }
+  /* 듣는 중: 테두리 고리가 목소리 크기(--lvl, 0~1)를 따라 커진다 — 소리가 들어가는지 바로 보인다. */
+  .btn.mic[data-state="recording"] { color: var(--danger); border-color: var(--danger);
+    box-shadow: 0 0 0 calc(1px + var(--lvl, 0) * 6px) color-mix(in srgb, var(--danger) 30%, transparent);
+    transition: box-shadow .08s linear; }
+  .capture.dictating { border-color: color-mix(in srgb, var(--danger) 55%, var(--line)); }
+  .mic-spin { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent;
+    border-radius: 50%; animation: ai-spin .8s linear infinite; }
+  @media (prefers-reduced-motion: reduce) { .mic-spin { animation-duration: 3s; } }
 
   .searchbar { display: flex; gap: 8px; margin: 18px 0 12px; }
   .searchbar input {
@@ -403,6 +414,8 @@
       </details>
       <div class="capture-bar">
         <span class="hint" id="captureHint">Ctrl+Enter 저장 · 형식은 신경 쓰지 마세요</span>
+        <button class="btn ghost mic" id="mic" type="button" disabled data-state="idle"
+          aria-label="음성으로 입력" title="음성으로 입력 — 누르고 말한 뒤 다시 누르세요"></button>
         <button class="btn primary" id="save" disabled>메모 저장</button>
       </div>
     </div>
@@ -581,6 +594,7 @@ async function restoreDraft() {
     $("#captureHint").textContent = "초안 연결 실패 · 작성 내용은 메모 저장으로 보관하세요";
   } finally {
     $("#capture").disabled = $("#save").disabled = false;
+    paintMic(mic.state);
     paintTagRows();
     $("#capture").focus();
   }
@@ -617,6 +631,309 @@ $("#capture").addEventListener("keydown", (e) => {
 });
 // 직접 #태그 를 쳐도 칩이 눌린 상태로 보여야 한다 — 본문이 원본이기 때문이다.
 $("#capture").addEventListener("input", captureChanged);
+
+// ---------------------------------------------------------------- 음성 입력
+// 🎤 를 누르면 듣기 시작하고, 말하는 대로 커서 위치에 글이 나타난다. 다시 누르면 끝.
+// 저장은 사용자가 한다 — 받아쓰기는 틀릴 수 있으니 확인할 기회가 있어야 한다.
+//
+// Whisper 는 스트리밍 모델이 아니라서 말을 '쉼' 단위 구간으로 끊는다.
+//   - 말하는 동안: 지금 구간을 1초쯤마다 빠르게 옮겨 초안으로 보여 준다
+//     (로컬 엔진만 — Gemini 는 호출마다 요금이 들어 쉼에서만 보낸다).
+//   - 0.7초 쉬면: 그 구간을 정확하게 다시 옮겨 확정하고 다음 구간을 시작한다.
+// 소리는 16kHz 로 직접 받아 구간마다 WAV 로 보낸다(서버에 오디오 디코더가 필요 없다).
+const MIC_RATE = 16000;
+const mic = {
+  state: "idle", max: 300, watch: null, timer: null, started: 0, stream: null, ctx: null, session: 0,
+  // 소리 판정(100ms RMS). voice 를 넘으면 말소리, dead 아래가 3초 이어지면 마이크에 소리가 안 들어오는 것.
+  voiceRms: 0.012, deadRms: 0.002, pauseMs: 700,
+  seg: [], segLen: 0, segVoiced: false, segId: 0, quietMs: 0, deadMs: 0, heard: false,
+  partials: true, partialBusy: false, lastPartial: 0, pending: 0, chain: Promise.resolve(),
+  committed: "", interim: "", error: "", before: "", at: 0, shown: 0, lead: "", tail: "",
+};
+// 오디오 스레드에서 1600 샘플(16kHz 기준 100ms)씩 모아 넘긴다.
+const MIC_TAP = `registerProcessor("mic-tap", class extends AudioWorkletProcessor {
+  constructor() { super(); this.buf = new Float32Array(1600); this.n = 0; }
+  process(inputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (ch) for (let i = 0; i < ch.length; i++) {
+      this.buf[this.n++] = ch[i];
+      if (this.n === this.buf.length) { this.port.postMessage(this.buf); this.buf = new Float32Array(1600); this.n = 0; }
+    }
+    return true;
+  }
+});`;
+const MIC_ICONS = {
+  idle: `<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"
+    stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>`,
+  recording: `<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/></svg>`,
+  busy: `<span class="mic-spin" aria-hidden="true"></span>`,
+};
+const MIC_LABELS = { idle: "음성으로 입력", recording: "받아쓰기 끝내기", busy: "받아쓰기 마무리하는 중" };
+const micSupported = !!(navigator.mediaDevices?.getUserMedia && window.AudioWorkletNode);
+const micClock = (ms) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+const micHint = (text) => { $("#captureHint").textContent = text; };
+
+function paintMic(next) {
+  mic.state = next;
+  const b = $("#mic");
+  b.hidden = !micSupported;
+  b.dataset.state = next;
+  b.innerHTML = MIC_ICONS[next];
+  b.setAttribute("aria-label", MIC_LABELS[next]);
+  b.title = next === "idle" ? "음성으로 입력 — 누르고 말하면 바로 글로 나타납니다" : MIC_LABELS[next];
+  b.disabled = next === "busy" || $("#capture").disabled;
+  b.style.setProperty("--lvl", "0");
+  // 받아쓰는 동안에는 글이 들어갈 자리가 흔들리지 않게 입력칸을 잠근다.
+  $("#capture").readOnly = next !== "idle";
+  document.querySelector(".capture").classList.toggle("dictating", next !== "idle");
+}
+
+function openSttSettings(ev) {
+  ev?.preventDefault();
+  goTab("settings").then(() => $("#sttPanel")?.scrollIntoView({ block: "start" }));
+}
+
+async function micClick() {
+  if (mic.state === "recording") return stopRecording();
+  if (mic.state !== "idle") return;
+  let info;
+  try { info = await api("/api/stt/status"); }
+  catch (e) { toast("음성 입력 상태를 확인하지 못했습니다: " + e.message); return; }
+  if (info.ready) { mic.max = info.max_seconds || 300; return startRecording(info); }
+  if (info.state === "needs_download") {
+    const m = info.local_models.find((x) => x.name === info.local_model);
+    if (!confirm(`음성 인식 모델(${m.name}, 약 ${m.size})을 처음 한 번 받아야 합니다.\n받는 동안에도 메모는 계속 쓸 수 있습니다. 지금 받을까요?`)) return;
+    try { await api("/api/stt/download", { method: "POST", body: { model: info.local_model } }); }
+    catch (e) { toast(e.message); return; }
+    return watchSttDownload();
+  }
+  if (info.state === "downloading") { micHint(info.message); return watchSttDownload(); }
+  // 키가 없거나 패키지가 없을 때 — 무엇을 하면 되는지 설정으로 바로 잇는다.
+  $("#captureHint").innerHTML = `${esc(info.message)} <a href="#" id="micSettings" style="color:var(--accent)">설정 열기</a>`;
+  $("#micSettings").onclick = openSttSettings;
+}
+
+// 모델 받는 진행률을 입력칸 안내와 설정 화면에 함께 보여 준다. 폴링은 하나만 돈다.
+let sttPanelPaint = null;  // 설정 화면이 열려 있으면 그 패널을 다시 그리는 함수
+function watchSttDownload() {
+  if (mic.watch) return;
+  const tick = async () => {
+    let s;
+    try { s = await api("/api/stt/status"); } catch { s = null; }
+    if (s && $("#sttPanel")) sttPanelPaint?.(s);
+    if (s?.download?.running) {
+      if (mic.state === "idle") micHint(`음성 인식 모델(${s.download.model}) 받는 중 ${s.download.percent}% · 메모는 계속 쓸 수 있습니다`);
+      mic.watch = setTimeout(tick, 1000);
+      return;
+    }
+    mic.watch = null;
+    if (!s) return;
+    if (s.download?.error) { micHint(s.download.error); toast(s.download.error); }
+    else if (s.ready) { micHint("음성 입력 준비 완료 — 🎤를 누르고 말하세요"); toast("음성 입력을 쓸 수 있습니다"); }
+  };
+  mic.watch = setTimeout(tick, 300);
+}
+
+const MIC_SILENT = "마이크에서 소리가 들어오지 않습니다 — 마이크 음소거, 또는 Windows 설정 → 개인 정보 → 마이크에서 '데스크톱 앱 액세스'가 켜져 있는지 확인하세요";
+
+// 16kHz 로 직접 받는다. 그 샘플레이트로 마이크를 못 잇는 환경이면 기본 레이트로 받아 줄인다.
+async function micGraph(stream) {
+  for (const opts of [{ sampleRate: MIC_RATE }, {}]) {
+    const ctx = new AudioContext(opts);
+    try {
+      const url = URL.createObjectURL(new Blob([MIC_TAP], { type: "text/javascript" }));
+      try { await ctx.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+      const node = new AudioWorkletNode(ctx, "mic-tap");
+      node.port.onmessage = (e) => micAudio(micResample(e.data, ctx.sampleRate));
+      ctx.createMediaStreamSource(stream).connect(node);
+      node.connect(ctx.destination);  // 출력은 무음이다. 그래프에 이어야 처리가 돈다.
+      if (ctx.state === "suspended") await ctx.resume();
+      return ctx;
+    } catch (e) {
+      ctx.close().catch(() => {});
+      if (!opts.sampleRate) throw e;
+    }
+  }
+}
+
+function micResample(x, from) {
+  if (from === MIC_RATE) return x;
+  const r = from / MIC_RATE, out = new Float32Array(Math.floor(x.length / r));
+  for (let i = 0; i < out.length; i++) {
+    const p = i * r, j = Math.floor(p), f = p - j;
+    out[i] = x[j] * (1 - f) + (x[j + 1] ?? x[j]) * f;
+  }
+  return out;
+}
+
+async function startRecording(info) {
+  let stream, ctx;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  } catch (e) {
+    toast({
+      NotFoundError: "마이크를 찾지 못했습니다 — 연결을 확인하세요",
+      NotAllowedError: "마이크 사용이 허용되지 않았습니다 — Windows 설정 → 개인 정보 → 마이크를 확인하세요",
+      NotReadableError: "다른 프로그램이 마이크를 쓰고 있습니다",
+    }[e.name] || `마이크를 열지 못했습니다: ${e.message}`);
+    return;
+  }
+  // 글이 들어갈 자리는 지금 커서다. 선택한 글이 있으면 받아쓴 말로 바뀐다(취소하면 되돌린다).
+  const ta = $("#capture");
+  const before = ta.value, start = ta.selectionStart ?? before.length, end = ta.selectionEnd ?? start;
+  Object.assign(mic, {
+    session: mic.session + 1, started: Date.now(), partials: info.engine === "local",
+    seg: [], segLen: 0, segVoiced: false, segId: 0, quietMs: 0, deadMs: 0, heard: false,
+    partialBusy: false, lastPartial: 0, pending: 0, chain: Promise.resolve(),
+    committed: "", interim: "", error: "", before, at: start, shown: 0,
+    lead: start > 0 && !/\s/.test(before[start - 1]) ? " " : "",
+    tail: end < before.length && !/\s/.test(before[end]) ? " " : "",
+  });
+  ta.setRangeText("", start, end, "start");
+  // 실제로 소리를 받기 시작한 뒤에 '듣는 중'으로 바꾼다 — 그 전에 말하면 앞부분이 빠진다.
+  paintMic("busy");
+  micHint("마이크 준비 중…");
+  try {
+    ctx = await micGraph(stream);
+  } catch (e) {
+    stream.getTracks().forEach((t) => t.stop());
+    ta.value = before;
+    paintMic("idle");
+    toast(`녹음을 시작하지 못했습니다: ${e.message}`);
+    return;
+  }
+  Object.assign(mic, { stream, ctx, started: Date.now() });
+  paintMic("recording");
+  api("/api/stt/prepare", { method: "POST" }).catch(() => {});  // 첫 말을 하는 동안 모델을 올려 둔다
+  const tick = () => {
+    const ms = Date.now() - mic.started;
+    if (ms >= mic.max * 1000) return stopRecording();
+    micHint(mic.deadMs >= 3000 ? `● ${MIC_SILENT}`
+      : `● 듣는 중 ${micClock(ms)} / ${micClock(mic.max * 1000)} · 말하는 대로 입력칸에 나타납니다 · 🎤 또는 Esc로 끝`);
+  };
+  tick();
+  mic.timer = setInterval(tick, 500);
+}
+
+// 100ms 마다 불린다. 소리 크기를 버튼 테두리로 보여 주고, 쉼을 찾아 구간을 끊는다.
+function micAudio(chunk) {
+  if (mic.state !== "recording") return;
+  let sum = 0;
+  for (let i = 0; i < chunk.length; i++) sum += chunk[i] * chunk[i];
+  const rms = Math.sqrt(sum / chunk.length), ms = (chunk.length / MIC_RATE) * 1000;
+  $("#mic").style.setProperty("--lvl", Math.min(1, rms / 0.12).toFixed(2));
+  mic.deadMs = rms < mic.deadRms ? mic.deadMs + ms : 0;
+  const voiced = rms > mic.voiceRms;
+  mic.seg.push(chunk);
+  mic.segLen += chunk.length;
+  if (voiced) { mic.segVoiced = mic.heard = true; mic.quietMs = 0; } else mic.quietMs += ms;
+  if (!mic.segVoiced) {
+    // 말이 시작되기 전 침묵은 0.5초만 남긴다 — 첫 음절이 잘리지 않을 만큼만.
+    while (mic.seg.length > 5) mic.segLen -= mic.seg.shift().length;
+    return;
+  }
+  const sec = mic.segLen / MIC_RATE;
+  // 쉼에서 확정한다. 쉬지 않고 길게 말하면 15초 뒤 잠깐 조용한 순간에, 그래도 없으면 25초에 끊는다.
+  if (mic.quietMs >= mic.pauseMs || (sec >= 15 && !voiced) || sec >= 25) micCommit();
+  else if (mic.partials && !mic.partialBusy && !mic.pending && sec >= 0.8 && Date.now() - mic.lastPartial >= 1000) micPartial();
+}
+
+function micTake() {
+  const pcm = new Float32Array(mic.segLen);
+  let at = 0;
+  for (const c of mic.seg) { pcm.set(c, at); at += c.length; }
+  return pcm;
+}
+
+function micSend(pcm, partial) {
+  return api(`/api/stt/transcribe${partial ? "?partial=1" : ""}`,
+    { method: "POST", headers: { "Content-Type": "audio/wav" }, rawBody: micWav(pcm) });
+}
+
+// 쉼에서 구간을 확정한다. 확정은 순서대로 하나씩 처리해야 글 순서가 섞이지 않는다.
+function micCommit() {
+  const pcm = micTake(), session = mic.session;
+  Object.assign(mic, { seg: [], segLen: 0, segVoiced: false, quietMs: 0, segId: mic.segId + 1 });
+  if (pcm.length < MIC_RATE * 0.6) return;  // 기침 같은 짧은 소리는 버린다
+  mic.pending++;
+  mic.chain = mic.chain.then(async () => {
+    let text = "";
+    try { text = (await micSend(pcm, false)).text; } catch (e) { if (session === mic.session) mic.error = e.message; }
+    if (session !== mic.session) return;  // 취소한 받아쓰기의 늦은 결과
+    if (text) mic.committed = mic.committed ? `${mic.committed} ${text}` : text;
+    mic.pending--;
+    mic.interim = "";
+    micShow();
+  });
+}
+
+// 말하는 도중의 초안. 확정이 진행 중이거나 그새 구간이 바뀌었으면 버린다.
+function micPartial() {
+  const pcm = micTake(), session = mic.session, segId = mic.segId;
+  Object.assign(mic, { partialBusy: true, lastPartial: Date.now() });
+  micSend(pcm, true).then((r) => {
+    if (session === mic.session && segId === mic.segId && !mic.pending && mic.state === "recording") {
+      mic.interim = r.text;
+      micShow();
+    }
+  }).catch(() => {}).finally(() => { if (session === mic.session) mic.partialBusy = false; });
+}
+
+// 이번 받아쓰기로 넣은 글(확정 + 초안)을 커서 자리에 다시 그린다.
+function micShow() {
+  const ta = $("#capture");
+  const body = [mic.committed, mic.interim].filter(Boolean).join(" ");
+  const text = body ? mic.lead + body + mic.tail : "";
+  ta.setRangeText(text, mic.at, mic.at + mic.shown, "end");
+  mic.shown = text.length;
+  if (mic.at + mic.shown >= ta.value.length - mic.tail.length) ta.scrollTop = ta.scrollHeight;
+}
+
+async function stopRecording(cancel = false) {
+  if (mic.state !== "recording") return;
+  clearInterval(mic.timer);
+  mic.stream.getTracks().forEach((t) => t.stop());
+  mic.ctx.close().catch(() => {});
+  const ta = $("#capture");
+  if (cancel) {
+    mic.session++;  // 아직 오고 있는 결과는 버린다
+    ta.value = mic.before;
+    ta.setSelectionRange(mic.at, mic.at);
+    paintMic("idle");
+    micHint("받아쓰기를 취소했습니다");
+    return;
+  }
+  paintMic("busy");
+  micHint("받아쓰기 마무리하는 중…");
+  if (mic.segVoiced) micCommit();
+  await mic.chain;
+  mic.interim = "";
+  micShow();
+  paintMic("idle");
+  ta.focus();
+  ta.setSelectionRange(mic.at + mic.shown, mic.at + mic.shown);
+  if (mic.committed) {
+    captureChanged();
+    toast(mic.error ? `일부를 옮기지 못했습니다: ${mic.error}` : "받아쓴 내용을 확인한 뒤 저장하세요");
+  } else if (mic.error) micHint(`음성 변환 실패: ${mic.error}`);
+  else if (!mic.heard) micHint(MIC_SILENT);
+  else micHint("말소리를 알아듣지 못했습니다 — 마이크에 가까이 대고 다시 말해 보세요");
+}
+
+function micWav(pcm) {
+  const n = pcm.length, view = new DataView(new ArrayBuffer(44 + n * 2));
+  const ascii = (at, s) => { for (let i = 0; i < s.length; i++) view.setUint8(at + i, s.charCodeAt(i)); };
+  ascii(0, "RIFF"); view.setUint32(4, 36 + n * 2, true); ascii(8, "WAVE");
+  ascii(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, MIC_RATE, true); view.setUint32(28, MIC_RATE * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  ascii(36, "data"); view.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 0x7fff, true);
+  return new Blob([view.buffer], { type: "audio/wav" });
+}
+
+paintMic("idle");
+$("#mic").onclick = micClick;
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && mic.state === "recording") stopRecording(); });
 
 let searchTimer;
 $("#q").addEventListener("input", (e) => {
@@ -2118,9 +2435,10 @@ async function renderSettings(version = renderVersion) {
       ${esc(x.label)} ${x.ready ? '<span style="color:var(--accent-2)">●</span>' : '<span style="opacity:.4">○</span>'}
     </button>`).join("");
 
-  const tg = await api("/api/tags");
+  const [tg, sttInfo] = await Promise.all([api("/api/tags"), api("/api/stt/status")]);
   if (version !== renderVersion) return;
   myTags = tg.items;
+  const sttModelText = (m) => `${m.label} · ${m.downloaded ? "받음" : `약 ${m.size}`}`;
 
   $("#view").innerHTML = `
     <div class="panel">
@@ -2206,6 +2524,45 @@ async function renderSettings(version = renderVersion) {
         <button class="btn primary" id="saveLlm">${active === cfg.provider ? "저장" : "저장하고 이 프로바이더 사용"}</button>
       </div>
       <div id="testOut" style="margin-top:10px"></div>
+    </div>
+
+    <div class="panel" id="sttPanel">
+      <h3>음성 입력 <span class="meta" id="sttState"></span></h3>
+      <div class="desc">
+        메모 입력칸의 🎤를 누르고 말한 뒤 다시 누르면 글로 옮겨 커서 위치에 넣습니다.
+        바로 저장하지 않으니 받아쓴 내용을 확인하고 저장하세요.
+      </div>
+      <div class="field">
+        <label for="sttEngine">변환 방식</label>
+        <select id="sttEngine">${sttInfo.engines.map((e) => `<option value="${e.value}"${e.value === sttInfo.engine ? " selected" : ""}>${
+          esc(e.value === "local" ? "로컬 Whisper (기본) — 음성이 PC 밖으로 나가지 않음" : "Gemini API — 음성이 Google 로 전송됨")}</option>`).join("")}</select>
+        <div class="note">${src("stt.engine")} 로컬은 인터넷 없이 동작합니다. Gemini 는 PC 가 느릴 때 빠르고, 사용량만큼 요금이 듭니다.</div>
+      </div>
+      <div class="field" data-stt-for="local">
+        <label for="sttLocalModel">Whisper 모델</label>
+        <select id="sttLocalModel">${sttInfo.local_models.map((m) =>
+          `<option value="${esc(m.name)}"${m.name === sttInfo.local_model ? " selected" : ""}>${esc(sttModelText(m))}</option>`).join("")}</select>
+        <div class="note" id="sttLocalNote"></div>
+      </div>
+      <div class="field" data-stt-for="gemini">
+        <label for="sttGeminiKey">Gemini API 키</label>
+        <input type="password" id="sttGeminiKey" placeholder="${s["llm.gemini.api_key"]?.configured
+          ? esc(s["llm.gemini.api_key"].value) + " — 바꾸려면 새로 입력" : "AIza… (Google AI Studio 에서 발급)"}" />
+        <div class="note">위 LLM 연결의 Gemini 와 같은 키를 씁니다. 여기서 넣어도 요약에 쓰는 AI 는 바뀌지 않습니다.</div>
+      </div>
+      <div class="field" data-stt-for="gemini">
+        <label for="sttGeminiModel">음성 인식 모델</label>
+        <input id="sttGeminiModel" list="sttGeminiList" value="${esc(sttInfo.gemini_model)}" />
+        <datalist id="sttGeminiList">${sttInfo.gemini_models.map((m) => `<option value="${esc(m)}">`).join("")}</datalist>
+        <div class="note">${src("stt.gemini.model")} flash 계열이 빠르고 저렴합니다. 목록에 없는 모델도 직접 입력할 수 있습니다.</div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <span class="spacer"></span>
+        <button class="btn" id="sttDownload" data-stt-for="local">모델 받기</button>
+        <button class="btn" id="sttTest" data-stt-for="gemini">연결 테스트</button>
+        <button class="btn primary" id="sttSave">저장</button>
+      </div>
+      <div id="sttOut" style="margin-top:10px"></div>
     </div>
 
     <div class="panel">
@@ -2312,6 +2669,66 @@ async function renderSettings(version = renderVersion) {
       base_url: $("#setBase") ? $("#setBase").value.trim() : "",
     } });
     $("#testOut").innerHTML = `<div class="status" style="color:${r.ok ? "var(--accent-2)" : "var(--danger)"}">${r.ok ? "✓" : "✗"} ${esc(r.message)}</div>`;
+  };
+
+  // 음성 입력 — 방식·모델을 바꾸면 저장 전에도 해당 항목과 안내를 바로 보여 준다.
+  let sttNow = sttInfo;
+  const sttPaint = (info = sttNow) => {
+    sttNow = info;
+    const engine = $("#sttEngine").value;
+    document.querySelectorAll("#sttPanel [data-stt-for]").forEach((el) => { el.hidden = el.dataset.sttFor !== engine; });
+    [...$("#sttLocalModel").options].forEach((o) => {
+      const m = info.local_models.find((x) => x.name === o.value);
+      if (m) o.textContent = sttModelText(m);
+    });
+    const chosen = info.local_models.find((m) => m.name === $("#sttLocalModel").value);
+    const job = info.download;
+    const failed = job.error && job.model === chosen.name ? ` <span style="color:var(--danger)">${esc(job.error)}</span>` : "";
+    $("#sttLocalNote").innerHTML = !info.local_package
+      ? `<span style="color:var(--danger)">faster-whisper 패키지가 없어 로컬 음성 인식을 쓸 수 없습니다.</span> <code>pip install faster-whisper</code>`
+      : job.running && job.model === chosen.name ? `받는 중 ${job.percent}% · 다른 화면으로 가도 계속 받습니다.`
+      : chosen.downloaded ? `받아 둔 모델입니다 — <code>${esc(info.models_dir)}</code>`
+      : `처음 한 번 약 ${esc(chosen.size)}를 받습니다.${failed}`;
+    $("#sttLocalNote").insertAdjacentHTML("beforeend", "<br/>small 은 빠르고, large-v3-turbo 는 더 정확하지만 3~4배 느립니다.");
+    $("#sttDownload").hidden = engine !== "local" || !info.local_package || chosen.downloaded;
+    $("#sttDownload").disabled = job.running;
+    // 제목은 저장된 설정 기준이다 — LLM 연결 제목과 같은 모양으로 무엇을 쓰는지 보여 준다.
+    $("#sttState").textContent = info.ready
+      ? `● ${info.engine === "gemini" ? `Gemini ${info.gemini_model}` : `로컬 Whisper ${info.local_model}`} 사용 중`
+      : "○ 준비 필요";
+  };
+  sttPanelPaint = sttPaint;
+  sttPaint();
+  if (sttInfo.download.running) watchSttDownload();
+  $("#sttEngine").onchange = $("#sttLocalModel").onchange = () => sttPaint();
+  const sttValues = () => {
+    const values = {
+      "stt.engine": $("#sttEngine").value,
+      "stt.local.model": $("#sttLocalModel").value,
+      "stt.gemini.model": $("#sttGeminiModel").value.trim(),
+    };
+    const key = $("#sttGeminiKey").value.trim();
+    if (key) values["llm.gemini.api_key"] = key;
+    return values;
+  };
+  const sttFail = (err) => { $("#sttOut").innerHTML = `<div class="status" style="color:var(--danger)">${esc(err.message)}</div>`; };
+  $("#sttSave").onclick = () => save(sttValues(), "음성 입력 설정을 저장했습니다").catch(sttFail);
+  $("#sttDownload").onclick = async () => {
+    try {
+      // 받을 모델이 곧 쓸 모델이다 — 선택도 함께 저장해 두 번 누르지 않게 한다.
+      await api("/api/settings", { method: "PUT", body: { values: sttValues() } });
+      sttPaint(await api("/api/stt/download", { method: "POST", body: { model: $("#sttLocalModel").value } }));
+      watchSttDownload();
+    } catch (err) { sttFail(err); }
+  };
+  $("#sttTest").onclick = async () => {
+    $("#sttOut").innerHTML = `<div class="status">테스트 중…</div>`;
+    try {
+      const r = await api("/api/settings/test", { method: "POST", body: {
+        provider: "gemini", api_key: $("#sttGeminiKey").value.trim(), model: $("#sttGeminiModel").value.trim(),
+      } });
+      $("#sttOut").innerHTML = `<div class="status" style="color:${r.ok ? "var(--accent-2)" : "var(--danger)"}">${r.ok ? "✓" : "✗"} ${esc(r.message)}</div>`;
+    } catch (err) { sttFail(err); }
   };
 
   const st = await api("/api/stats");

@@ -17,3 +17,7 @@ sentence-transformers>=2.5
 #   ChatGPT · Gemini · Ollama  → openai  (Gemini/Ollama 는 OpenAI 호환 엔드포인트로 접속)
 anthropic>=0.40
 openai>=1.40
+
+# 선택: 음성 입력(로컬 Whisper). 없으면 설정에서 Gemini 음성 인식만 쓸 수 있습니다.
+# 모델(small 약 0.5GB)은 처음 쓸 때 받습니다.
+faster-whisper>=1.2,<2

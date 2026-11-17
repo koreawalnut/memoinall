@@ -218,6 +218,30 @@ class OpenAICompatProvider:
         messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": user}]
         return self._extract(self._invoke(self._build(messages, max_tokens, None, fmt)))
 
+    def transcribe(self, wav: bytes, instruction: str, *, max_tokens: int = 4096) -> str:
+        """음성(WAV)을 글로 옮긴다. Gemini 의 OpenAI 호환 엔드포인트는 input_audio 를 받는다.
+
+        받아쓰기에 추론은 필요 없고 느려지기만 해서 추론을 끈다('none').
+        끌 수 없는 모델이면 기존 재시도 로직이 reasoning_effort 를 빼고 다시 보낸다.
+        """
+        import base64
+
+        content = [
+            {"type": "text", "text": instruction},
+            {"type": "input_audio", "input_audio": {"data": base64.b64encode(wav).decode("ascii"), "format": "wav"}},
+        ]
+        response = self._invoke(self._build([{"role": "user", "content": content}], max_tokens, "none"))
+        choice = response.choices[0]
+        # 말소리가 없으면 빈 답이 정상이다 — '빈 응답' 오류로 다루지 않는다.
+        if (
+            not (choice.message.content or "").strip()
+            and getattr(choice, "finish_reason", None) == "stop"
+            and not getattr(choice.message, "refusal", None)
+            and not _reasoning_of(choice.message)
+        ):
+            return ""
+        return self._extract(response)
+
     def test_connection(self) -> dict:
         messages = [{"role": "user", "content": "연결 확인. '확인'이라고만 답하세요."}]
         # 추론 모델은 32토큰으로는 본문을 못 낸다. 넉넉히 주되, 그래도 비면

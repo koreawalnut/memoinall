@@ -34,6 +34,11 @@ def _build_schema() -> dict[str, Entry]:
         "llm.max_tokens": ("MEMOINALL_LLM_MAX_TOKENS", "8000", False),
         "gen.budget_tokens": ("MEMOINALL_GEN_BUDGET", "6000", False),
         "gen.query_count": ("MEMOINALL_GEN_QUERIES", "3", False),
+        # 음성 입력. 기본은 로컬 Whisper — 음성이 PC 밖으로 나가지 않는다.
+        # Gemini 를 고르면 키는 llm.gemini.api_key 를 같이 쓴다(같은 키를 두 번 넣지 않게).
+        "stt.engine": ("MEMOINALL_STT_ENGINE", "local", False),
+        "stt.local.model": ("MEMOINALL_STT_MODEL", "small", False),
+        "stt.gemini.model": (None, "gemini-2.5-flash", False),
         # Redmine 가져오기 — 주소/키는 매번 입력하지 않도록 저장한다.
         "import.redmine.url": ("REDMINE_URL", "", False),
         "import.redmine.api_key": ("REDMINE_API_KEY", "", True),

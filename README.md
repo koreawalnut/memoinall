@@ -47,6 +47,14 @@ AI 호출은 이 버튼을 눌렀을 때만 실행됩니다.
 미리보기에서 변경 건수를 확인한 뒤 적용하며, 주소 연결은 수동 새로고침으로 갱신합니다.
 외부 일정은 할 일과 구분해 표시하는 읽기 전용 연동입니다. [가져오기 방법과 범위](docs/todos.md#네이버구글-등-외부-캘린더-가져오기)
 
+**음성 입력**은 메모 저장 옆의 🎤를 누르고 말하면 됩니다. 말하는 대로 커서 위치에 글이 나타나고
+(말하는 중엔 초안, 잠깐 쉬면 그 문장이 확정됩니다), 🎤를 다시 누르거나 `Esc`를 누르면 끝납니다. 버튼 테두리가 목소리 크기를 따라
+커져 소리가 들어가는지 바로 보입니다. 받아쓴 글은 그대로 남고, 저장은 내용을 확인한 뒤 직접 합니다. 한 번에 5분까지 받아쓸 수 있습니다.
+기본은 **로컬 Whisper**라 음성이 PC 밖으로 나가지 않습니다. 처음 쓸 때 모델(small 약 0.5GB)을 받아
+`~/.memoinall/models/whisper`에 둡니다. **더 보기 → 설정 → 음성 입력**에서 정확도 우선 모델(large-v3-turbo, 약 1.6GB)이나
+**Gemini API**로 바꿀 수 있습니다. Gemini를 쓰면 음성이 Google로 전송되며, 키는 LLM 연결의 Gemini 키를 같이 씁니다.
+Gemini는 호출마다 요금이 들어 말하는 중 초안 없이 쉼마다 문장 단위로 나타납니다.
+
 작성 중인 내용은 초안으로 자동 보관됩니다. **메모 선택**을 누르면 체크박스가 나타나고,
 고른 메모로 **AI로 정리** 또는 **공유·인수인계**를 실행할 수 있습니다.
 목록은 40건씩 이동합니다. 작성일은 **상세 검색**에서 지정하고 태그·사람 조건도 함께 적용할 수 있습니다.
@@ -95,7 +103,7 @@ python build_installer.py --skip-app-build # 이미 검증한 dist/memoinall을 
 **설치 없이 쓰려면 단일 exe도 지원합니다.** 다음 명령으로 만듭니다.
 
 ```bash
-python build_exe.py           # dist/memoinall.exe 생성 (약 60MB)
+python build_exe.py           # dist/memoinall.exe 생성 (약 90MB, 로컬 음성 인식 제외 시 약 60MB)
 python build_exe.py --check   # 빌드 환경 확인만 실행
 python build_exe.py --onedir  # 빠른 실행용 dist/memoinall/memoinall.exe
 ```
@@ -132,6 +140,11 @@ python run.py                 # 웹 서버 (http://127.0.0.1:8787)
 **두 백엔드는 가중치가 같아서 벡터가 완전히 동일합니다** — 코사인 유사도 1.0,
 최대 오차 1.2e-7(float32 반올림), 검색 순위 동일. 그래서 웹으로 쓰다가 exe 로 바꿔도
 **이미 만들어둔 임베딩을 그대로 씁니다** (재색인 불필요).
+
+로컬 음성 입력(faster-whisper)을 넣으면 추론 엔진 ctranslate2 때문에 exe 가 약 30MB 늘어납니다(60MB → 91MB).
+faster-whisper 가 끌어오는 PyAV(ffmpeg, 68MB)·pyarrow(85MB)는 이 앱에서 쓰지 않아 뺐고,
+Whisper 모델도 exe 에 넣지 않고 처음 쓸 때 받습니다. 빌드 환경에 faster-whisper 가 없으면
+이전 크기로 만들어지며, 음성 입력은 Gemini 로만 쓸 수 있습니다.
 
 모델은 `exe` 가 아니라 사용자 폴더에 있으므로, exe 를 새 버전으로 바꿔도 다시 받지 않습니다.
 받는 동안에도 앱은 쓸 수 있고(해시 임베더로 동작), 사이드바에 진행률이 표시됩니다.
@@ -434,6 +447,8 @@ curl "http://127.0.0.1:8787/api/context.txt?q=결제+이슈&budget=3000"
 | `REDMINE_API_KEY` | — | Redmine API 키 |
 | `MEMOINALL_LLM_MODEL` | 프로바이더별 | 더 보기 → 설정에서 프로바이더별로 지정합니다 |
 | `MEMOINALL_LLM_EFFORT` | `high` | `none`~`max`. `none` 은 추론 끄기 |
+| `MEMOINALL_STT_ENGINE` | `local` | 음성 입력 방식. `local`(로컬 Whisper) / `gemini` |
+| `MEMOINALL_STT_MODEL` | `small` | 로컬 Whisper 모델. `small` / `large-v3-turbo` |
 
 모델을 바꾸면 청크에 기록된 모델명이 달라져 **자동으로 재임베딩**됩니다.
 
@@ -473,6 +488,7 @@ memoinall/
   llm.py         프로바이더 선택 + 앱 수준 프롬프트
   providers/     Claude(네이티브) · OpenAI호환(ChatGPT/Gemini/Ollama)
   embed_onnx.py  ONNX 임베더 (torch 불필요 — exe 패키징의 핵심)
+  stt.py         음성 입력: 로컬 Whisper(faster-whisper) · Gemini, 모델 받기
   desktop.py     네이티브 창 + 내부 서버 (pywebview)
   api.py         FastAPI 라우트
   cli.py         CLI
