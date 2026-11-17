@@ -267,6 +267,9 @@ function renderAllMemos() { renderTagChips(); renderMemos(); }
 
 // ---- 새 메모
 const capture = $("#capture");
+// 음성 입력은 휴대폰 키보드의 받아쓰기를 그대로 쓴다. 빈 칸일 때 그 사실을 알려 준다.
+const VOICE_HINT = "키보드의 🎤로 말해서 입력할 수 있어요";
+const draftNote = (text) => { $("#draftNote").textContent = text || VOICE_HINT; };
 function captureChanged() {
   $("#saveMemo").disabled = !capture.value.trim();
   capture.style.height = "auto";
@@ -278,7 +281,7 @@ capture.addEventListener("input", () => {
   clearTimeout(draftTimer);
   draftTimer = setTimeout(() => {
     local.set("memoinall.draft", capture.value.trim() ? capture.value : null);
-    $("#draftNote").textContent = capture.value.trim() ? "작성 중인 내용은 자동 보관됩니다" : "";
+    draftNote(capture.value.trim() ? "작성 중인 내용은 자동 보관됩니다" : "");
   }, 400);
 });
 capture.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveCapture(); } });
@@ -295,7 +298,7 @@ async function saveCapture() {
     capture.value = "";
     clearTimeout(draftTimer);
     local.set("memoinall.draft", null);
-    $("#draftNote").textContent = "";
+    draftNote("");
     captureChanged();
     renderAllMemos();
     toast("저장했습니다");
@@ -1150,7 +1153,8 @@ async function init() {
   }
   sortMemos();
   const draft = local.get("memoinall.draft");
-  if (draft) { capture.value = draft; $("#draftNote").textContent = "작성 중이던 내용을 되살렸습니다"; }
+  if (draft) capture.value = draft;
+  draftNote(draft ? "작성 중이던 내용을 되살렸습니다" : "");
   captureChanged();
   renderAllMemos();
   paintOnline();

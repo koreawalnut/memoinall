@@ -147,6 +147,7 @@ def main():
         print("OK install banner: one-tap install where the browser allows it, Safari and in-app-browser instructions, stays closed once closed")
 
         # ---------------------------------------------------------- 메모
+        expect(page.locator("#draftNote")).to_have_text("키보드의 🎤로 말해서 입력할 수 있어요")   # 빈 칸일 때 음성 입력 안내
         capture.fill("내일 오후 3시 결제 시스템 점검 회의 #회의 #결제\n자료는 김과장이 준비")
         expect(page.locator("#draftNote")).to_contain_text("자동 보관")
         page.reload()
@@ -155,6 +156,7 @@ def main():
         page.locator("#saveMemo").click()
         toast("저장했습니다")
         expect(capture).to_have_value("")
+        expect(page.locator("#draftNote")).to_contain_text("🎤")
         capture.fill("금요일까지 보고서 보내기 #보고서")
         capture.press("Control+Enter")
         capture.fill("서버 로그 확인하기")
@@ -171,7 +173,8 @@ def main():
         expect(memos).to_have_count(1)
         page.locator('#tagChips [data-tag="보고서"]').click()
         expect(memos).to_have_count(3)
-        print("OK memos: draft survives reload, #tags become chips, search needs every word, tag filter toggles")
+        print("OK memos: keyboard-mic hint on an empty box, draft survives reload, #tags become chips, "
+              "search needs every word, tag filter toggles")
 
         memos.filter(has_text="서버 로그").click()
         dlg = page.locator("#memoDlg")
