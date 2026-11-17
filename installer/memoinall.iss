@@ -1,6 +1,6 @@
 ; Build with python build_installer.py. Keep AppId stable across upgrades.
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "0.1.1"
 #endif
 #ifndef AppSource
   #define AppSource "..\dist\memoinall"
@@ -25,7 +25,8 @@ SolidCompression=yes
 WizardStyle=modern
 DisableWelcomePage=no
 SetupLogging=yes
-CloseApplications=no
+; Offer to close applications holding the old executable before replacing it.
+CloseApplications=yes
 RestartApplications=no
 
 [Languages]

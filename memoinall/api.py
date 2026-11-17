@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from . import (
+    __version__,
     config,
     ai_history,
     collection_analysis,
@@ -37,6 +38,11 @@ from . import (
     settings,
     store,
     tags,
+    todos,
+    calendar_import,
+    schedule_tags,
+    schedule_share,
+    todo_ai,
     workflows,
 )
 
@@ -48,6 +54,7 @@ def _prepare_search() -> None:
     started = time.monotonic()
     try:
         store.backfill_source_tags()
+        todos.refresh_pending()
         embed.ensure_loaded_async()
         count = store.reindex_pending()
         log.info("검색 준비: 재색인 %d건 예약 (%.3fs)", count, time.monotonic() - started)
@@ -87,7 +94,7 @@ async def lifespan(app: FastAPI):
         db.close()
 
 
-app = FastAPI(title="memoinall", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="memoinall", version=__version__, lifespan=lifespan)
 
 
 @app.get("/api/health")
@@ -330,14 +337,137 @@ def adopt_tags(payload: dict = Body(...)):
 
 
 @app.get("/api/todos")
-def get_todos(limit: int = 100):
-    return {"items": store.open_todos(limit)}
+def get_todos(limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
+              view: str = "all", today: str | None = None, tag: str | None = None):
+    try:
+        return {**todos.board(limit=limit, offset=offset, view=view, today=today, tag=tag), "ai": todo_ai.availability()}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.patch("/api/todos/{todo_id}")
 def patch_todo(todo_id: int, payload: dict = Body(...)):
-    store.toggle_todo(todo_id, bool(payload.get("done")))
-    return {"ok": True}
+    try:
+        return {"ok": True, "item": todos.update(todo_id, payload)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(404, str(exc.args[0])) from exc
+
+
+@app.post("/api/todos")
+def create_todo(payload: dict = Body(...)):
+    try:
+        return {"ok": True, "item": todos.create(payload)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/todos/calendar")
+def get_todo_calendar(month: str, selected: str | None = None, today: str | None = None,
+                      limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0), tag: str | None = None):
+    try:
+        return {**todos.calendar_view(month=month, selected=selected, today=today, limit=limit, offset=offset, tag=tag),
+                "ai": todo_ai.availability()}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+def _calendar_request(operation, *args):
+    try:
+        return operation(*args)
+    except calendar_import.Conflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(404, str(exc.args[0])) from exc
+
+
+@app.get("/api/schedule/tags")
+def schedule_tag_choices():
+    return {"items": schedule_tags.choices()}
+
+
+@app.patch("/api/schedule/items/{item_id}/tags")
+def update_schedule_tags(item_id: str, payload: dict = Body(...)):
+    return _calendar_request(schedule_tags.update, item_id, payload)
+
+
+@app.post("/api/schedule/share/preview")
+def preview_schedule_share(payload: dict = Body(...)):
+    return _calendar_request(schedule_share.preview, payload)
+
+
+@app.post("/api/schedule/share/{plan_id}/export")
+def export_schedule_share(plan_id: str, payload: dict = Body(...)):
+    return _calendar_request(schedule_share.export, plan_id, payload.get("selected"))
+
+
+@app.get("/api/calendars")
+def get_calendars():
+    return {"items": calendar_import.sources()}
+
+
+@app.post("/api/calendars/preview")
+async def preview_calendar(request: Request):
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > calendar_import.MAX_BYTES * 3 + 10000:
+            raise HTTPException(413, "일정 파일은 2MB 이하만 가져올 수 있습니다.")
+    try:
+        payload = json.loads(body)
+        if not isinstance(payload, dict):
+            raise ValueError
+    except (ValueError, UnicodeError):
+        raise HTTPException(400, "가져올 캘린더 정보를 확인해 주세요.") from None
+    return await run_in_threadpool(_calendar_request, calendar_import.preview, payload)
+
+
+@app.post("/api/calendars/plans/{plan_id}/apply")
+def apply_calendar(plan_id: str):
+    return _calendar_request(calendar_import.apply, plan_id)
+
+
+@app.post("/api/calendars/{source_id}/preview")
+def refresh_calendar(source_id: int, payload: dict = Body(default={})):
+    return _calendar_request(calendar_import.refresh_preview, source_id, payload)
+
+
+@app.delete("/api/calendars/{source_id}")
+def disconnect_calendar(source_id: int):
+    return _calendar_request(calendar_import.disconnect, source_id)
+
+
+def _todo_ai_request(operation, *args, **kwargs):
+    try:
+        return operation(*args, **kwargs)
+    except todo_ai.Conflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(404, str(exc.args[0])) from exc
+    except providers.Unavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except providers.ProviderError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+
+@app.post("/api/todos/ai/preview")
+def preview_todo_ai(payload: dict = Body(...)):
+    return _todo_ai_request(todo_ai.preview, days=payload.get("days", 30), today=payload.get("today"))
+
+
+@app.post("/api/todos/ai/{plan_id}/apply")
+def apply_todo_ai(plan_id: str, payload: dict = Body(...)):
+    return _todo_ai_request(todo_ai.apply, plan_id, payload.get("selected"))
+
+
+@app.post("/api/todos/ai/{plan_id}/undo")
+def undo_todo_ai(plan_id: str):
+    return _todo_ai_request(todo_ai.undo, plan_id)
 
 
 # --------------------------------------------------------------------------- 가져오기

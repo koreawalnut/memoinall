@@ -23,7 +23,7 @@ DIST = ROOT / "dist"
 BUILD = ROOT / "build"
 
 REQUIRED = ["webview", "onnxruntime", "tokenizers", "fastapi", "uvicorn", "numpy",
-            "pypdf", "openpyxl", "xlrd", "olefile", "defusedxml"]
+            "pypdf", "openpyxl", "xlrd", "olefile", "defusedxml", "icalendar", "recurring_ical_events", "tzdata"]
 OPTIONAL = ["anthropic", "openai"]
 
 
@@ -55,7 +55,7 @@ def check() -> bool:
     if missing:
         print("현재 Python:", sys.executable)
         print("필수 패키지가 없습니다:", ", ".join(missing))
-        print("  python -X utf8 -m pip install pywebview onnxruntime tokenizers fastapi uvicorn numpy -r requirements-documents.txt")
+        print("  python -X utf8 -m pip install pywebview onnxruntime tokenizers fastapi uvicorn numpy icalendar recurring-ical-events tzdata -r requirements-documents.txt")
         return False
     for m in OPTIONAL:
         state = "포함" if importlib.util.find_spec(m) else "없음(해당 프로바이더 비활성)"

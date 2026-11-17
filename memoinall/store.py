@@ -11,7 +11,7 @@ import queue
 import threading
 from datetime import datetime
 
-from . import config, db, embed, extract, settings, textutil
+from . import config, db, embed, extract, settings, textutil, todos
 from .source_tags import SOURCE_TAGS, append_source_tag
 
 log = logging.getLogger(__name__)
@@ -127,6 +127,7 @@ def content_uids() -> dict[str, int]:
 
 def _index_body(conn, memo_id: int, body: str) -> None:
     """원문을 바꾸는 트랜잭션 안에서 검색과 태그도 즉시 반영한다."""
+    conn.execute("UPDATE memos SET todo_version=0 WHERE id=?", (memo_id,))
     conn.execute("DELETE FROM memo_fts WHERE rowid=?", (memo_id,))
     conn.execute("INSERT INTO memo_fts(rowid, grams, raw) VALUES(?,?,?)",
                  (memo_id, textutil.ngram_index_text(body), textutil.normalize(body).lower()))
@@ -197,7 +198,7 @@ def correct_import_times(memo_id: int, changes: dict, *, dry_run: bool, enqueue_
         if dry_run:
             return True
         fields = ",".join(f"{key}=?" for key in updates)
-        conn.execute(f"UPDATE memos SET {fields},enriched_at=NULL WHERE id=?", (*updates.values(), memo_id))
+        conn.execute(f"UPDATE memos SET {fields},enriched_at=NULL,todo_version=0 WHERE id=?", (*updates.values(), memo_id))
         _remember_import_alias(conn, memo_id, row["created_at"], row["body"],
                                updates.get("created_at", row["created_at"]), row["body"])
     if enqueue_enrich:
@@ -253,7 +254,7 @@ def set_flag(memo_id: int, *, pinned: bool | None = None, archived: bool | None 
 
 
 def toggle_todo(todo_id: int, done: bool) -> None:
-    db.execute("UPDATE todos SET done=? WHERE id=?", (1 if done else 0, todo_id))
+    todos.update(todo_id, {"done": done})
 
 
 def _index_fts(memo_id: int, body: str) -> None:
@@ -274,7 +275,8 @@ def get_memo(memo_id: int, *, with_facets: bool = True) -> dict:
     memo = dict(row)
     if with_facets:
         memo["facets"] = facets_of(memo_id)
-        memo["todos"] = [dict(r) for r in db.query("SELECT * FROM todos WHERE memo_id=? ORDER BY id", (memo_id,))]
+        memo["todos"] = [todos.public(dict(r)) for r in db.query(
+            "SELECT * FROM todos WHERE memo_id=? AND active=1 AND status!='dismissed' ORDER BY id", (memo_id,))]
     return memo
 
 
@@ -340,7 +342,8 @@ def stats() -> dict:
     chunks = db.one("SELECT COUNT(*) c FROM chunks")["c"]
     embedded = db.one("SELECT COUNT(*) c FROM chunks WHERE embedding IS NOT NULL")["c"]
     pending = db.one("SELECT COUNT(*) c FROM memos WHERE enriched_at IS NULL AND archived=0")["c"]
-    open_todos = db.one("SELECT COUNT(*) c FROM todos WHERE done=0")["c"]
+    open_todos = db.one("SELECT COUNT(*) c FROM todos t JOIN memos m ON m.id=t.memo_id "
+                        "WHERE t.active=1 AND t.status IN ('open','waiting') AND m.archived=0")["c"]
     # DB 에 실제로 들어있는 임베딩 모델. 현재 프로세스의 임베더와 다를 수 있어서
     # (모델을 아직 안 올린 명령 등) 둘 다 보여줘야 오해가 없다.
     stored = [
@@ -371,13 +374,7 @@ def top_facets(kind: str, limit: int = 30) -> list[dict]:
 
 
 def open_todos(limit: int = 100) -> list[dict]:
-    rows = db.query(
-        "SELECT t.*, m.title AS memo_title FROM todos t JOIN memos m ON m.id=t.memo_id "
-        "WHERE t.done=0 AND m.archived=0 "
-        "ORDER BY (t.due IS NULL), t.due, t.id DESC LIMIT ?",
-        (limit,),
-    )
-    return [dict(r) for r in rows]
+    return todos.board(limit=limit)["items"]
 
 
 # --------------------------------------------------------------------------- 파생물
@@ -404,19 +401,13 @@ def enrich(memo_id: int) -> bool:
         # SELECT 는 sqlite3 의 암시적 트랜잭션을 시작하지 않는다. 먼저 쓰기 잠금을
         # 잡아야 존재 확인과 파생물 교체 사이에 다른 스레드가 메모를 지우지 못한다.
         conn.execute("BEGIN IMMEDIATE")
-        still_there = conn.execute("SELECT body FROM memos WHERE id=?", (memo_id,)).fetchone()
-        if still_there is None or still_there["body"] != body:
+        still_there = conn.execute("SELECT body,created_at FROM memos WHERE id=?", (memo_id,)).fetchone()
+        if still_there is None or still_there["body"] != body or still_there["created_at"] != row["created_at"]:
             return False  # 삭제됐거나 그 사이 또 수정됨 — 뒤따르는 작업이 처리한다
 
-        # 파생물은 지웠다 다시 만든다. 단, 사용자가 UI 에서 체크한 완료 상태는
-        # 원문에 없는 정보라 재생성으로 날아가면 안 된다 — 본문 기준으로 살려둔다.
-        prev_done = {
-            r["text"]
-            for r in conn.execute("SELECT text FROM todos WHERE memo_id=? AND done=1", (memo_id,))
-        }
+        # 할 일은 고정 ID와 사용자 결정을 유지하고 추출 결과만 갱신한다.
         conn.execute("DELETE FROM chunks WHERE memo_id=?", (memo_id,))
         conn.execute("DELETE FROM facets WHERE memo_id=?", (memo_id,))
-        conn.execute("DELETE FROM todos WHERE memo_id=?", (memo_id,))
 
         for seq, (text, vec) in enumerate(zip(pieces, vectors)):
             conn.execute(
@@ -429,13 +420,7 @@ def enrich(memo_id: int) -> bool:
                     "INSERT OR IGNORE INTO facets(memo_id, kind, value) VALUES(?,?,?)",
                     (memo_id, kind, value[:500]),
                 )
-        for todo in facets["todos"]:
-            text = todo["text"][:500]
-            done = todo["done"] or text in prev_done
-            conn.execute(
-                "INSERT INTO todos(memo_id, text, done, due, created_at) VALUES(?,?,?,?,?)",
-                (memo_id, text, 1 if done else 0, todo.get("due"), row["created_at"]),
-            )
+        todos.sync(conn, dict(row))
         conn.execute("UPDATE memos SET enriched_at=? WHERE id=?", (now_iso(), memo_id))
 
     _search_cache.invalidate()

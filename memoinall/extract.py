@@ -112,7 +112,6 @@ def extract(text: str, created_at: datetime) -> dict:
     links = _uniq(URL_RE.findall(text))
     dates = extract_dates(text, created_at)
 
-    todos: list[dict] = []
     decisions: list[str] = []
     questions: list[str] = []
 
@@ -123,12 +122,10 @@ def extract(text: str, created_at: datetime) -> dict:
 
         mark = TODO_MARK_RE.match(line)
         if mark:
-            todos.append({"text": _clean(mark.group(2)), "done": mark.group(1).lower() == "x"})
             continue
 
         kw = TODO_KEYWORD_RE.match(line)
         if kw:
-            todos.append({"text": _clean(kw.group(1)), "done": False})
             continue
 
         dec = DECISION_RE.match(line)
@@ -146,15 +143,12 @@ def extract(text: str, created_at: datetime) -> dict:
                 questions.append(body)
                 continue
             core = TAIL_NOISE_RE.sub("", body)  # 앵커 판정용 (저장은 원문 그대로)
-            if _ends_with_action(core):
-                todos.append({"text": body, "done": False})
-            elif DECISION_TAIL_RE.search(body):
+            if not _ends_with_action(core) and DECISION_TAIL_RE.search(body):
                 decisions.append(body)
 
-    # 할일에 날짜가 붙어 있으면 마감으로 본다
-    for todo in todos:
-        due = extract_dates(todo["text"], created_at)
-        todo["due"] = due[0] if due else None
+    # 행동과 날짜의 역할은 별도로 판별한다. 문장 속 첫 날짜는 마감이 아니다.
+    from .todo_extract import extract_todos
+    todos = extract_todos(text, created_at)
 
     return {
         "tag": tags,

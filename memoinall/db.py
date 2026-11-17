@@ -1,7 +1,7 @@
 """SQLite 스키마와 커넥션 관리.
 
 - 메모 원문은 memos 에 그대로 둔다(원본 불변).
-- 파생물(청크/임베딩/태그/할일)은 언제든 재생성 가능한 캐시로 취급한다.
+- 추출 결과는 재생성 가능하다. 할 일의 고정 ID와 사용자 결정은 보존한다.
 """
 
 from __future__ import annotations
@@ -68,6 +68,52 @@ CREATE TABLE IF NOT EXISTS todos (
 );
 CREATE INDEX IF NOT EXISTS idx_todos_memo ON todos(memo_id);
 CREATE INDEX IF NOT EXISTS idx_todos_done ON todos(done);
+
+CREATE TABLE IF NOT EXISTS todo_ai_plans (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    data_json TEXT NOT NULL,
+    applied_json TEXT,
+    undone INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS calendar_sources (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    kind TEXT NOT NULL,
+    url TEXT NOT NULL DEFAULT '',
+    range_start TEXT NOT NULL,
+    range_end TEXT NOT NULL,
+    timezone TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS calendar_events (
+    source_id INTEGER NOT NULL REFERENCES calendar_sources(id) ON DELETE CASCADE,
+    event_key TEXT NOT NULL,
+    start_day TEXT NOT NULL,
+    end_day TEXT NOT NULL,
+    data_json TEXT NOT NULL,
+    PRIMARY KEY(source_id,event_key)
+);
+CREATE INDEX IF NOT EXISTS idx_calendar_events_dates ON calendar_events(start_day,end_day);
+CREATE TABLE IF NOT EXISTS calendar_event_tags (
+    source_id INTEGER NOT NULL REFERENCES calendar_sources(id) ON DELETE CASCADE,
+    event_key TEXT NOT NULL,
+    tags_json TEXT NOT NULL,
+    PRIMARY KEY(source_id,event_key)
+);
+CREATE TABLE IF NOT EXISTS schedule_share_plans (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    data_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS calendar_import_plans (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    data_json TEXT NOT NULL,
+    applied_json TEXT
+);
 
 -- 직접 정해 둔 태그 목록. facets 의 'tag' 는 본문에서 뽑아낸 결과라 무엇이든 들어오지만,
 -- 이건 '쓰기로 정한' 태그다. 적을 때 골라 넣고, 조회·내보내기 조건으로도 쓴다.
@@ -174,7 +220,25 @@ def connect() -> sqlite3.Connection:
 
 
 # (컬럼명, 정의) — CREATE TABLE 보다 나중에 추가된 것들. 기존 DB 를 살려서 올린다.
-_ADDED_COLUMNS = [("memos", "external_id", "TEXT")]
+_ADDED_COLUMNS = [
+    ("memos", "external_id", "TEXT"),
+    ("memos", "todo_version", "INTEGER NOT NULL DEFAULT 0"),
+    ("todos", "title", "TEXT NOT NULL DEFAULT ''"),
+    ("todos", "status", "TEXT NOT NULL DEFAULT 'open'"),
+    ("todos", "review_on", "TEXT"),
+    ("todos", "scheduled_for", "TEXT"),
+    ("todos", "schedule_end", "TEXT"),
+    ("todos", "date_label", "TEXT NOT NULL DEFAULT ''"),
+    ("todos", "reason", "TEXT NOT NULL DEFAULT ''"),
+    ("todos", "identity_key", "TEXT NOT NULL DEFAULT ''"),
+    ("todos", "derived_json", "TEXT NOT NULL DEFAULT '{}'"),
+    ("todos", "overrides_json", "TEXT NOT NULL DEFAULT '{}'"),
+    ("todos", "active", "INTEGER NOT NULL DEFAULT 1"),
+    ("todos", "origin", "TEXT NOT NULL DEFAULT 'rule'"),
+    ("todos", "ai_sources_json", "TEXT NOT NULL DEFAULT '[]'"),
+    ("todos", "ai_values_json", "TEXT NOT NULL DEFAULT '{}'"),
+    ("todos", "tags_json", "TEXT"),
+]
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -186,6 +250,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_memos_external ON memos(source, external_id) "
         "WHERE external_id IS NOT NULL"
     )
+    # 예전 완료 체크도 사용자 결정으로 보존한다. 이후에는 재추출로 덮어쓰지 않는다.
+    conn.execute("UPDATE todos SET status='done', overrides_json='{\"status\":\"done\"}' "
+                 "WHERE done=1 AND derived_json='{}' AND overrides_json='{}'")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_todos_active_status ON todos(active, status)")
     conn.commit()
 
 

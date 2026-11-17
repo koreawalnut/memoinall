@@ -131,8 +131,8 @@
   }
   .tab.on { color: var(--fg); border-bottom-color: var(--accent); }
 
-  /* 항상 보이는 메뉴는 주요 사용 목적 세 가지. 보조 기능은 더 보기에서 연다. */
-  .nav { display: flex; gap: 4px; align-items: center; margin: 0 0 24px; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+  /* 메모·일정·AI·가져오기는 대메뉴에서 바로 연다. */
+  .nav { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 0 0 24px; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
   .nav .tab {
     border: 1px solid transparent; border-radius: 7px; padding: 8px 12px;
     background: transparent; line-height: 1.4; font-size: 14px; white-space: nowrap;
@@ -185,6 +185,44 @@
   .todo:last-child { border-bottom: 0; }
   .todo input { margin-top: 5px; accent-color: var(--accent); }
   .todo .due { color: var(--warn); font-size: 13.5px; }
+  .todo-overview { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 14px; }
+  .todo-overview strong { font-size: 19px; }
+  .todo-overview p, .todo-help, .todo-reason { margin: 5px 0; color: var(--dim); font-size: 13.5px; }
+  .todo-filters, .todo-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+  .todo-filters .chip { padding: 6px 11px; }
+  .todo-group-title { margin: 20px 0 10px; font-size: 16px; }
+  .todo-group-title span { color: var(--dim); font-weight: 400; margin-left: 6px; }
+  .todo-list { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+  .todo-list .todo { padding: 15px; }
+  .todo-body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .todo-title { font-weight: 600; }
+  .todo-history-title { color: var(--dim); }
+  .todo-actions { margin-top: 10px; }
+  .todo-actions .btn, .todo-evidence .btn { font-size: 13px; padding: 4px 9px; }
+  .todo-evidence { margin-top: 9px; color: var(--dim); font-size: 13px; }
+  .todo-evidence blockquote { margin: 9px 0; padding: 7px 11px; border-left: 2px solid var(--line); white-space: pre-wrap; }
+  .todo-evidence .btn { max-width: 100%; text-align: left; white-space: normal; }
+  .todo .todo-overdue, .todo-error { color: var(--danger); }
+  .todo .todo-overdue { border-color: var(--danger); }
+  .todo .todo-deadline { color: var(--warn); }
+  .todo-pager { margin-top: 14px; }
+  .todo-example { font-size: 13px; }
+  .todo-undo { margin-top: 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 7px; font-size: 13px; }
+  #todoEditor { width: min(560px, 95vw); }
+  .todo-ai-tools { margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--line); }
+  .todo-ai-description { flex-basis: 100%; }
+  .todo-ai-panel { padding: 16px; margin-bottom: 18px; background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius); }
+  .todo-ai-panel h3 { margin: 0 0 8px; font-size: 17px; }
+  .todo-ai-proposals { margin: 12px 0; max-height: 58vh; overflow: auto; }
+  .todo-ai-proposal { border-top: 1px solid var(--line); padding: 12px 2px; overflow-wrap: anywhere; }
+  .todo-ai-select { display: flex; gap: 8px; align-items: baseline; }
+  .todo-ai-select input { accent-color: var(--accent); }
+  .todo-ai-proposal dl { margin: 8px 0; font-size: 13.5px; }
+  .todo-ai-proposal dl > div { display: flex; gap: 10px; padding: 2px 0; }
+  .todo-ai-proposal dt { flex: 0 0 85px; color: var(--dim); }
+  .todo-ai-proposal dd { margin: 0; min-width: 0; }
+  .todo-ai-before { color: var(--dim); }
+  .todo-ai-footer { margin: 10px 0 0; }
   .cluster { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 13px 15px; margin-bottom: 10px; }
   .cluster h3 { margin: 0 0 8px; font-size: 15.5px; }
   .cluster li { color: var(--dim); font-size: 14px; cursor: pointer; list-style: none; padding: 2px 0; }
@@ -335,6 +373,7 @@
   .col-target { border-color: var(--accent); }
   @media (max-width: 600px) { .col-sheet { margin-left: 0; } .col-steps { gap: 12px; font-size: 13px; } }
 </style>
+<link rel="stylesheet" href="/static/todo-planner.css">
 </head>
 <body>
 <div class="app">
@@ -435,6 +474,11 @@
 <script src="/static/generate.js"></script>
 <script src="/static/workflows.js"></script>
 <script src="/static/collections.js"></script>
+<script src="/static/todos.js"></script>
+<script src="/static/todo-ai.js"></script>
+<script src="/static/todo-calendar.js"></script>
+<script src="/static/calendar-entry.js"></script>
+<script src="/static/schedule-share.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 // tags 는 조회 조건(AND). tag 하나만 쓰던 시절의 사이드바 클릭도 여기로 모은다.
@@ -624,8 +668,8 @@ $("#exportHits").onclick = () => prepareExport();
 const TABS = [
   { id: "feed", primary: true, icon: "📝", name: "내 메모",
     title: "무엇이든 적어두세요", lead: "나중에 검색해서 찾고, 필요한 메모로 AI 문서나 인수인계 자료를 만들 수 있어요." },
-  { id: "todos", icon: "✅", name: "할 일", sub: "자동 추출",
-    title: "할 일", lead: "메모에서 자동으로 뽑아낸 할 일입니다. 체크하면 목록에서 사라집니다." },
+  { id: "todos", primary: true, icon: "📅", name: "일정",
+    title: "일정", lead: "메모 속 할 일과 외부 일정을 모아, 태그로 정리하고 함께 나눕니다." },
   { id: "clusters", icon: "🧩", name: "주제별", sub: "자동 묶음",
     title: "주제별 묶음", lead: "비슷한 내용끼리 자동으로 묶었습니다. 태그를 달지 않아도 주제가 드러납니다." },
   { id: "rollup", icon: "📅", name: "기간 요약", sub: "일·주·월",
@@ -660,6 +704,7 @@ document.addEventListener("click", (e) => {
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("#moreMenu")) $("#moreMenu").open = false; });
 
 function goTab(id) {
+  if (id === "todos" && state.tab !== "todos") { todoBoard.layout = "calendar"; todoBoard.offset = 0; }
   state.tab = id;
   renderTabs();
   return render();   // 화면이 다 그려진 뒤에 이어서 할 일이 있는 호출자를 위해
@@ -737,7 +782,7 @@ async function loadSidebar() {
     items.map((i) => `<span class="chip ${on(key, i.value) ? "on" : ""}" data-k="${key}" data-v="${esc(i.value)}">${prefix}${esc(i.value)}<span class="n">${i.count}</span></span>`).join("") || `<span class="status">없음</span>`;
   $("#tags").innerHTML = chips(tags.items, "tag", "#");
   $("#people").innerHTML = chips(people.items, "person", "@");
-  document.querySelectorAll(".chip").forEach((c) => {
+  document.querySelectorAll("#tags .chip, #people .chip").forEach((c) => {
     c.onclick = () => {
       if (c.dataset.k === "tag") toggleTagFilter(c.dataset.v);
       else { state.person = state.person === c.dataset.v ? null : c.dataset.v; loadSidebar(); resetFeed(); }
@@ -779,6 +824,7 @@ async function render() {
   // 메모 입력창과 검색창은 '메모' 화면 전용이다. 다른 화면에서는 검색어가 아예
   // 쓰이지 않는데도 검색창이 떠 있어서 "쳐도 아무 일이 없는" 상태였다.
   const onFeed = state.tab === "feed";
+  document.querySelector("main").classList.toggle("is-todos", state.tab === "todos");
   document.querySelector(".searchbar").style.display = onFeed ? "flex" : "none";
   document.querySelector(".capture").style.display = onFeed ? "block" : "none";
   document.querySelector(".feed-tools").style.display = onFeed ? "block" : "none";
@@ -787,7 +833,7 @@ async function render() {
   const t = TAB_BY_ID[state.tab];
   const lead = $("#lead");
   if (t) {
-    lead.innerHTML = `<h2>${t.icon} ${esc(t.title)}</h2><p>${esc(t.lead)}</p>`;
+    lead.innerHTML = state.tab === "todos" ? `<h2><span class="todo-lead-icon">${todoIcon("calendar")}</span>일정</h2><p>메모 속 할 일과 하루의 일정, 태그로 정리하고 함께 나누세요.</p>` : `<h2>${t.icon} ${esc(t.title)}</h2><p>${esc(t.lead)}</p>`;
     lead.style.display = "block";
   } else {
     lead.style.display = "none";
@@ -823,7 +869,7 @@ function cardHTML(m) {
     m.why ? `<span class="badge why">${esc(m.why)}</span>` : "",
     ...(f.tag || []).slice(0, 5).map((t) => `<span class="badge tag">#${esc(t)}</span>`),
     ...(f.person || []).slice(0, 3).map((p) => `<span class="badge person">@${esc(p)}</span>`),
-    (m.todos || []).some((t) => !t.done) ? `<span class="badge">할일 ${m.todos.filter((t) => !t.done).length}</span>` : "",
+    (m.todos || []).some((t) => ["open", "waiting"].includes(t.status)) ? `<span class="badge">할일 ${m.todos.filter((t) => ["open", "waiting"].includes(t.status)).length}</span>` : "",
   ].filter(Boolean).join("");
   return `<div class="card" data-id="${m.id}" tabindex="0" role="button" aria-label="${esc(m.title)} 열기">
     <div class="card-h">${state.tab === "feed" ? `<input type="checkbox" class="memo-select" data-select="${m.id}" aria-label="${esc(m.title)} 선택" ${state.selected.has(m.id) ? "checked" : ""} ${state.selecting ? "" : "hidden"} />` : ""}<span class="card-title">${esc(m.title)}</span><span class="meta">${fmt(m.created_at)}</span></div>
@@ -949,27 +995,7 @@ async function renderFeed(version = renderVersion) {
 }
 
 async function renderTodos(version = renderVersion) {
-  const { items } = await api("/api/todos?limit=200");
-  if (version !== renderVersion) return;
-  if (!items.length) {
-    $("#view").innerHTML = `<div class="empty">아직 할 일이 없습니다.<br/>
-      <span style="font-size:14px">메모에 <b>[ ]</b> 를 쓰거나 "~해야 함", "~할 것" 처럼 적으면 자동으로 잡힙니다.</span></div>`;
-    return;
-  }
-  $("#view").innerHTML = `<div class="card" style="cursor:default;padding:0">` + items.map((t) => `
-    <div class="todo">
-      <input type="checkbox" data-todo="${t.id}" />
-      <div style="flex:1">
-        <div>${esc(t.text)}</div>
-        <div class="meta">${t.due ? `<span class="due">마감 ${t.due}</span> · ` : ""}<a href="#" data-memo="${t.memo_id}" style="color:var(--dim)">${esc(t.memo_title)}</a></div>
-      </div>
-    </div>`).join("") + `</div>`;
-  document.querySelectorAll("[data-todo]").forEach((c) => {
-    c.onchange = async () => { await api(`/api/todos/${c.dataset.todo}`, { method: "PATCH", body: { done: c.checked } }); render(); loadSidebar(); };
-  });
-  document.querySelectorAll("[data-memo]").forEach((a) => {
-    a.onclick = (e) => { e.preventDefault(); openMemo(+a.dataset.memo); };
-  });
+  return renderTodoBoard(version);
 }
 
 async function renderClusters(version = renderVersion) {
@@ -2547,7 +2573,7 @@ $("#dCollection").onclick = () => {
 };
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "/" && !$("#detail").open && !["TEXTAREA", "INPUT", "SELECT"].includes(document.activeElement.tagName)) {
+  if (e.key === "/" && !document.querySelector("dialog[open]") && !["TEXTAREA", "INPUT", "SELECT"].includes(document.activeElement.tagName)) {
     e.preventDefault();
     goTab("feed"); $("#q").focus();
   }
@@ -2555,7 +2581,7 @@ document.addEventListener("keydown", (e) => {
 window.addEventListener("beforeunload", (e) => {
   localDraft($("#capture").value);
   if (genDirty() || gen.busy || detailDirty() || docImport.dirty || docImport.saving || $("#capture").value !== draftSaved || captureSaving
-      || col.upload || col.preview) {
+      || col.upload || col.preview || todoAi.busy || calendarEntry.busy || calendarEntry.dirty) {
     e.preventDefault(); e.returnValue = "";
   }
 });

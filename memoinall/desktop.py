@@ -249,14 +249,14 @@ def _install_downloader(window) -> None:
 
     def save(content: str, suggested: str):
         try:
-            kind = "업무 설정 (*.json)" if suggested.lower().endswith(".json") else "마크다운 (*.md)"
+            kind = {".json": "업무 설정 (*.json)", ".ics": "일정 파일 (*.ics)"}.get(Path(suggested).suffix.lower(), "마크다운 (*.md)")
             result = window.create_file_dialog(
                 webview.SAVE_DIALOG, save_filename=suggested, file_types=(kind, "모든 파일 (*.*)")
             )
             if not result:
                 return False
             path = result if isinstance(result, str) else result[0]
-            Path(path).write_text(content, encoding="utf-8")
+            Path(path).write_text(content, encoding="utf-8", newline="")
             return True
         except Exception:
             log.exception("파일 저장 실패")

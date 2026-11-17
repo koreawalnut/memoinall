@@ -76,6 +76,11 @@ for parser in ("pypdf", "openpyxl", "xlrd", "olefile", "defusedxml"):
     if has(parser):
         hiddenimports += collect_submodules(parser)
 
+# iCalendar recurrence/timezones are also required in the Windows executable.
+for parser in ("icalendar", "recurring_ical_events", "x_wr_timezone"):
+    hiddenimports += collect_submodules(parser)
+datas += collect_data_files("tzdata")
+
 # 주고받기 파일 암호화. 쓸 때만 import 하므로 명시해야 exe 에 들어간다.
 if has("cryptography"):
     hiddenimports += ["cryptography.hazmat.primitives.ciphers.aead"]

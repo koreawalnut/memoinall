@@ -137,7 +137,7 @@ def rollup(period: str = "week", anchor: str | None = None) -> dict:
 
     if ids:
         ph = ",".join("?" * len(ids))
-        for r in db.query(f"SELECT * FROM todos WHERE memo_id IN ({ph})", ids):
+        for r in db.query(f"SELECT * FROM todos WHERE memo_id IN ({ph}) AND active=1 AND status NOT IN ('dismissed','review')", ids):
             (todos_done if r["done"] else todos_open).append({"id": r["id"], "text": r["text"], "memo_id": r["memo_id"], "due": r["due"]})
         for r in db.query(f"SELECT kind, value, memo_id FROM facets WHERE memo_id IN ({ph})", ids):
             if r["kind"] == "tag":
