@@ -26,6 +26,10 @@ def sync(conn, memo: dict, extracted: list[dict] | None = None) -> None:
     Match exact evidence first, then a unique action identity within this memo.
     Removed evidence becomes inactive, so restoring it also restores decisions.
     """
+    # The writer explicitly scheduled this whole memo as one calendar entry.
+    if memo["source"] == "task" and (memo.get("external_id") or "").startswith("capture:"):
+        conn.execute("UPDATE memos SET todo_version=? WHERE id=?", (todo_extract.VERSION, memo["id"]))
+        return
     base = _base(memo["created_at"])
     extracted = extracted if extracted is not None else todo_extract.extract_todos(memo["body"], base, memo["source"])
     old = [dict(row) for row in conn.execute("SELECT * FROM todos WHERE memo_id=? AND origin='rule' ORDER BY active DESC,id", (memo["id"],))]
@@ -148,7 +152,7 @@ def create(payload: dict) -> dict:
     from . import store
     import uuid
 
-    if set(payload) - {"title", "scheduled_for", "due", "request_id", "tags", "note"}:
+    if set(payload) - {"title", "scheduled_for", "due", "request_id", "tags", "note", "memo_body"}:
         raise ValueError("추가할 할 일 항목을 확인해 주세요.")
     title = payload.get("title")
     if not isinstance(title, str) or not 1 <= len(title.strip()) <= 500:
@@ -161,20 +165,27 @@ def create(payload: dict) -> dict:
     note = note.strip()
     tag_values = schedule_tags.validate(payload.get("tags", []))
     planned = validate_date(payload.get("scheduled_for"), "예정")
+    memo_body = payload.get("memo_body")
+    if "memo_body" in payload and (not isinstance(memo_body, str) or not memo_body.strip() or not planned):
+        raise ValueError("일정으로 등록할 메모 내용과 예정일을 입력해 주세요.")
     due = validate_date(payload.get("due"), "마감")
     try:
         token = str(uuid.UUID(payload.get("request_id", "")))
     except (ValueError, TypeError, AttributeError):
         raise ValueError("저장 요청 식별자가 올바르지 않습니다.") from None
+    if memo_body is not None:
+        token = "capture:" + token
     conn = db.connect()
     with conn:
         conn.execute("BEGIN IMMEDIATE")
         previous = conn.execute("SELECT t.* FROM todos t JOIN memos m ON m.id=t.memo_id "
                                 "WHERE m.source='task' AND m.external_id=?", (token,)).fetchone()
+        if memo_body is not None:
+            conn.execute("UPDATE meta SET value='' WHERE key='capture_draft' AND value=?", (memo_body,))
         if previous:
             return public(dict(previous))
         now = store.now_iso()
-        body = (title + (f"\n예정일: {planned}" if planned else "") + (f"\n마감일: {due}" if due else "")
+        body = memo_body if memo_body is not None else (title + (f"\n예정일: {planned}" if planned else "") + (f"\n마감일: {due}" if due else "")
                 + (f"\n\n{note}" if note else ""))
         memo_id = conn.execute("INSERT INTO memos(body,title,source,external_id,created_at,updated_at) VALUES(?,?,'task',?,?,?)",
                                (body, title, token, now, now)).lastrowid

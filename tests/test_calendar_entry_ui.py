@@ -11,7 +11,7 @@ os.environ["MEMOINALL_DISABLE_ST"] = "1"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient
 from playwright.sync_api import expect, sync_playwright
-from memoinall import calendar_import, db, store
+from memoinall import calendar_import, config, db, store
 from memoinall.api import app
 
 
@@ -24,6 +24,7 @@ async def no_prepare():
 
 
 def main():
+    assert config.DB_PATH.resolve() == (Path(TMP.name) / "memo.db").resolve()
     errors, requests = [], []
     fail = {"create": False, "refresh": False}
     with patch.object(store, "start_worker"), patch.object(store, "enqueue"), patch("memoinall.api._prepare_search_later", new=no_prepare), patch.object(calendar_import, "fetch_calendar", return_value=calendar()) as fetch, TestClient(app) as client, sync_playwright() as pw:
@@ -37,6 +38,8 @@ def main():
             path = request.url.split("127.0.0.1:8787", 1)[-1]
             requests.append((request.method, path))
             if fail["create"] and path == "/api/todos" and request.method == "POST":
+                if fail["create"] == "after_commit":
+                    assert client.post(path, json=request.post_data_json).is_success
                 fail["create"] = False
                 route.fulfill(status=503, content_type="application/json", body='{"detail":"일시적인 저장 오류"}')
                 return
@@ -164,6 +167,41 @@ def main():
         assert not errors, errors
         assert not any("/ai/" in path for _, path in requests)
         print("OK disconnect removes only that source; native task remains and AI never auto-runs")
+
+        client.post("/api/tags", json={"name": "회의"})
+        page.reload()
+        capture = page.locator("#capture")
+        register = page.get_by_role("button", name="일정으로 등록", exact=True)
+        expect(capture).to_be_enabled()
+        expect(register).to_be_disabled()
+        body = "분기 회의 #회의\n- [ ] 내일까지 자료 보내기\n" + "회의 자료와 참석자 확인\n" * 500
+        capture.fill(body)
+        register.click()
+        expect(page.locator("#todoCreateTitle")).to_have_value("분기 회의 #회의")
+        expect(page.locator("#todoCreateDate")).to_be_focused()
+        expect(page.locator('#todoCreateTags [data-tag="회의"]')).to_have_attribute("aria-pressed", "true")
+        page.keyboard.press("Escape")
+        expect(capture).to_have_value(body)
+        register.click()
+        page.locator("#todoCreateDate").fill("2026-12-01")
+        page.locator("#todoCreateTitle").fill("분기 회의")
+        fail["create"] = "after_commit"
+        page.locator("#todoCreateSave").click()
+        expect(page.locator("#todoCreateError")).to_contain_text("일시적인 저장 오류")
+        expect(capture).to_have_value(body)
+        page.locator("#todoCreateSave").click()
+        expect(capture).to_have_value("")
+        expect(register).to_be_disabled()
+        assert client.get("/api/draft").json()["body"] == ""
+        assert db.one("SELECT count(*) n FROM memos WHERE body=?", (body,))["n"] == 1
+        db.execute("UPDATE memos SET todo_version=0 WHERE body=?", (body,))
+        page.locator('[data-tab="todos"]').click()
+        expect(page.locator("#todoCalendarDayTitle")).to_contain_text("12/1")
+        expect(page.locator(".todo-calendar-agenda .todo-title")).to_have_text("분기 회의")
+        expect(page.locator('.todo-calendar-agenda [data-schedule-filter="회의"]')).to_be_visible()
+        assert db.one("SELECT count(*) n FROM todos JOIN memos ON memos.id=todos.memo_id WHERE memos.body=?", (body,))["n"] == 1
+        assert not errors, errors
+        print("OK capture schedules the full memo once on the chosen day; cancel and retry keep the draft")
         browser.close()
     db.close()
     TMP.cleanup()

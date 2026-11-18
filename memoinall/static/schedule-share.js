@@ -16,8 +16,7 @@ function scheduleItemTags(item) {
   return `<div class="schedule-tags">${scheduleTagPills(item.tags)}<button type="button" class="schedule-tag-edit" data-schedule-tags="${id}" aria-label="${esc(item.title)} 태그 편집">${todoIcon("tag")} ${item.tags?.length ? "편집" : "태그 추가"}</button></div>`;
 }
 
-function scheduleTagField(id, selected, label = "내 태그 (선택)") {
-  const registered = todoBoard.registeredTags;
+function scheduleTagField(id, selected, label = "내 태그 (선택)", registered = todoBoard.registeredTags) {
   const existing = selected.filter((name) => !registered.some((tag) => tag.name === name));
   const chip = (tag) => tagChip(tag, selected.includes(tag.name), `aria-pressed="${selected.includes(tag.name)}"`);
   return `<div class="field schedule-tag-field" id="${id}" role="group" aria-labelledby="${id}Label">

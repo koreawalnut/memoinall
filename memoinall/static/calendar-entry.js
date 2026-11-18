@@ -20,8 +20,10 @@ function calendarDialog(id, title) {
   return dialog;
 }
 
-function openTodoCreate(day, fromDayCell = false) {
-  const dialog = calendarDialog("todoCreate", "일정 추가");
+function openTodoCreate(day, fromDayCell = false, memoBody = null) {
+  const fromMemo = memoBody !== null;
+  const heading = fromMemo ? "메모를 일정으로 등록" : "일정 추가";
+  const dialog = calendarDialog("todoCreate", heading);
   if (fromDayCell) {
     // Refreshing the agenda replaces the day button that opened this dialog.
     dialog.addEventListener("close", () => {
@@ -29,15 +31,19 @@ function openTodoCreate(day, fromDayCell = false) {
     }, { once: true });
   }
   const requestId = crypto.randomUUID();
-  dialog.innerHTML = `<form id="todoCreateForm"><div class="dlg-h"><strong>일정 추가</strong></div><div class="dlg-b">
-    <p class="todo-help">선택한 날짜에 일정을 바로 등록합니다.</p>
-    <div class="field"><label for="todoCreateTitle">일정 이름</label><input id="todoCreateTitle" required maxlength="500" placeholder="예: 교육계획안 보내기" autofocus></div>
-    <div class="calendar-form-dates"><div class="field"><label for="todoCreateDate">예정일</label><input id="todoCreateDate" type="date" required value="${day}"></div>
+  const registered = fromMemo ? myTags : todoBoard.registeredTags;
+  const memoTags = new Set(fromMemo ? bodyTags(memoBody).map((name) => name.toLowerCase()) : []);
+  const selectedTags = registered.filter((tag) => fromMemo ? memoTags.has(tag.name.toLowerCase()) : tag.name === todoBoard.tag).map((tag) => tag.name).slice(0, 20);
+  dialog.innerHTML = `<form id="todoCreateForm"><div class="dlg-h"><strong>${heading}</strong></div><div class="dlg-b">
+    <p class="todo-help">${fromMemo ? "예정일을 선택하세요. 작성한 메모 전체가 일정에 연결됩니다." : "선택한 날짜에 일정을 바로 등록합니다."}</p>
+    <div class="field"><label for="todoCreateTitle">일정 이름</label><input id="todoCreateTitle" required maxlength="500" placeholder="예: 교육계획안 보내기" ${fromMemo ? "" : "autofocus"}></div>
+    <div class="calendar-form-dates"><div class="field"><label for="todoCreateDate">예정일</label><input id="todoCreateDate" type="date" required value="${day}" ${fromMemo ? "autofocus" : ""}></div>
     <div class="field"><label for="todoCreateDue">마감일 (선택)</label><input id="todoCreateDue" type="date"></div></div>
     <p class="todo-help">예정일은 할 날짜, 마감일은 끝내야 하는 날짜입니다. 등록 내용은 메모에도 함께 저장됩니다.</p>
-    ${scheduleTagField("todoCreateTags", todoBoard.registeredTags.some((tag) => tag.name === todoBoard.tag) ? [todoBoard.tag] : [])}
+    ${scheduleTagField("todoCreateTags", selectedTags, "내 태그 (선택)", registered)}
     <p id="todoCreateError" class="todo-error" role="alert"></p></div>
-    <div class="dlg-f"><button class="btn" type="button" id="todoCreateCancel">닫기</button><button class="btn primary" type="submit" id="todoCreateSave">추가</button></div></form>`;
+    <div class="dlg-f"><button class="btn" type="button" id="todoCreateCancel">닫기</button><button class="btn primary" type="submit" id="todoCreateSave">${fromMemo ? "등록" : "추가"}</button></div></form>`;
+  if (fromMemo) $("#todoCreateTitle").value = [...memoBody.trim().split(/\r?\n/, 1)[0]].slice(0, 500).join("");
   $("#todoCreateCancel").onclick = () => dialog.close();
   bindScheduleTagField("todoCreateTags");
   $("#todoCreateForm").oninput = () => { calendarEntry.dirty = true; };
@@ -51,11 +57,27 @@ function openTodoCreate(day, fromDayCell = false) {
     dialog.querySelectorAll("button,input").forEach((el) => { el.disabled = true; });
     $("#todoCreateError").textContent = "";
     try {
+      if (fromMemo) {
+        payload.memo_body = memoBody;
+        await persistDraft().catch(() => {});
+      }
       await api("/api/todos", { method: "POST", body: payload });
       if (!payload.tags.includes(todoBoard.tag)) todoBoard.tag = null;
       dialog.close();
+      if (fromMemo) {
+        if ($("#capture").value === memoBody) {
+          $("#capture").value = draftSaved = "";
+          localDraft("");
+          $("#captureHint").textContent = "Ctrl+Enter 저장 · 형식은 신경 쓰지 마세요";
+        }
+        paintTagRows();
+        updateCaptureSchedule();
+        state.offset = 0;
+        await Promise.allSettled([render(), loadSidebar(), loadTags()]);
+        $("#capture").focus();
+      }
       await selectTodoCalendarDay(planned, fromDayCell);
-      toast("일정을 추가했습니다.");
+      toast(fromMemo ? `${todoDate(planned)} 일정으로 등록했습니다.` : "일정을 추가했습니다.");
     } catch (error) { $("#todoCreateError").textContent = error.message; }
     finally {
       calendarEntry.busy = false;

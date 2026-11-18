@@ -86,6 +86,10 @@
     border: 0; outline: none; font-size: 15px; line-height: 1.7;
   }
   .capture-bar { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+  @media (max-width: 600px) {
+    .capture-bar { flex-wrap: wrap; justify-content: flex-end; }
+    .capture-bar .hint { flex-basis: 100%; }
+  }
   .hint { color: var(--dim); font-size: 13.5px; flex: 1; }
   .btn {
     background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px;
@@ -414,6 +418,7 @@
       </details>
       <div class="capture-bar">
         <span class="hint" id="captureHint">Ctrl+Enter 저장 · 형식은 신경 쓰지 마세요</span>
+        <button class="btn" type="button" id="scheduleCapture" aria-haspopup="dialog" disabled>일정으로 등록</button>
         <button class="btn ghost mic" id="mic" type="button" disabled data-state="idle"
           aria-label="음성으로 입력" title="음성으로 입력 — 누르고 말한 뒤 다시 누르세요"></button>
         <button class="btn primary" id="save" disabled>메모 저장</button>
@@ -572,6 +577,7 @@ function persistDraft() {
   return draftQueue;
 }
 function captureChanged() {
+  updateCaptureSchedule();
   paintTagRows();
   localDraft($("#capture").value);
   $("#captureHint").textContent = "초안 보관 중…";
@@ -607,6 +613,7 @@ async function save() {
   if (!body || captureSaving || ta.disabled) return;
   const snapshot = ta.value;
   captureSaving = true;
+  updateCaptureSchedule();
   $("#save").disabled = true;
   try {
     clearTimeout(draftTimer);
@@ -622,12 +629,21 @@ async function save() {
     toast("저장 실패: " + e.message);
   } finally {
     captureSaving = false;
+    updateCaptureSchedule();
     $("#save").disabled = false;
     ta.focus();
   }
 }
 
 $("#save").onclick = save;
+function updateCaptureSchedule() {
+  const input = $("#capture");
+  $("#scheduleCapture").disabled = input.disabled || input.readOnly || captureSaving || !input.value.trim();
+}
+$("#scheduleCapture").onclick = () => {
+  const body = $("#capture").value;
+  if (body.trim() && !captureSaving && !mic.starting && mic.state === "idle") openTodoCreate(todoLocalDate(), false, body);
+};
 $("#capture").addEventListener("keydown", (e) => {
   if (!e.isComposing && (e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); save(); }
 });
@@ -687,6 +703,7 @@ function paintMic(next) {
   b.style.setProperty("--lvl", "0");
   // 받아쓰는 동안에는 글이 들어갈 자리가 흔들리지 않게 입력칸을 잠근다.
   $("#capture").readOnly = next !== "idle";
+  updateCaptureSchedule();
   document.querySelector(".capture").classList.toggle("dictating", next !== "idle");
 }
 
