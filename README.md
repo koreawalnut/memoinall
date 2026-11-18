@@ -69,6 +69,7 @@ Gemini의 **전송 방식**은 두 가지입니다. **기본**은 말을 잠깐 
 
 **휴대폰 앱**은 PC와 연결되지 않는 별도 버전입니다. 메모·일정은 그 휴대폰에만 저장됩니다.
 사내 정보 보호를 위해 주고받기는 **휴대폰 → PC 한 방향**(휴대폰 화면의 QR을 PC 웹캠으로)만 됩니다.
+메모는 PC 메모로, 일정은 PC **일정**으로 들어갑니다.
 홈 화면에 설치하는 웹 앱이라 iPhone·Android 모두 쓰고, 오프라인에서도 열립니다. AI 정리는 휴대폰에 넣은 API 키로 합니다.
 휴대폰에는 **가져오기·공유 → 휴대폰 QR·설치 → 설치 QR 보기**에 표시된 QR을 찍어 설치합니다.
 `python build_mobile.py`로 만든 폴더를 GitHub Pages에 올립니다. [휴대폰 앱 안내](docs/mobile.md)
@@ -476,7 +477,8 @@ python tests/test_collections.py        # 엑셀 폴더 취합: 읽기·확인·
 python tests/test_collection_ui.py      # 엑셀 폴더 취합 화면 흐름 (playwright)
 python tests/test_mobile.py             # 휴대폰 앱 빌드 · QR 형식 · PC와 공유 형식 일치 (Node 필요)
 python tests/test_mobile_ui.py          # 휴대폰 앱 전체 흐름 · 한 방향 확인 · 오프라인 (playwright)
-python tests/test_qr_share_ui.py        # PC 앱이 웹캠으로 휴대폰 QR 받기 · 설치 주소 QR (playwright)
+python tests/test_qr_share_ui.py        # PC 앱이 웹캠으로 휴대폰 메모·일정 QR 받기 · 설치 주소 QR (playwright)
+python tests/test_schedule_receive.py   # 휴대폰 일정 → PC 일정 (검증·비밀번호·중복 방지)
 ```
 
 `test_generate.py` 는 각 어댑터가 **실제로 어떤 파라미터를 보내는지**까지 검사합니다 —

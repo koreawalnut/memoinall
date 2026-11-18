@@ -44,6 +44,7 @@ from . import (
     calendar_import,
     schedule_tags,
     schedule_share,
+    schedule_receive,
     todo_ai,
     workflows,
 )
@@ -404,6 +405,26 @@ def preview_schedule_share(payload: dict = Body(...)):
 @app.post("/api/schedule/share/{plan_id}/export")
 def export_schedule_share(plan_id: str, payload: dict = Body(...)):
     return _calendar_request(schedule_share.export, plan_id, payload.get("selected"))
+
+
+@app.post("/api/schedule/receive/preview")
+def preview_schedule_receive(payload: dict = Body(...)):
+    """휴대폰 앱이 QR 로 보낸 일정을 넣기 전에 확인한다. 잠긴 일정이면 비밀번호를 달라고 알린다."""
+    try:
+        return schedule_receive.preview(str(payload.get("content") or ""), str(payload.get("password") or ""))
+    except exchange.PasswordRequired:
+        return {"needs_password": True, "items": [], "skipped": 0, "encrypted": True}
+    except exchange.ExchangeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/schedule/receive/apply")
+def apply_schedule_receive(payload: dict = Body(...)):
+    try:
+        return schedule_receive.apply(str(payload.get("content") or ""), str(payload.get("password") or ""),
+                                      payload.get("selected"))
+    except ValueError as exc:   # ExchangeError 포함
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.get("/api/calendars")

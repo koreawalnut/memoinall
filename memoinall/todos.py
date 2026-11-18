@@ -148,12 +148,17 @@ def create(payload: dict) -> dict:
     from . import store
     import uuid
 
-    if set(payload) - {"title", "scheduled_for", "due", "request_id", "tags"}:
+    if set(payload) - {"title", "scheduled_for", "due", "request_id", "tags", "note"}:
         raise ValueError("추가할 할 일 항목을 확인해 주세요.")
     title = payload.get("title")
     if not isinstance(title, str) or not 1 <= len(title.strip()) <= 500:
         raise ValueError("할 일 이름은 1~500자로 입력해 주세요.")
     title = title.strip()
+    # 덧붙인 설명(휴대폰 일정의 메모 등)은 함께 저장되는 메모 본문 끝에 둔다.
+    note = payload.get("note") or ""
+    if not isinstance(note, str) or len(note) > 5000:
+        raise ValueError("일정 메모는 5,000자 이하로 입력해 주세요.")
+    note = note.strip()
     tag_values = schedule_tags.validate(payload.get("tags", []))
     planned = validate_date(payload.get("scheduled_for"), "예정")
     due = validate_date(payload.get("due"), "마감")
@@ -169,7 +174,8 @@ def create(payload: dict) -> dict:
         if previous:
             return public(dict(previous))
         now = store.now_iso()
-        body = title + (f"\n예정일: {planned}" if planned else "") + (f"\n마감일: {due}" if due else "")
+        body = (title + (f"\n예정일: {planned}" if planned else "") + (f"\n마감일: {due}" if due else "")
+                + (f"\n\n{note}" if note else ""))
         memo_id = conn.execute("INSERT INTO memos(body,title,source,external_id,created_at,updated_at) VALUES(?,?,'task',?,?,?)",
                                (body, title, token, now, now)).lastrowid
         store._index_body(conn, memo_id, body)

@@ -455,19 +455,58 @@ $("#memoAi").onclick = () => editing && openAi([editing.id]);
 // 주고받기는 휴대폰 → PC 한 방향뿐이다. PC로는 화면의 QR 로만 보낸다 — 네트워크·외부 서버(메신저·메일)를
 // 거치지 않는다. 파일은 이 휴대폰의 백업용으로만 만든다.
 const sendDlg = $("#sendDlg");
-let sending = null;   // { ids, backup }
+let sending = null;   // { ids, backup } 또는 { events: Set(고른 일정 id) }
 let qrView = null, wake = null;
 function openSend(ids, { backup = false } = {}) {
   if (!ids.length && !backup) { toast("보낼 메모를 고르세요"); return; }
   sending = { ids, backup };
   $("#sendTitle").textContent = backup ? `백업 — 메모 ${S.memos.length}건 · 일정 ${S.events.length}건` : `PC로 보내기 — 메모 ${ids.length}건`;
+  prepareSend(backup);
+}
+function prepareSend(backup) {
   $("#sendPw").value = "";
   $("#sendPw").placeholder = backup ? "정하면 되살릴 때 이 비밀번호가 필요합니다" : "정하면 PC에서 열 때 이 비밀번호가 필요합니다";
   $("#sendOut").innerHTML = "";
   $("#sendQr").hidden = backup;
   $("#sendFile").hidden = !backup;
+  paintSendPick();
   paintPwNote();
   openSheet(sendDlg);
+}
+
+// 일정 보내기: 고를 목록을 보여준다. 기본은 오늘 이후의 끝내지 않은 일정(하나를 골라 열었으면 그것만).
+const sortByDay = (a, b) => a.date.localeCompare(b.date) || (a.time || "").localeCompare(b.time || "") || a.id - b.id;
+function openSendEvents(only = null) {
+  if (!S.events.length) { toast("보낼 일정이 없습니다"); return; }
+  const today = todayStr();
+  const picked = only ? [only] : S.events.filter((e) => e.date >= today && !e.done).map((e) => e.id);
+  sending = { events: new Set(picked) };
+  prepareSend(false);
+}
+function paintSendPick() {
+  const box = $("#sendPick");
+  if (!sending || !sending.events) { box.hidden = true; box.innerHTML = ""; return; }
+  const today = todayStr(), picked = sending.events;
+  const coming = S.events.filter((e) => e.date >= today).sort(sortByDay);
+  const past = S.events.filter((e) => e.date < today).sort((a, b) => sortByDay(b, a));
+  const row = (e) => `<label class="imp-item"><input type="checkbox" data-send-ev="${e.id}" ${picked.has(e.id) ? "checked" : ""} />
+    <div style="min-width:0"><div class="t">${esc(e.title)}</div>
+      <div class="muted">${esc(dayLabel(e.date))}${e.time ? " " + esc(e.time) : ""}${e.tags.length ? " · " + e.tags.map((t) => "#" + esc(t)).join(" ") : ""}${e.done ? " · 끝냄" : ""}</div></div></label>`;
+  box.hidden = false;
+  box.innerHTML = `<div class="row" style="margin-bottom:4px"><b style="flex:1">보낼 일정</b>
+      <button class="btn small" type="button" id="sendEvAll">모두 선택</button>
+      <button class="btn small" type="button" id="sendEvNone">선택 해제</button></div>
+    <div style="max-height:34vh;overflow:auto;border-bottom:1px solid var(--line);margin-bottom:6px">
+      ${coming.length ? coming.map(row).join("") : '<div class="muted" style="padding:8px 0">오늘 이후 일정이 없습니다.</div>'}
+      ${past.length ? `<div class="muted" style="margin-top:10px">지난 일정</div>${past.map(row).join("")}` : ""}</div>`;
+  $("#sendTitle").textContent = `PC로 보내기 — 일정 ${picked.size}건`;
+  $("#sendQr").disabled = !picked.size;
+  const changed = () => { stopQr(); $("#sendOut").innerHTML = ""; paintSendPick(); };
+  $$("[data-send-ev]", box).forEach((c) => {
+    c.onchange = () => { c.checked ? picked.add(+c.dataset.sendEv) : picked.delete(+c.dataset.sendEv); changed(); };
+  });
+  $("#sendEvAll").onclick = () => { S.events.forEach((e) => picked.add(e.id)); changed(); };
+  $("#sendEvNone").onclick = () => { picked.clear(); changed(); };
 }
 function paintPwNote() {
   const pw = !!$("#sendPw").value, backup = !!(sending && sending.backup);
@@ -488,6 +527,12 @@ function stopQr() {
 
 async function sendText() {
   const pw = $("#sendPw").value;
+  if (sending.events) {
+    const events = S.events.filter((e) => sending.events.has(e.id)).sort(sortByDay);
+    await ensureEventUids(events);
+    const pack = X.buildSchedules(events);
+    return { text: JSON.stringify(await X.seal(pack, pw), null, 2), count: events.length, locked: !!pw, what: "일정" };
+  }
   const memos = sending.backup ? S.memos.slice().reverse() : sending.ids.map(findMemo).filter(Boolean);
   const pack = await X.build(memos, sending.backup ? { note: "memoinall 휴대폰 백업", schedules: S.events, backup: true } : {});
   return { text: JSON.stringify(await X.seal(pack, pw), null, 2), count: memos.length, locked: !!pw };
@@ -500,12 +545,12 @@ $("#sendQr").onclick = async () => {
   stopQr();
   sendBusy(true, $("#sendPw").value ? "암호화하는 중…" : "QR 만드는 중…");
   try {
-    const { text, count } = await sendText();
+    const { text, count, what = "메모" } = await sendText();
     const parts = await QrShare.encode(text);
     $("#sendOut").innerHTML = `<div class="note" style="margin-bottom:10px">PC 앱의 <b>가져오기·공유 → 휴대폰 QR·설치 → QR 찍기</b>를 누르고
       이 화면을 웹캠에 비추세요.${parts.length > 1 ? ` QR <b>${parts.length}장</b>이 자동으로 넘어가니 그대로 두면 됩니다.` : ""}</div>
       <div id="qrHere"></div>
-      <div class="muted" style="margin-top:8px;text-align:center">메모 ${count}건${$("#sendPw").value ? " · 암호화됨" : ""}</div>`;
+      <div class="muted" style="margin-top:8px;text-align:center">${what} ${count}건${$("#sendPw").value ? " · 암호화됨" : ""}</div>`;
     qrView = QrShare.show($("#qrHere"), parts);
     try { if (navigator.wakeLock) wake = await navigator.wakeLock.request("screen"); } catch (_) { /* 화면 켜짐 유지는 선택 */ }
   } catch (err) {
@@ -564,6 +609,7 @@ function packSchedules(pack) {
   return (Array.isArray(pack.schedules) ? pack.schedules : [])
     .filter((e) => e && typeof e.title === "string" && e.title.trim() && /^\d{4}-\d{2}-\d{2}$/.test(e.date))
     .map((e) => ({
+      uid: typeof e.uid === "string" && e.uid ? e.uid.slice(0, 200) : newUid(),
       title: e.title.trim().slice(0, 300), date: e.date, time: /^\d{2}:\d{2}$/.test(e.time || "") ? e.time : "",
       note: typeof e.note === "string" ? e.note : "", tags: Array.isArray(e.tags) ? uniq(e.tags.map(normTag).filter(Boolean)) : [],
       done: !!e.done, created_at: typeof e.created_at === "string" ? e.created_at : X.nowIso(),
@@ -952,10 +998,25 @@ function openEvent(id, date) {
   $("#evNote").value = ev ? ev.note || "" : "";
   $("#evErr").textContent = "";
   $("#evDel").hidden = !ev;
+  $("#evSend").hidden = !ev;
   openSheet(eventDlg);
   if (!ev) setTimeout(() => $("#evTitle").focus(), 60);
 }
 $("#addEvent").onclick = () => openEvent(null, S.day);
+$("#calSend").onclick = () => openSendEvents();
+$("#evSend").onclick = () => { if (editingEvent) openSendEvents(editingEvent); };
+
+// PC가 같은 일정을 두 번 넣지 않도록 일정마다 바뀌지 않는 uid 를 둔다. 예전에 만든 일정은 보낼 때 붙인다.
+function newUid() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function ensureEventUids(events) {
+  const missing = events.filter((e) => !e.uid);
+  if (!missing.length) return;
+  missing.forEach((e) => { e.uid = newUid(); });
+  await idb.putMany("events", missing);
+}
 $("#evSave").onclick = async () => {
   const title = $("#evTitle").value.trim(), date = $("#evDate").value;
   if (!title) { $("#evErr").textContent = "할 일·일정을 적어주세요."; $("#evTitle").focus(); return; }
@@ -963,7 +1024,7 @@ $("#evSave").onclick = async () => {
   const old = editingEvent ? S.events.find((x) => x.id === editingEvent) : null;
   const now = X.nowIso();
   const ev = {
-    ...(old || { done: false, created_at: now }),
+    ...(old || { uid: newUid(), done: false, created_at: now }),
     title: title.slice(0, 300), date, time: $("#evTime").value || "", tags: parseTags($("#evTags").value),
     note: $("#evNote").value.trim(), updated_at: now,
   };

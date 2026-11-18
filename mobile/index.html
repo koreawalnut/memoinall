@@ -249,7 +249,10 @@
       <button class="btn primary small" id="addEvent" type="button">+ 일정 추가</button>
     </div>
     <div id="dayList" class="card" style="padding:4px 14px"></div>
-    <h2>다가오는 일정</h2>
+    <div class="row" style="margin:22px 0 10px">
+      <h2 style="margin:0;flex:1">다가오는 일정</h2>
+      <button class="btn small" id="calSend" type="button">PC로 보내기</button>
+    </div>
     <div id="upcoming" class="card" style="padding:4px 14px"></div>
     <div id="overdueBox" hidden>
       <h2>지난 일 중 안 끝난 것</h2>
@@ -355,6 +358,7 @@
 <dialog class="sheet" id="sendDlg" aria-labelledby="sendTitle">
   <div class="sheet-head"><h3 id="sendTitle">보내기</h3><button class="btn ghost x" data-close type="button" aria-label="닫기">×</button></div>
   <div class="sheet-body">
+    <div id="sendPick" hidden></div>
     <label class="field"><span>비밀번호 (선택)</span>
       <input id="sendPw" type="password" autocomplete="new-password" placeholder="정하면 받는 쪽도 이 비밀번호가 있어야 엽니다" /></label>
     <div class="note" id="sendPwNote"></div>
@@ -409,6 +413,7 @@
   </div>
   <div class="sheet-foot">
     <button class="btn danger" id="evDel" type="button">삭제</button>
+    <button class="btn" id="evSend" type="button">PC로 보내기</button>
     <button class="btn primary" id="evSave" type="button">저장</button>
   </div>
 </dialog>

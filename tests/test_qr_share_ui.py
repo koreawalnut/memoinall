@@ -8,6 +8,7 @@ Node 가 없으면 건너뛴다(QR 영상을 만들 때 실제 qrshare.js 를 No
 import json
 import os
 import random
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -21,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fastapi.testclient import TestClient  # noqa: E402
 from playwright.sync_api import expect, sync_playwright  # noqa: E402
 
-from memoinall import exchange, store  # noqa: E402
+from memoinall import exchange, store, todos  # noqa: E402
 from memoinall.api import app  # noqa: E402
 from qr_helpers import camera_args, node_available, run_qrshare, write_camera_video  # noqa: E402
 
@@ -171,6 +172,56 @@ def main():
         expect(picker.locator("[data-pick]")).to_have_count(3)
         expect(picker).to_be_visible()
         print("OK file review works independently after receiving a locked QR")
+
+        assert not errors, errors
+        browser.close()
+
+        # 휴대폰 일정 QR (비밀번호로 잠금) — 웹캠으로 찍으면 일정 화면으로 가서 PC 일정에 들어간다.
+        # 휴대폰 exchange.js 처럼 잠근 봉투 겉에 kind 를 붙인다.
+        schedules = {"format": "memoinall/schedules", "version": 1, "count": 2, "schedules": [
+            {"uid": "ev-1", "title": "고객사 방문", "date": "2026-12-03", "time": "10:30", "note": "견적서 지참",
+             "tags": ["고객사"], "done": False, "created_at": "2026-11-18T09:00:00"},
+            {"uid": "ev-2", "title": "안전 교육", "date": "2026-12-05", "time": "", "note": "", "tags": [], "done": False,
+             "created_at": "2026-11-18T09:01:00"}]}
+        envelope = {**exchange.seal(schedules, "일정 비번"), "kind": "schedules"}
+        qr3 = run_qrshare(text=json.dumps(envelope, ensure_ascii=False))
+        video2 = Path(TMP.name) / "camera-schedules.y4m"
+        write_camera_video(video2, qr3["matrices"])
+        browser = pw.chromium.launch(headless=True, args=camera_args(video2))
+        page = browser.new_page(viewport={"width": 1280, "height": 920})
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.route("http://127.0.0.1:8787/**", serve)
+        page.goto("http://127.0.0.1:8787/")
+        page.locator('[data-tab="import"]').click()
+        page.locator('[data-exchange-tab="mobile"]').click()
+        expect(page.locator("h3", has_text="휴대폰 메모·일정 QR로 받기")).to_be_visible()
+        page.locator("#sharedQr").click()
+        dlg = page.locator("#qrDlg")
+        expect(page.locator("#schedPw")).to_be_visible(timeout=30000)
+        expect(page.locator("#qrDlgTitle")).to_have_text("휴대폰 일정 받기")
+        expect(dlg.locator("video")).to_have_count(0)
+        page.locator("#schedPw").fill("틀린 비번")
+        page.locator("#schedPw").press("Enter")
+        expect(dlg).to_contain_text("비밀번호")
+        page.locator("#schedPw").fill("일정 비번")
+        page.locator("#schedPw").press("Enter")
+        expect(dlg.locator("[data-sched-key]")).to_have_count(2)
+        expect(dlg).to_contain_text("2026-12-03 10:30")
+        expect(dlg).to_contain_text("#고객사")
+        dlg.locator("[data-sched-key]").nth(1).uncheck()
+        expect(page.locator("#schedApply")).to_have_text("일정 1건 가져오기")
+        page.locator("#schedApply").click()
+        expect(dlg).to_contain_text("일정 1건을 추가했습니다")
+        expect(dlg.locator("[data-sched-key]").nth(0)).to_be_disabled()      # 방금 넣은 것은 이미 있음
+        expect(dlg.locator("[data-sched-key]").nth(0).locator("xpath=..")).to_contain_text("이미 있음")
+        visit = next((t for t in todos.board(limit=50)["items"] if t["title"] == "10:30 고객사 방문"), None)
+        assert visit and visit["scheduled_for"] == "2026-12-03" and visit["tags"] == ["고객사"], visit
+        assert not any(t["title"] == "안전 교육" for t in todos.board(limit=50)["items"])
+        page.locator("#schedOpen").click()
+        expect(dlg).to_be_hidden()
+        expect(page.locator('[data-tab="todos"]')).to_have_class(re.compile(r"\bon\b"))
+        print(f"OK a locked schedule QR from the phone ({len(qr3['parts'])} QR) is read by webcam, "
+              "opens with the password, and only the checked schedule is added to PC schedules")
 
         assert not errors, errors
         browser.close()

@@ -25,7 +25,7 @@ sys.path.insert(0, str(ROOT))
 from playwright.sync_api import expect, sync_playwright  # noqa: E402
 
 import build_mobile  # noqa: E402
-from memoinall import exchange  # noqa: E402
+from memoinall import exchange, schedule_receive  # noqa: E402
 
 TMP = tempfile.TemporaryDirectory(prefix="memoinall-mobile-ui-", ignore_cleanup_errors=True)
 JSQR = ROOT / "memoinall" / "static" / "vendor" / "jsQR.js"   # 화면의 QR 을 읽어 보는 데만 쓴다(앱에는 없다)
@@ -236,6 +236,54 @@ def main():
         expect(page.locator("#eventDlg")).to_be_hidden()
         fits()
         print("OK schedule: add with time and tag, dot on the day, mark done, jump to another month, title required")
+
+        # ---------------------------------------------------------- 일정 PC로 보내기
+        send = page.locator("#sendDlg")
+        page.locator("#calSend").click()
+        expect(send).to_contain_text("PC로 보내기 — 일정 1건")           # 기본: 오늘 이후의 끝내지 않은 일정만
+        expect(page.locator("#sendPick [data-send-ev]")).to_have_count(2)
+        expect(page.locator("#sendPick [data-send-ev]:checked")).to_have_count(1)
+        expect(page.locator("#sendFile")).to_be_hidden()
+        page.locator("#sendEvAll").click()
+        expect(page.locator("#sendTitle")).to_have_text("PC로 보내기 — 일정 2건")
+        page.locator("#sendQr").click()
+        expect(send.locator(".qrs-code")).to_be_visible()
+        expect(send).to_contain_text("일정 2건")
+        page.add_script_tag(path=str(JSQR))
+        r = page.evaluate(READ_QR)
+        sent = schedule_receive.parse(r["text"])
+        assert [(i["title"], i["date"], i["time"]) for i in sent["items"]] == [
+            ("결제 시스템 점검 회의", today.isoformat(), "15:00"), ("고객사 방문", later.isoformat(), "")], sent
+        assert sent["items"][0]["tags"] == ["회의"] and sent["items"][0]["done"] is True
+        assert page.evaluate("S.events.every((e) => typeof e.uid === 'string' && e.uid.length >= 16)")
+        keys = [i["key"] for i in sent["items"]]
+        page.locator("#sendPw").fill("일정 비번")
+        page.locator("#sendQr").click()
+        expect(send).to_contain_text("암호화됨")
+        r = page.evaluate(READ_QR)
+        envelope = json.loads(r["text"])
+        assert envelope["kind"] == "schedules" and "고객사" not in r["text"]       # 겉에는 종류만, 내용은 잠김
+        again = schedule_receive.parse(r["text"], "일정 비번")
+        assert [i["key"] for i in again["items"]] == keys                          # 다시 보내도 같은 일정은 같은 열쇠
+        page.locator("#sendEvNone").click()
+        expect(page.locator("#sendQr")).to_be_disabled()
+        expect(send.locator(".qrs-code")).to_have_count(0)                        # 고른 게 바뀌면 이전 QR 은 지운다
+        page.go_back()
+        expect(send).to_be_hidden()
+        page.locator("#upcoming .what").first.click()
+        expect(page.locator("#evSend")).to_be_visible()
+        page.locator("#evSend").click()
+        expect(page.locator("#sendTitle")).to_have_text("PC로 보내기 — 일정 1건")
+        expect(page.locator("#sendPick [data-send-ev]:checked")).to_have_count(1)
+        page.go_back()
+        page.go_back()
+        expect(page.locator("#eventDlg")).to_be_hidden()
+        page.locator("#addEvent").click()
+        expect(page.locator("#evSend")).to_be_hidden()                             # 아직 없는 일정은 보낼 수 없다
+        page.go_back()
+        fits()
+        print("OK schedules to PC: upcoming ones picked by default, QR opens on the PC (plain and locked), "
+              "each schedule keeps the same key so the PC never duplicates it")
 
         # ---------------------------------------------------------- 보내기 (QR·파일)
         tab("memos")

@@ -15,6 +15,7 @@
   const FORMAT = "memoinall/memos", VERSION = 1;
   const SEALED_FORMAT = "memoinall/sealed", SEALED_VERSION = 1;
   const BACKUP_KIND = "memoinall/mobile-backup";
+  const SCHEDULES_FORMAT = "memoinall/schedules";
   const SCRYPT = { n: 2 ** 15, r: 8, p: 1 };
   const SCRYPT_MAX_N = 2 ** 20;
   const MAX_BYTES = 50_000_000;
@@ -173,11 +174,14 @@
     const key = await aesKey(password, salt, SCRYPT.n, SCRYPT.r, SCRYPT.p);
     const data = new Uint8Array(await crypto.subtle.encrypt(
       { name: "AES-GCM", iv: nonce, additionalData: utf8.encode(SEALED_FORMAT) }, key, utf8.encode(JSON.stringify(payload))));
-    return {
+    const envelope = {
       format: SEALED_FORMAT, version: SEALED_VERSION, count: payload.count,
       kdf: { name: "scrypt", n: SCRYPT.n, r: SCRYPT.r, p: SCRYPT.p, salt: b64(salt) },
       cipher: "AES-256-GCM", nonce: b64(nonce), data: b64(data),
     };
+    // 잠근 일정도 PC 가 열기 전에 일정인지 알아야 일정 화면으로 보낸다. 종류만 겉에 남긴다.
+    if (payload.format === SCHEDULES_FORMAT) envelope.kind = "schedules";
+    return envelope;
   }
 
   const isSealed = (data) => !!data && typeof data === "object" && data.format === SEALED_FORMAT;
@@ -225,10 +229,7 @@
     }
     const pack = { format: FORMAT, version: VERSION, exported_at: nowIso(), note: String(note || "").trim(), count: items.length, memos: items };
     if (backup) pack.backup = BACKUP_KIND;
-    if (schedules) pack.schedules = schedules.map((e) => ({
-      title: e.title, date: e.date, time: e.time || "", note: e.note || "", tags: [...(e.tags || [])],
-      done: !!e.done, created_at: e.created_at, updated_at: e.updated_at || e.created_at,
-    }));
+    if (schedules) pack.schedules = schedules.map(scheduleItem);
     return pack;
   }
 
@@ -271,8 +272,22 @@
   // 이 휴대폰 앱이 만든 백업인지. PC 의 공유 파일에는 이 표시가 없다.
   const isBackup = (pack) => !!pack && pack.backup === BACKUP_KIND;
 
+  // 일정 한 건. uid 는 PC 가 같은 일정을 두 번 넣지 않게 하는 열쇠다(memoinall/schedule_receive.py).
+  function scheduleItem(e) {
+    return {
+      uid: e.uid || "", title: e.title, date: e.date, time: e.time || "", note: e.note || "", tags: [...(e.tags || [])],
+      done: !!e.done, created_at: e.created_at, updated_at: e.updated_at || e.created_at,
+    };
+  }
+
+  // PC로 보내는 일정 꾸러미. PC 는 이걸 받아 자기 일정(할 일)으로 넣는다.
+  function buildSchedules(events) {
+    const schedules = events.map(scheduleItem);
+    return { format: SCHEDULES_FORMAT, version: VERSION, exported_at: nowIso(), count: schedules.length, schedules };
+  }
+
   root.Exchange = {
-    FORMAT, SEALED_FORMAT, BACKUP_KIND, SCRYPT, ExchangeError, PasswordRequired,
-    clean, titleFrom, contentUid, nowIso, scrypt, seal, unseal, isSealed, isBackup, build, parse, items,
+    FORMAT, SEALED_FORMAT, SCHEDULES_FORMAT, BACKUP_KIND, SCRYPT, ExchangeError, PasswordRequired,
+    clean, titleFrom, contentUid, nowIso, scrypt, seal, unseal, isSealed, isBackup, build, buildSchedules, parse, items,
   };
 })(typeof window !== "undefined" ? window : globalThis);

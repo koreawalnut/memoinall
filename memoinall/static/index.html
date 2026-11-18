@@ -1673,8 +1673,9 @@ async function renderImport(version = renderVersion) {
       ${imp.sharedViaQr ? sharedExtra + resetRow(byName.shared) : sourceCard(byName.shared, sharedExtra + sharedPasswordField)}
     </div>
     <div class="panel" data-exchange-section="mobile">
-      <h3>휴대폰 메모 QR로 받기</h3>
-      <p class="desc">휴대폰 앱에서 보낼 메모를 고르고, 휴대폰 화면에 뜬 QR을 PC 웹캠에 비추세요.</p>
+      <h3>휴대폰 메모·일정 QR로 받기</h3>
+      <p class="desc">휴대폰 앱에서 보낼 메모나 일정을 고르고, 휴대폰 화면에 뜬 QR을 PC 웹캠에 비추세요.
+        일정은 확인한 뒤 PC 일정에 추가됩니다.</p>
       <button class="btn primary" type="button" id="sharedQr">QR 찍기</button>
       <div class="note" role="status" id="sharedQrStatus">${imp.sharedViaQr && imp.sharedLocked ? "잠긴 메모입니다. 비밀번호를 입력하세요." : ""}</div>
       ${imp.sharedViaQr ? sharedPasswordField + sourceActions(byName.shared) + '<div id="impOut-shared"></div>' : ""}
@@ -1838,7 +1839,9 @@ async function renderImport(version = renderVersion) {
   };
   $("#sharedQr").onclick = () => {
     if (imp.busy) { toast("진행 중인 가져오기가 끝난 뒤 QR을 찍으세요"); return; }
-    scanQrDialog((text) => loadShared(async () => text, "QR로 받은 메모", { what: "QR" }));
+    scanQrDialog((text) => (qrPayloadKind(text) === "schedules"
+      ? receiveSchedules(text)
+      : loadShared(async () => text, "QR로 받은 메모", { what: "QR" })));
   };
   $("#mobileInstall").onclick = showInstallQr;
   $("#impSharedPw").value = imp.sharedPassword;
@@ -2106,7 +2109,7 @@ function qrDialog(title) {
 function scanQrDialog(onText) {
   const dlg = qrDialog("휴대폰 QR 찍어서 받기");
   $("#qrDlgBody").innerHTML = `<div id="qrDlgScan"></div>
-    <div class="note" style="margin-top:10px">휴대폰 앱에서 메모를 고르고 <b>PC로 보내기 → QR로 보여주기</b>를 누른 뒤 화면을 웹캠에 비추세요.
+    <div class="note" style="margin-top:10px">휴대폰 앱에서 메모나 일정을 고르고 <b>PC로 보내기 → QR로 보여주기</b>를 누른 뒤 화면을 웹캠에 비추세요.
       여러 장이면 자동으로 넘어가니 그대로 두면 됩니다.</div>
     <div class="note" style="margin-top:6px">휴대폰 앱이 아직 없다면 <button class="btn ghost" type="button" id="qrToInstall">설치 QR 보기</button></div>`;
   const scan = QrShare.scan($("#qrDlgScan"), {
@@ -2115,6 +2118,103 @@ function scanQrDialog(onText) {
   dlg._stop = () => scan.stop();
   $("#qrToInstall").onclick = showInstallQr;
   if (!dlg.open) dlg.showModal();
+}
+
+// ---------------------------------------------------------------- 휴대폰 일정 받기
+// 휴대폰이 보낸 QR 이 메모인지 일정인지. 잠근 일정은 봉투 겉에 kind 가 적혀 온다.
+function qrPayloadKind(text) {
+  try {
+    const d = JSON.parse(text);
+    return d && (d.format === "memoinall/schedules" || d.kind === "schedules") ? "schedules" : "memos";
+  } catch (_) { return "memos"; }
+}
+
+const schedRx = { content: "", password: "", data: null, locked: false, error: "", picked: new Set(), busy: false, result: null };
+
+async function receiveSchedules(content) {
+  Object.assign(schedRx, { content, password: "", data: null, locked: false, error: "", picked: new Set(), busy: false, result: null });
+  const dlg = qrDialog("휴대폰 일정 받기");
+  if (!dlg.open) dlg.showModal();
+  await previewSchedules();
+}
+
+async function previewSchedules() {
+  const body = $("#qrDlgBody");
+  if (body) body.innerHTML = '<div class="status">확인하는 중…</div>';
+  try {
+    const r = await api("/api/schedule/receive/preview", { method: "POST", body: { content: schedRx.content, password: schedRx.password } });
+    schedRx.locked = !!r.needs_password;
+    schedRx.data = r.needs_password ? null : r;
+    schedRx.error = "";
+    if (schedRx.data) schedRx.picked = new Set(r.items.filter((x) => !x.exists).map((x) => x.key));
+  } catch (err) {
+    schedRx.data = null;
+    schedRx.error = err.message;
+  }
+  paintScheduleReceive();
+}
+
+function paintScheduleReceive() {
+  const body = $("#qrDlgBody");
+  if (!body || !$("#qrDlg")?.open) return;
+  const d = schedRx.data;
+  let html = "";
+  if (!d && (schedRx.locked || /비밀번호/.test(schedRx.error))) {
+    html += `<div class="note">잠긴 일정입니다. 휴대폰에서 정한 비밀번호를 넣으세요.</div>
+      <form id="schedPwForm" class="row" style="margin-top:8px"><input id="schedPw" type="password" autocomplete="off" aria-label="비밀번호" placeholder="비밀번호" style="flex:1" />
+        <button class="btn primary" type="submit">열기</button></form>`;
+  }
+  if (schedRx.error) html += `<div class="status" style="color:var(--danger);margin-top:8px">${esc(schedRx.error)}</div>`;
+  if (d) {
+    const fresh = d.items.filter((x) => !x.exists).length;
+    html += `<div class="note">휴대폰에서 보낸 일정 ${d.items.length}건${d.items.length - fresh ? ` · 이미 받은 ${d.items.length - fresh}건은 빼 두었습니다` : ""}${d.skipped ? ` · 읽을 수 없는 ${d.skipped}건 제외` : ""}.
+      고른 일정을 PC 일정에 추가합니다(시각은 이름 앞에, 메모는 함께 저장되는 메모에 들어갑니다).</div>
+      <div class="row" style="margin:10px 0 4px"><button class="btn ghost" type="button" id="schedAll">모두 선택</button>
+        <button class="btn ghost" type="button" id="schedNone">선택 해제</button></div>
+      <div style="max-height:46vh;overflow:auto">${d.items.map((x) => `<label style="display:flex;gap:8px;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--line)">
+        <input type="checkbox" data-sched-key="${esc(x.key)}" ${schedRx.picked.has(x.key) ? "checked" : ""} ${x.exists ? "disabled" : ""} />
+        <span style="min-width:0"><b style="overflow-wrap:anywhere">${esc(x.title)}</b>
+          <span class="meta" style="display:block">${esc(x.date)}${x.time ? " " + esc(x.time) : ""}${x.tags.length ? " · " + x.tags.map((t) => "#" + esc(t)).join(" ") : ""}${x.done ? " · 끝냄" : ""}${x.note ? " · 메모 있음" : ""}${x.exists ? ' · <span style="color:var(--warn)">이미 있음</span>' : ""}</span></span></label>`).join("")
+        || '<div class="status">받을 수 있는 일정이 없습니다.</div>'}</div>
+      <div class="row" style="margin-top:12px"><span class="spacer"></span>
+        <button class="btn primary" type="button" id="schedApply" ${schedRx.picked.size && !schedRx.busy ? "" : "disabled"}>${schedRx.picked.size ? `일정 ${schedRx.picked.size}건 가져오기` : "가져오기"}</button></div>`;
+  }
+  if (schedRx.result) {
+    html += `<div class="status" style="margin-top:10px">일정 ${schedRx.result.imported}건을 추가했습니다${schedRx.result.skipped_existing ? ` · 이미 있던 ${schedRx.result.skipped_existing}건은 건너뛰었습니다` : ""}.
+      <button class="btn" type="button" id="schedOpen" style="margin-left:6px">일정에서 보기</button></div>`;
+  }
+  body.innerHTML = html;
+  const form = $("#schedPwForm");
+  if (form) {
+    form.onsubmit = (e) => { e.preventDefault(); schedRx.password = $("#schedPw").value; if (schedRx.password) previewSchedules(); };
+    setTimeout(() => $("#schedPw")?.focus(), 30);
+  }
+  body.querySelectorAll("[data-sched-key]").forEach((c) => {
+    c.onchange = () => { c.checked ? schedRx.picked.add(c.dataset.schedKey) : schedRx.picked.delete(c.dataset.schedKey); paintScheduleReceive(); };
+  });
+  if ($("#schedAll")) $("#schedAll").onclick = () => { d.items.filter((x) => !x.exists).forEach((x) => schedRx.picked.add(x.key)); paintScheduleReceive(); };
+  if ($("#schedNone")) $("#schedNone").onclick = () => { schedRx.picked.clear(); paintScheduleReceive(); };
+  if ($("#schedApply")) $("#schedApply").onclick = applySchedules;
+  if ($("#schedOpen")) $("#schedOpen").onclick = () => { $("#qrDlg").close(); goTab("todos"); };
+}
+
+async function applySchedules() {
+  if (schedRx.busy || !schedRx.picked.size) return;
+  schedRx.busy = true;
+  paintScheduleReceive();
+  try {
+    const r = await api("/api/schedule/receive/apply", { method: "POST",
+      body: { content: schedRx.content, password: schedRx.password, selected: [...schedRx.picked] } });
+    toast(`일정 ${r.imported}건을 추가했습니다`);
+    schedRx.busy = false;
+    await previewSchedules();          // 방금 넣은 것은 '이미 있음'으로 바뀐다
+    schedRx.result = r;
+    paintScheduleReceive();
+  } catch (err) {
+    schedRx.busy = false;
+    schedRx.error = err.message;
+    paintScheduleReceive();
+  }
 }
 
 // ---------------------------------------------------------------- 휴대폰 앱 설치 QR
