@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from icalendar import Calendar
 from memoinall import calendar_import as calendars, config, db, schedule_share as share, schedule_tags as tags, store, todos
 from memoinall.api import app
+from memoinall import tags as my_tags
 
 
 async def no_prepare():
@@ -107,6 +108,8 @@ class ScheduleShareTests(unittest.TestCase):
         self.assertEqual(todos.board()["items"][0]["tags"], ["원래"])
 
     def test_preview_selection_privacy_and_tag_round_trip(self):
+        for tag in ("업무", "팀"):
+            my_tags.add(tag)
         keep = self.create(tags=["팀", "업무"], title="공유할 제목")
         self.create(tags=["개인"], title="보내지 않을 제목")
         db.execute("UPDATE memos SET body=? WHERE id=?", ("비밀 메모 원문 private-TOKEN", keep["memo_id"]))
@@ -126,6 +129,7 @@ class ScheduleShareTests(unittest.TestCase):
         self.assertEqual(parsed[0]["end_day"], "2026-11-20")
 
     def test_export_checks_reviewed_items_and_changed_or_deleted_schedules(self):
+        my_tags.add("변경")
         item = self.create()
         plan = self.preview()
         for selected in [None, [], "bad", [1], ["not-reviewed"], [plan["items"][0]["key"]] * 2]:
@@ -156,6 +160,25 @@ class ScheduleShareTests(unittest.TestCase):
             todos.update(item["id"], {"status": status})
         plan = self.preview(tag="팀")
         self.assertEqual((plan["total"], plan["undated"]), (1, 1))
+
+    def test_registered_share_tags_apply_to_native_and_external_files(self):
+        for tag in ("업무", "기획"):
+            my_tags.add(tag)
+        self.create(tags=["기획", "미등록"])
+        self.create(tags=["미등록"])
+        self.external()
+        plan = self.preview(tags=["업무", "기획"], include_external=True)
+        self.assertEqual(sorted(item["tags"] for item in plan["items"]), [["기획"], ["업무"]])
+        events = Calendar.from_ical(self.export(plan)["content"]).walk("VEVENT")
+        self.assertEqual(sorted([str(t) for t in event["CATEGORIES"].cats] for event in events), [["기획"], ["업무"]])
+        whole = self.preview(tags=[], include_external=True)
+        self.assertEqual(whole["total"], 3)
+        self.assertIn([], [item["tags"] for item in whole["items"]])
+        with self.assertRaises(ValueError):
+            self.preview(tags=["미등록"])
+        my_tags.remove("기획")
+        with self.assertRaises(calendars.Conflict):
+            self.export(plan)
 
     def test_period_overlap_all_day_exclusive_end_and_uid_stability(self):
         item = self.create(scheduled_for="2026-10-30")

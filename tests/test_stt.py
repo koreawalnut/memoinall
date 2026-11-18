@@ -7,6 +7,9 @@
 from __future__ import annotations
 
 import base64
+import asyncio
+import json
+from contextlib import asynccontextmanager
 import io
 import os
 import shutil
@@ -28,7 +31,7 @@ sys.path.insert(0, str(ROOT))
 import numpy as np  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from memoinall import db, store, stt  # noqa: E402
+from memoinall import config, db, store, stt, stt_live  # noqa: E402
 from memoinall.api import app  # noqa: E402
 from memoinall.providers.openai_compat import OpenAICompatProvider  # noqa: E402
 
@@ -95,6 +98,7 @@ def fake_client(completions):
 
 
 def main() -> int:
+    assert config.DB_PATH.resolve() == (Path(TMP) / "memo.db").resolve()
     with patch.object(store, "start_worker"), TestClient(app) as c:
         # ---------------------------------------------------------------- 기본값
         with patch.object(stt, "local_package_available", return_value=True):
@@ -127,6 +131,43 @@ def main() -> int:
         check("LLM 연결과 같은 Gemini 키를 쓴다", s["ready"] and s["gemini_key"] and "Google" in s["message"], s)
         settings_view = c.get("/api/settings").json()["settings"]
         check("키는 가려서 내보낸다", "TESTKEY" not in settings_view["llm.gemini.api_key"]["value"])
+
+        c.put("/api/settings", json={"values": {"stt.gemini.model": stt.LIVE_MODEL}})
+        check("기존 Live 모델 설정 인식", c.get("/api/stt/status").json()["gemini_transport"] == "live")
+        frames = []
+
+        @asynccontextmanager
+        async def fake_connect(url, **options):
+            assert url == stt_live.URL and options["additional_headers"]["x-goog-api-key"]
+            replies = asyncio.Queue()
+
+            async def send(raw):
+                frame = json.loads(raw)
+                frames.append(frame)
+                if "setup" in frame:
+                    await replies.put('{"setupComplete":{}}')
+                elif "audio" in frame["realtimeInput"]:
+                    await replies.put(json.dumps({"serverContent": {"interimInputTranscription": {"text": "중간"}}}))
+                elif "activityEnd" in frame["realtimeInput"]:
+                    await replies.put(json.dumps({"serverContent": {"inputTranscription": {"text": "확정"}}}))
+
+            yield SimpleNamespace(send=send, recv=replies.get)
+
+        with patch.object(stt_live, "connect", fake_connect):
+            check("Live 연결 테스트", c.post("/api/stt/live/test", json={"api_key": "test"}).json()["ok"])
+            with c.websocket_connect("/api/stt/live", headers={"origin": "http://testserver"}) as ws:
+                assert ws.receive_json() == {"ready": True}
+                ws.send_text("start")
+                ws.send_bytes(b"\x01\x02" * 1600)
+                assert ws.receive_json() == {"interim": "중간"}
+                ws.send_text("end")
+                ws.send_text("finish")
+                assert ws.receive_json() == {"final": "확정"}
+                assert ws.receive_json() == {"done": True}
+            check("Live 한국어 설정·PCM 전송", frames[0]["setup"]["inputAudioTranscription"]["languageCodes"] == ["ko-KR"]
+                  and base64.b64decode(frames[-2]["realtimeInput"]["audio"]["data"]) == b"\x01\x02" * 1600)
+        check("Live 설정은 기본 HTTP 전송을 거부", post_wav(c, wav_bytes()).status_code == 400)
+        c.put("/api/settings", json={"values": {"stt.gemini.transport": "basic", "stt.gemini.model": "gemini-2.5-flash-lite"}})
 
         # ---------------------------------------------------------------- Gemini 요청 형태
         completions = FakeCompletions([("  내일 회의는 3시입니다.  ", "stop")])

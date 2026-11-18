@@ -1,13 +1,13 @@
 // Schedule tags and explicit, reviewed calendar-file sharing.
-function scheduleTagOptions(selected) {
-  const names = [...new Set([...(todoBoard.tagChoices || []).map((tag) => tag.name), ...(selected ? [selected] : [])])].sort();
-  return '<option value="">모든 태그</option>' + names.map((name) => `<option value="${esc(name)}" ${name === selected ? "selected" : ""}>#${esc(name)}</option>`).join("");
+function scheduleTagOptions(names, selected) {
+  return names.map((name) => `<option value="${esc(name)}" ${name === selected ? "selected" : ""}>#${esc(name)}</option>`).join("");
 }
 
 function scheduleTagPills(tags, interactive = true) {
   return (tags || []).map((tag) => {
-    const color = [...tag].reduce((n, c) => n + c.codePointAt(0), 0) % 5;
-    return interactive ? `<button type="button" class="schedule-tag tag-${color}" data-schedule-filter="${esc(tag)}" title="이 태그의 일정 보기">#${esc(tag)}</button>` : `<span class="schedule-tag tag-${color}">#${esc(tag)}</span>`;
+    const definition = todoBoard.registeredTags.find((entry) => entry.name === tag);
+    const colorClass = definition ? `registered-tag t-${esc(definition.color)}` : `tag-${[...tag].reduce((n, c) => n + c.codePointAt(0), 0) % 5}`;
+    return interactive ? `<button type="button" class="schedule-tag ${colorClass}" data-schedule-filter="${esc(tag)}" title="이 태그의 일정 보기">#${esc(tag)}</button>` : `<span class="schedule-tag ${colorClass}">#${esc(tag)}</span>`;
   }).join("");
 }
 
@@ -16,16 +16,44 @@ function scheduleItemTags(item) {
   return `<div class="schedule-tags">${scheduleTagPills(item.tags)}<button type="button" class="schedule-tag-edit" data-schedule-tags="${id}" aria-label="${esc(item.title)} 태그 편집">${todoIcon("tag")} ${item.tags?.length ? "편집" : "태그 추가"}</button></div>`;
 }
 
-function scheduleTagField(id, tags = []) {
-  return `<div class="field"><label for="${id}">태그 (선택)</label><input id="${id}" maxlength="1000" value="${esc(tags.join(", "))}" placeholder="예: 업무, 팀프로젝트, 개인"><p class="todo-help">쉼표로 구분해 최대 20개. 띄어쓰기는 밑줄로 바뀝니다.</p></div>`;
+function scheduleTagField(id, selected, label = "내 태그 (선택)") {
+  const registered = todoBoard.registeredTags;
+  const existing = selected.filter((name) => !registered.some((tag) => tag.name === name));
+  const chip = (tag) => tagChip(tag, selected.includes(tag.name), `aria-pressed="${selected.includes(tag.name)}"`);
+  return `<div class="field schedule-tag-field" id="${id}" role="group" aria-labelledby="${id}Label">
+    <strong id="${id}Label">${label}</strong>
+    ${registered.length ? `<div class="tagrow">${registered.map(chip).join("")}</div>` : '<p class="todo-help">설정 → 내 태그에서 태그를 만들면 여기에 표시됩니다.</p>'}
+    ${existing.length ? `<span>이 일정에 붙어 있는 기타 태그</span><div class="tagrow">${existing.map((name) => chip({ name })).join("")}</div>` : ""}
+  </div>`;
+}
+
+function bindScheduleTagField(id) {
+  const field = document.getElementById(id);
+  field.onclick = (event) => {
+    const chip = event.target.closest("button[data-tag]");
+    if (!chip) return;
+    if (!chip.classList.contains("on") && scheduleReadTags(id).length >= 20) {
+      toast("일정 태그는 최대 20개까지 선택할 수 있습니다.");
+      return;
+    }
+    chip.setAttribute("aria-pressed", chip.classList.toggle("on"));
+    calendarEntry.dirty = true;
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  };
 }
 
 function scheduleReadTags(id) {
-  return document.getElementById(id).value.split(",").map((value) => value.trim()).filter(Boolean);
+  return [...document.getElementById(id).querySelectorAll('[data-tag][aria-pressed="true"]')].map((chip) => chip.dataset.tag);
 }
 
 function scheduleToolbar() {
-  return `<div class="schedule-toolbar"><div class="schedule-filter"><label for="scheduleTagFilter">${todoIcon("tag")} 태그</label><select id="scheduleTagFilter">${scheduleTagOptions(todoBoard.tag)}</select>${todoBoard.tag ? '<button class="btn ghost" id="scheduleClearTag" type="button">필터 해제</button>' : ""}</div><button class="btn" type="button" id="scheduleShareOpen">${todoIcon("share")} 일정 공유</button></div>`;
+  const registered = todoBoard.registeredTags.map((tag) => tag.name);
+  const names = new Set(todoBoard.tagChoices.map((tag) => tag.name));
+  if (todoBoard.tag) names.add(todoBoard.tag);
+  const others = [...names].filter((name) => !registered.includes(name)).sort();
+  return `<div class="schedule-toolbar"><div class="schedule-filter"><label for="scheduleTagFilter">${todoIcon("tag")} 태그</label><select id="scheduleTagFilter"><option value="">모든 태그</option>
+    ${registered.length ? `<optgroup label="내 태그">${scheduleTagOptions(registered, todoBoard.tag)}</optgroup>` : ""}
+    ${others.length ? `<optgroup label="기타 태그">${scheduleTagOptions(others, todoBoard.tag)}</optgroup>` : ""}</select>${todoBoard.tag ? '<button class="btn ghost" id="scheduleClearTag" type="button">필터 해제</button>' : ""}</div><button class="btn" type="button" id="scheduleShareOpen">${todoIcon("share")} 일정 공유</button></div>`;
 }
 
 function bindSchedule() {
@@ -46,17 +74,10 @@ function bindSchedule() {
 function openScheduleTags(item, key) {
   const dialog = calendarDialog("scheduleTagsDialog", "일정 태그 편집");
   dialog.innerHTML = `<form id="scheduleTagsForm"><div class="dlg-h"><strong>일정 태그 편집</strong></div><div class="dlg-b"><p class="schedule-dialog-title">${esc(item.title)}</p>${scheduleTagField("scheduleTagsInput", item.tags)}
-    <div class="schedule-tag-suggestions">${(todoBoard.tagChoices || []).map((tag) => `<button type="button" class="chip" data-tag-suggestion="${esc(tag.name)}">+ #${esc(tag.name)}</button>`).join("")}</div>
     <p class="todo-help">${item.external ? "이 앱에 붙인 태그는 원본 캘린더를 새로고침해도 유지됩니다." : item.tags_inherited ? "메모의 태그를 가져왔습니다. 저장하면 이 일정의 태그를 따로 관리합니다." : "이 일정의 태그만 바뀝니다."}</p><p id="scheduleTagsError" class="todo-error" role="alert"></p></div>
     <div class="dlg-f"><button class="btn" type="button" id="scheduleTagsClose">닫기</button><button class="btn primary" type="submit">저장</button></div></form>`;
   $("#scheduleTagsClose").onclick = () => dialog.close();
-  $("#scheduleTagsForm").oninput = () => { calendarEntry.dirty = true; };
-  dialog.querySelectorAll("[data-tag-suggestion]").forEach((button) => {
-    button.onclick = () => {
-      $("#scheduleTagsInput").value = [...new Set([...scheduleReadTags("scheduleTagsInput"), button.dataset.tagSuggestion])].join(", ");
-      calendarEntry.dirty = true;
-    };
-  });
+  bindScheduleTagField("scheduleTagsInput");
   $("#scheduleTagsForm").onsubmit = async (event) => {
     event.preventDefault();
     if (calendarEntry.busy) return;
@@ -73,7 +94,7 @@ function openScheduleTags(item, key) {
     finally { calendarEntry.busy = false; dialog.querySelectorAll("button,input").forEach((el) => { el.disabled = false; }); }
   };
   dialog.showModal();
-  $("#scheduleTagsInput").focus();
+  dialog.querySelector("[data-tag]")?.focus();
 }
 
 function openScheduleShare() {
@@ -81,11 +102,14 @@ function openScheduleShare() {
   const first = todoCalendar.month + "-01";
   const last = new Date(first + "T12:00:00");
   last.setMonth(last.getMonth() + 1, 0);
+  const initialTags = todoBoard.registeredTags.some((tag) => tag.name === todoBoard.tag) ? [todoBoard.tag] : [];
   let plan = null;
   dialog.innerHTML = `<div class="dlg-h"><strong>${todoIcon("share")} 일정 공유</strong><button class="btn ghost" type="button" id="scheduleShareClose">닫기</button></div><div class="dlg-b">
     <div class="schedule-share-intro"><span class="schedule-share-step">1</span><div><strong>보낼 일정만 골라 주세요</strong><p>달력 파일(.ics)을 저장해 메신저나 메일로 전달할 수 있습니다. 서버나 계정 연결 없이 사용할 수 있습니다.</p></div></div>
     <form id="scheduleShareForm"><div class="calendar-form-dates"><div class="field"><label for="scheduleShareStart">시작일</label><input id="scheduleShareStart" type="date" value="${first}" min="1970-01-01" max="2100-12-31" required></div><div class="field"><label for="scheduleShareEnd">종료일 (최대 1년)</label><input id="scheduleShareEnd" type="date" value="${todoCalendarISO(last)}" min="1970-01-01" max="2100-12-31" required></div></div>
-    <div class="field"><label for="scheduleShareTag">공유할 태그</label><select id="scheduleShareTag">${scheduleTagOptions(todoBoard.tag)}</select></div>
+    ${scheduleTagField("scheduleShareTag", initialTags, "공유할 내 태그")}
+    <div class="schedule-share-options"><label><input type="checkbox" id="scheduleShareWholePeriod" ${!todoBoard.tag && !todoBoard.registeredTags.length ? "checked" : ""}> 기간 내 전체 일정</label></div>
+    <p class="todo-help">태그를 여러 개 고르면 그중 하나라도 붙은 일정을 공유합니다.</p>
     <div class="schedule-share-options"><label><input type="checkbox" id="scheduleShareExternal"> 가져온 외부 일정도 포함</label><label><input type="checkbox" id="scheduleShareDetails" disabled> 외부 일정의 장소·상세 내용도 포함</label></div>
     <p class="todo-help">일정 제목·날짜·태그가 공유됩니다. 메모 원문은 포함하지 않습니다. 기간에 걸친 일정은 전체 기간으로 공유합니다.</p><button class="btn primary" type="submit" id="scheduleSharePreviewRun">공유할 일정 확인</button></form>
     <p id="scheduleShareError" class="todo-error" role="alert"></p><p id="scheduleShareStatus" class="todo-help" role="status"></p><div id="scheduleSharePreview"></div>
@@ -98,12 +122,23 @@ function openScheduleShare() {
   };
   const reset = () => {
     plan = null; calendarEntry.dirty = true;
+    $("#scheduleShareError").textContent = "";
     $("#scheduleSharePreview").innerHTML = "";
     $("#scheduleShareStatus").textContent = "";
     if (!$("#scheduleShareExternal").checked) $("#scheduleShareDetails").checked = false;
     $("#scheduleShareDetails").disabled = !$("#scheduleShareExternal").checked;
   };
-  $("#scheduleShareForm").oninput = reset;
+  bindScheduleTagField("scheduleShareTag");
+  $("#scheduleShareForm").oninput = (event) => {
+    if (event.target.id === "scheduleShareTag") $("#scheduleShareWholePeriod").checked = false;
+    if (event.target.id === "scheduleShareWholePeriod" && event.target.checked) {
+      $("#scheduleShareTag").querySelectorAll('[aria-pressed="true"]').forEach((chip) => {
+        chip.classList.remove("on");
+        chip.setAttribute("aria-pressed", "false");
+      });
+    }
+    reset();
+  };
   $("#scheduleShareForm").onchange = reset;
   $("#scheduleShareClose").onclick = () => dialog.close();
   const run = async (action) => {
@@ -122,7 +157,12 @@ function openScheduleShare() {
   };
   $("#scheduleShareForm").onsubmit = (event) => {
     event.preventDefault();
-    const options = { start: $("#scheduleShareStart").value, end: $("#scheduleShareEnd").value, tag: $("#scheduleShareTag").value || null,
+    const tags = scheduleReadTags("scheduleShareTag");
+    if (!tags.length && !$("#scheduleShareWholePeriod").checked) {
+      $("#scheduleShareError").textContent = "공유할 내 태그 또는 ‘기간 내 전체 일정’을 선택해 주세요.";
+      return;
+    }
+    const options = { start: $("#scheduleShareStart").value, end: $("#scheduleShareEnd").value, tags,
       include_external: $("#scheduleShareExternal").checked, include_details: $("#scheduleShareDetails").checked };
     run(async () => {
       plan = null; $("#scheduleSharePreview").innerHTML = "";

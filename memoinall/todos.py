@@ -7,7 +7,7 @@ import calendar
 from collections import Counter
 from datetime import date, datetime
 
-from . import db, todo_extract, schedule_tags
+from . import db, todo_extract, schedule_tags, tags
 
 STATUSES = {"open", "waiting", "review", "done", "dismissed"}
 GROUPS = ("today", "upcoming", "waiting", "unscheduled", "review", "done", "dismissed")
@@ -257,6 +257,7 @@ def board(*, today: str | None = None, view: str = "all", limit: int = 100, offs
     items.sort(key=sort_key)
     total = len(items)
     return {"items": items[offset:offset + limit], "counts": counts, "total": total, "tag": tag, "tag_choices": schedule_tags.choices(),
+            "registered_tags": tags.all_tags(with_counts=False),
             "today": today, "offset": offset, "has_more": offset + limit < total}
 
 
@@ -333,6 +334,7 @@ def calendar_view(*, month: str, selected: str | None = None, today: str | None 
               "events": sorted(events.values(), key=order), "count": len(events)} for day, events in days.items()]
     items.sort(key=order)
     return {"month": month, "selected": selected, "today": today, "days": cells, "counts": counts, "tag": tag, "tag_choices": schedule_tags.choices(),
+            "registered_tags": tags.all_tags(with_counts=False),
             "month_count": len(month_ids), "external_count": len(external_ids), "sources": calendar_import.sources(),
             "overdue_count": overdue, "undated_waiting": undated_waiting,
             "items": items[offset:offset + limit], "total": len(items), "offset": offset,

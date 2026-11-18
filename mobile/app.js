@@ -502,7 +502,7 @@ $("#sendQr").onclick = async () => {
   try {
     const { text, count } = await sendText();
     const parts = await QrShare.encode(text);
-    $("#sendOut").innerHTML = `<div class="note" style="margin-bottom:10px">PC 앱의 <b>가져오기·공유 → 동료와 주고받기 → QR 찍기</b>를 누르고
+    $("#sendOut").innerHTML = `<div class="note" style="margin-bottom:10px">PC 앱의 <b>가져오기·공유 → 휴대폰 QR·설치 → QR 찍기</b>를 누르고
       이 화면을 웹캠에 비추세요.${parts.length > 1 ? ` QR <b>${parts.length}장</b>이 자동으로 넘어가니 그대로 두면 됩니다.` : ""}</div>
       <div id="qrHere"></div>
       <div class="muted" style="margin-top:8px;text-align:center">메모 ${count}건${$("#sendPw").value ? " · 암호화됨" : ""}</div>`;

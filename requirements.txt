@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 fastapi>=0.110
 uvicorn[standard]>=0.27
+websockets>=14,<17
 numpy>=1.24
 cryptography>=42   # 동료와 주고받는 메모 파일 암호화
 icalendar>=6.3,<7

@@ -485,6 +485,7 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="/static/qrshare.js"></script>
+<script src="/static/stt-live.js"></script>
 <script src="/static/generate.js"></script>
 <script src="/static/workflows.js"></script>
 <script src="/static/collections.js"></script>
@@ -644,7 +645,7 @@ $("#capture").addEventListener("input", captureChanged);
 // 소리는 16kHz 로 직접 받아 구간마다 WAV 로 보낸다(서버에 오디오 디코더가 필요 없다).
 const MIC_RATE = 16000;
 const mic = {
-  state: "idle", max: 300, watch: null, timer: null, started: 0, stream: null, ctx: null, session: 0,
+  state: "idle", starting: false, live: null, max: 300, watch: null, timer: null, started: 0, stream: null, ctx: null, session: 0,
   // 소리 판정(100ms RMS). voice 를 넘으면 말소리, dead 아래가 3초 이어지면 마이크에 소리가 안 들어오는 것.
   voiceRms: 0.012, deadRms: 0.002, pauseMs: 700,
   seg: [], segLen: 0, segVoiced: false, segId: 0, quietMs: 0, deadMs: 0, heard: false,
@@ -696,7 +697,12 @@ function openSttSettings(ev) {
 
 async function micClick() {
   if (mic.state === "recording") return stopRecording();
-  if (mic.state !== "idle") return;
+  if (mic.state !== "idle" || mic.starting) return;
+  mic.starting = true;
+  try { await beginMic(); } finally { mic.starting = false; }
+}
+
+async function beginMic() {
   let info;
   try { info = await api("/api/stt/status"); }
   catch (e) { toast("음성 입력 상태를 확인하지 못했습니다: " + e.message); return; }
@@ -796,16 +802,28 @@ async function startRecording(info) {
   micHint("마이크 준비 중…");
   try {
     ctx = await micGraph(stream);
+    if (info.engine === "gemini" && info.gemini_transport === "live") {
+      micHint("Gemini Live 연결 중…");
+      mic.live = await openLiveMic((msg) => {
+        if ("final" in msg) {
+          if (msg.final) mic.committed = [mic.committed, msg.final.trim()].filter(Boolean).join(" ");
+          mic.interim = "";
+        } else if ("interim" in msg) mic.interim = msg.interim;
+        micShow();
+      }, (message) => { mic.error = message; stopRecording(); });
+    }
   } catch (e) {
+    ctx?.close().catch(() => {});
     stream.getTracks().forEach((t) => t.stop());
     ta.value = before;
     paintMic("idle");
+    micHint(e.message);
     toast(`녹음을 시작하지 못했습니다: ${e.message}`);
     return;
   }
   Object.assign(mic, { stream, ctx, started: Date.now() });
   paintMic("recording");
-  api("/api/stt/prepare", { method: "POST" }).catch(() => {});  // 첫 말을 하는 동안 모델을 올려 둔다
+  if (info.engine === "local") api("/api/stt/prepare", { method: "POST" }).catch(() => {});
   const tick = () => {
     const ms = Date.now() - mic.started;
     if (ms >= mic.max * 1000) return stopRecording();
@@ -825,6 +843,26 @@ function micAudio(chunk) {
   $("#mic").style.setProperty("--lvl", Math.min(1, rms / 0.12).toFixed(2));
   mic.deadMs = rms < mic.deadRms ? mic.deadMs + ms : 0;
   const voiced = rms > mic.voiceRms;
+  if (mic.live) {
+    // Keep pre-roll for soft initial consonants and stream each block while speaking.
+    if (!mic.segVoiced) {
+      mic.seg.push(chunk);
+      if (mic.seg.length > 5) mic.seg.shift();
+      if (!voiced) return;
+      mic.segVoiced = mic.heard = true;
+      mic.live.send("start");
+      for (const block of mic.seg) mic.live?.send(micPCM16(block));
+      mic.seg = [];
+    } else {
+      mic.live.send(micPCM16(chunk));
+    }
+    mic.quietMs = voiced ? 0 : mic.quietMs + ms;
+    if (mic.quietMs >= mic.pauseMs) {
+      mic.live?.send("end");
+      mic.segVoiced = false;
+    }
+    return;
+  }
   mic.seg.push(chunk);
   mic.segLen += chunk.length;
   if (voiced) { mic.segVoiced = mic.heard = true; mic.quietMs = 0; } else mic.quietMs += ms;
@@ -897,6 +935,8 @@ async function stopRecording(cancel = false) {
   mic.ctx.close().catch(() => {});
   const ta = $("#capture");
   if (cancel) {
+    mic.live?.cancel();
+    mic.live = null;
     mic.session++;  // 아직 오고 있는 결과는 버린다
     ta.value = mic.before;
     ta.setSelectionRange(mic.at, mic.at);
@@ -906,10 +946,18 @@ async function stopRecording(cancel = false) {
   }
   paintMic("busy");
   micHint("받아쓰기 마무리하는 중…");
-  if (mic.segVoiced) micCommit();
-  await mic.chain;
+  if (mic.live) {
+    if (mic.segVoiced) mic.live.send("end");
+    const error = await mic.live.finish();
+    if (error) mic.error = error;
+    mic.live = null;
+  } else {
+    if (mic.segVoiced) micCommit();
+    await mic.chain;
+  }
   mic.interim = "";
   micShow();
+  if (!mic.committed) ta.value = mic.before;
   paintMic("idle");
   ta.focus();
   ta.setSelectionRange(mic.at + mic.shown, mic.at + mic.shown);
@@ -921,6 +969,12 @@ async function stopRecording(cancel = false) {
   else micHint("말소리를 알아듣지 못했습니다 — 마이크에 가까이 대고 다시 말해 보세요");
 }
 
+function micPCM16(pcm) {
+  const bytes = new DataView(new ArrayBuffer(pcm.length * 2));
+  for (let i = 0; i < pcm.length; i++) bytes.setInt16(i * 2, Math.max(-1, Math.min(1, pcm[i])) * 0x7fff, true);
+  return bytes.buffer;
+}
+
 function micWav(pcm) {
   const n = pcm.length, view = new DataView(new ArrayBuffer(44 + n * 2));
   const ascii = (at, s) => { for (let i = 0; i < s.length; i++) view.setUint8(at + i, s.charCodeAt(i)); };
@@ -928,7 +982,7 @@ function micWav(pcm) {
   ascii(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
   view.setUint32(24, MIC_RATE, true); view.setUint32(28, MIC_RATE * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
   ascii(36, "data"); view.setUint32(40, n * 2, true);
-  for (let i = 0; i < n; i++) view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 0x7fff, true);
+  new Uint8Array(view.buffer, 44).set(new Uint8Array(micPCM16(pcm)));
   return new Blob([view.buffer], { type: "audio/wav" });
 }
 
@@ -1384,7 +1438,7 @@ async function renderRollup(version = renderVersion) {
 // 왜 그 근거가 뽑혔는지 안 보이면 결과물을 믿을 수 없기 때문.
 // AI document UI is in generate.js.
 
-const imp = { section: "import", path: "", sharedPath: "", sharedContent: "", sharedName: "", sharedPassword: "", sharedLocked: false, minChars: 0, update: false, tags: [], results: {}, busy: false };
+const imp = { section: "import", path: "", sharedPath: "", sharedContent: "", sharedName: "", sharedPassword: "", sharedLocked: false, sharedViaQr: false, minChars: 0, update: false, tags: [], results: {}, busy: false };
 const docImport = { preview: null, selected: new Set(), edits: new Map(), busy: false, saving: false, dirty: false, error: "", result: null };
 // 내보내기 조건. 조건들은 AND 로 겹친다 — '결제 + 지난달' 처럼 좁혀 보낼 수 있어야 한다.
 const exp = { ids: null, q: "", tag: "", tags: [], person: null, since: "", until: "", archived: false, note: "" };
@@ -1398,8 +1452,16 @@ const evernoteFile = { content: "", name: "", version: 0 };
 const RM_KINDS = { issues: "이슈", wiki: "위키", documents: "문서", news: "공지" };
 
 // 소스 한 칸: 상태 + 자기 버튼 + 자기 결과. '일괄'도 같은 칸에 결과를 흘려보낸다.
-function sourceCard(x, extra = "") {
+function sourceActions(x) {
   const disabled = x.available ? "" : "disabled";
+  return `<div class="row" style="margin:9px 0 0">
+    <span class="spacer"></span>
+    <button class="btn" data-src-preview="${x.name}" ${disabled}>미리보기</button>
+    <button class="btn primary" data-src-run="${x.name}" ${disabled}>${["shared", "evernote"].includes(x.name) ? "선택한 메모 가져오기" : "가져오기"}</button>
+  </div>`;
+}
+
+function sourceCard(x, extra = "") {
   return `<div class="src" style="align-items:stretch">
     <div class="src-body">
       <div><b>${esc(x.label)}</b>
@@ -1408,11 +1470,7 @@ function sourceCard(x, extra = "") {
       <div class="meta" style="word-break:break-all">${esc(x.available ? x.path : x.reason)}</div>
       ${x.source_tag ? `<div class="meta">가져오면 #${esc(x.source_tag)} 태그가 붙습니다.</div>` : ""}
       ${extra}
-      <div class="row" style="margin:9px 0 0">
-        <span class="spacer"></span>
-        <button class="btn" data-src-preview="${x.name}" ${disabled}>미리보기</button>
-        <button class="btn primary" data-src-run="${x.name}" ${disabled}>${["shared", "evernote"].includes(x.name) ? "선택한 메모 가져오기" : "가져오기"}</button>
-      </div>
+      ${sourceActions(x)}
       ${resetRow(x)}
       <div id="impOut-${x.name}"></div>
     </div>
@@ -1501,24 +1559,19 @@ async function renderImport(version = renderVersion) {
     <div class="field" style="margin:9px 0 0;grid-template-columns:80px 1fr">
       <label for="sharedFile">찾아보기</label>
       <input id="sharedFile" type="file" accept=".json,application/json" />
-      <div class="note" id="sharedFileStatus">${imp.sharedName
+      <div class="note" id="sharedFileStatus">${imp.sharedName && !imp.sharedViaQr
         ? "선택한 파일: " + esc(imp.sharedName) + (imp.sharedLocked ? " — 암호화된 파일입니다. 아래에 비밀번호를 입력하세요." : "")
         : "받은 .json 파일을 선택하면 내용을 미리 보여줍니다."}</div>
-    </div>
-    <div class="field" style="margin:9px 0 0;grid-template-columns:80px 1fr">
-      <label for="sharedQr">QR</label>
-      <div class="row" style="margin:0"><button class="btn" type="button" id="sharedQr">QR 찍기</button>
-        <button class="btn" type="button" id="mobileInstall">휴대폰 앱 설치</button>
-        <span class="note">휴대폰 앱이 띄운 QR을 웹캠으로 찍어 받습니다. (휴대폰 → PC 한 방향만 됩니다)</span></div>
     </div>
     <div class="field" style="margin:9px 0 0;grid-template-columns:80px 1fr">
       <label>또는 경로</label>
       <input id="impShared" value="${esc(imp.sharedPath)}" placeholder="예) C:\\Users\\나\\Downloads\\memoinall-20260901-1200-12건.json" />
       <div class="note">동료가 <b>내보내기</b>로 만든 .json 파일. 이미 갖고 있는 내용은 알아서 건너뜁니다.</div>
-    </div>
+    </div>`;
+  const sharedPasswordField = `
     <div class="field" style="margin:9px 0 0;grid-template-columns:80px 1fr">
       <label for="impSharedPw">비밀번호</label>
-      <input id="impSharedPw" type="password" autocomplete="off" placeholder="암호화된 파일이면 보낸 사람에게 받은 비밀번호" />
+      <input id="impSharedPw" type="password" autocomplete="off" placeholder="보낸 사람에게 받은 비밀번호" />
       <div class="note">입력 후 Enter. 암호를 푼 내용만 저장되고 비밀번호는 어디에도 남지 않습니다.</div>
     </div>`;
 
@@ -1526,6 +1579,7 @@ async function renderImport(version = renderVersion) {
     <nav class="tabs" aria-label="가져오기와 공유">
       <button class="tab" data-exchange-tab="import">다른 앱에서 가져오기</button>
       <button class="tab" data-exchange-tab="share">동료와 주고받기</button>
+      <button class="tab" data-exchange-tab="mobile">휴대폰 QR·설치</button>
     </nav>
     <div class="panel" data-exchange-section="import" id="documentPanel">
       <h3>파일을 메모로 가져오기</h3>
@@ -1616,7 +1670,19 @@ async function renderImport(version = renderVersion) {
 
     <div class="panel" data-exchange-section="share">
       <h3>받은 메모 파일 넣기</h3>
-      ${sourceCard(byName.shared, sharedExtra)}
+      ${imp.sharedViaQr ? sharedExtra + resetRow(byName.shared) : sourceCard(byName.shared, sharedExtra + sharedPasswordField)}
+    </div>
+    <div class="panel" data-exchange-section="mobile">
+      <h3>휴대폰 메모 QR로 받기</h3>
+      <p class="desc">휴대폰 앱에서 보낼 메모를 고르고, 휴대폰 화면에 뜬 QR을 PC 웹캠에 비추세요.</p>
+      <button class="btn primary" type="button" id="sharedQr">QR 찍기</button>
+      <div class="note" role="status" id="sharedQrStatus">${imp.sharedViaQr && imp.sharedLocked ? "잠긴 메모입니다. 비밀번호를 입력하세요." : ""}</div>
+      ${imp.sharedViaQr ? sharedPasswordField + sourceActions(byName.shared) + '<div id="impOut-shared"></div>' : ""}
+    </div>
+    <div class="panel" data-exchange-section="mobile">
+      <h3>휴대폰 앱 설치</h3>
+      <p class="desc">휴대폰 카메라로 설치 QR을 찍으면 앱 주소가 열립니다.</p>
+      <button class="btn" type="button" id="mobileInstall">설치 QR 보기</button>
     </div>
 
     <details class="panel" id="importOptions">
@@ -1755,7 +1821,8 @@ async function renderImport(version = renderVersion) {
   $("#impShared").onchange = (e) => {
     sharedLoadVersion++;
     imp.sharedPath = e.target.value.trim(); imp.sharedContent = imp.sharedName = "";
-    imp.sharedLocked = false;
+    if (imp.sharedViaQr) imp.sharedPassword = "";
+    imp.sharedLocked = imp.sharedViaQr = false;
     delete importReviews.shared;
     delete imp.results.shared; render();
   };
@@ -1778,9 +1845,9 @@ async function renderImport(version = renderVersion) {
     imp.sharedPassword = e.target.value;
     delete imp.results.shared;
     if (!imp.sharedContent) return;   // 경로로 지정한 파일은 미리보기 버튼에서 같이 보낸다
-    const status = $("#sharedFileStatus");
-    try { await openShared(imp.sharedContent, imp.sharedName, status); }
-    catch (err) { if (status.isConnected) status.textContent = "파일 확인 실패: " + err.message; }
+    const status = $(imp.sharedViaQr ? "#sharedQrStatus" : "#sharedFileStatus");
+    try { await openShared(imp.sharedContent, imp.sharedName, status, imp.sharedViaQr); }
+    catch (err) { if (status.isConnected) status.textContent = err.message; }
   };
   $("#expPw").value = expSecret.password;
   $("#expPw2").value = expSecret.confirm;
@@ -1992,16 +2059,21 @@ function paintDocumentResult() {
 // 받은 내용(파일·QR)을 새로 고른 것으로 놓고 미리보기까지. 앞서 고른 것의 결과는 버린다.
 async function loadShared(read, name, { what = "파일", fail = null } = {}) {
   const version = ++sharedLoadVersion;
+  const viaQr = what === "QR";
+  if (viaQr || imp.sharedViaQr) {
+    imp.sharedPassword = "";
+    $("#impSharedPw").value = "";
+  }
   imp.sharedContent = imp.sharedName = imp.sharedPath = "";
   delete imp.results.shared;
   delete importReviews.shared;
   if ($("#impOut-shared")) $("#impOut-shared").textContent = "";
   document.querySelectorAll('[data-src-run="shared"], [data-src-preview="shared"]').forEach((b) => { b.disabled = true; });
-  const status = $("#sharedFileStatus");
+  const status = $(viaQr ? "#sharedQrStatus" : "#sharedFileStatus");
   try {
     const content = await read();
     if (version !== sharedLoadVersion) return;
-    await openShared(content, name, status, version);
+    await openShared(content, name, status, viaQr, version);
   } catch (err) {
     if (fail) fail();
     if (version === sharedLoadVersion && status?.isConnected) status.textContent = `${what} 확인 실패: ${err.message}`;
@@ -2127,12 +2199,12 @@ function paintInstallQr(entry, { editing = false } = {}) {
 }
 
 // 고른 파일의 겉면을 확인하고 미리보기까지. 암호화된 파일이면 비밀번호를 받을 때까지 멈춘다.
-async function openShared(content, name, status, version = ++sharedLoadVersion) {
+async function openShared(content, name, status, viaQr, version = ++sharedLoadVersion) {
   const info = await api("/api/import/shared/describe", {
     method: "POST", body: { content, password: imp.sharedPassword || null },
   });
   if (version !== sharedLoadVersion || !status.isConnected) return;
-  Object.assign(imp, { sharedContent: content, sharedName: name, sharedPath: "", sharedLocked: !!info.needs_password });
+  Object.assign(imp, { sharedContent: content, sharedName: name, sharedPath: "", sharedViaQr: viaQr, sharedLocked: !!info.needs_password });
   delete imp.results.shared;
   delete importReviews.shared;
   if (!info.needs_password) {
@@ -2688,8 +2760,16 @@ async function renderSettings(version = renderVersion) {
         <div class="note">위 LLM 연결의 Gemini 와 같은 키를 씁니다. 여기서 넣어도 요약에 쓰는 AI 는 바뀌지 않습니다.</div>
       </div>
       <div class="field" data-stt-for="gemini">
+        <label for="sttTransport">전송 방식</label>
+        <select id="sttTransport"><option value="basic">기본 · 말이 끝난 구간마다 전송</option>
+          <option value="live" ${sttInfo.gemini_transport === "live" ? "selected" : ""}>실시간 · WebSocket으로 전송</option></select>
+      </div>
+      <div class="field" id="sttLiveField">
+        <label>실시간 음성 인식 모델</label><span>${esc(sttInfo.gemini_live_model)}</span>
+      </div>
+      <div class="field" id="sttBasicField">
         <label for="sttGeminiModel">음성 인식 모델</label>
-        <input id="sttGeminiModel" list="sttGeminiList" value="${esc(sttInfo.gemini_model)}" />
+        <input id="sttGeminiModel" list="sttGeminiList" value="${esc(sttInfo.gemini_model.replace(/^models\//, "") === sttInfo.gemini_live_model ? "gemini-2.5-flash-lite" : sttInfo.gemini_model)}" />
         <datalist id="sttGeminiList">${sttInfo.gemini_models.map((m) => `<option value="${esc(m)}">`).join("")}</datalist>
         <div class="note">${src("stt.gemini.model")} flash 계열이 빠르고 저렴합니다. 목록에 없는 모델도 직접 입력할 수 있습니다.</div>
       </div>
@@ -2813,6 +2893,9 @@ async function renderSettings(version = renderVersion) {
   const sttPaint = (info = sttNow) => {
     sttNow = info;
     const engine = $("#sttEngine").value;
+    const live = $("#sttTransport").value === "live";
+    $("#sttLiveField").hidden = engine !== "gemini" || !live;
+    $("#sttBasicField").hidden = engine !== "gemini" || live;
     document.querySelectorAll("#sttPanel [data-stt-for]").forEach((el) => { el.hidden = el.dataset.sttFor !== engine; });
     [...$("#sttLocalModel").options].forEach((o) => {
       const m = info.local_models.find((x) => x.name === o.value);
@@ -2831,18 +2914,19 @@ async function renderSettings(version = renderVersion) {
     $("#sttDownload").disabled = job.running;
     // 제목은 저장된 설정 기준이다 — LLM 연결 제목과 같은 모양으로 무엇을 쓰는지 보여 준다.
     $("#sttState").textContent = info.ready
-      ? `● ${info.engine === "gemini" ? `Gemini ${info.gemini_model}` : `로컬 Whisper ${info.local_model}`} 사용 중`
+      ? `● ${info.engine === "gemini" ? `Gemini ${info.gemini_transport === "live" ? info.gemini_live_model : info.gemini_model}` : `로컬 Whisper ${info.local_model}`} 사용 중`
       : "○ 준비 필요";
   };
   sttPanelPaint = sttPaint;
   sttPaint();
   if (sttInfo.download.running) watchSttDownload();
-  $("#sttEngine").onchange = $("#sttLocalModel").onchange = () => sttPaint();
+  $("#sttEngine").onchange = $("#sttTransport").onchange = $("#sttLocalModel").onchange = () => sttPaint();
   const sttValues = () => {
     const values = {
       "stt.engine": $("#sttEngine").value,
       "stt.local.model": $("#sttLocalModel").value,
       "stt.gemini.model": $("#sttGeminiModel").value.trim(),
+      "stt.gemini.transport": $("#sttTransport").value,
     };
     const key = $("#sttGeminiKey").value.trim();
     if (key) values["llm.gemini.api_key"] = key;
@@ -2861,7 +2945,8 @@ async function renderSettings(version = renderVersion) {
   $("#sttTest").onclick = async () => {
     $("#sttOut").innerHTML = `<div class="status">테스트 중…</div>`;
     try {
-      const r = await api("/api/settings/test", { method: "POST", body: {
+      const endpoint = $("#sttTransport").value === "live" ? "/api/stt/live/test" : "/api/settings/test";
+      const r = await api(endpoint, { method: "POST", body: {
         provider: "gemini", api_key: $("#sttGeminiKey").value.trim(), model: $("#sttGeminiModel").value.trim(),
       } });
       $("#sttOut").innerHTML = `<div class="status" style="color:${r.ok ? "var(--accent-2)" : "var(--danger)"}">${r.ok ? "✓" : "✗"} ${esc(r.message)}</div>`;

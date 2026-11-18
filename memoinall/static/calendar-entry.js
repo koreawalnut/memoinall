@@ -20,8 +20,14 @@ function calendarDialog(id, title) {
   return dialog;
 }
 
-function openTodoCreate(day) {
+function openTodoCreate(day, fromDayCell = false) {
   const dialog = calendarDialog("todoCreate", "일정 추가");
+  if (fromDayCell) {
+    // Refreshing the agenda replaces the day button that opened this dialog.
+    dialog.addEventListener("close", () => {
+      document.querySelector(`[data-calendar-day="${todoCalendar.selected}"]`)?.focus({ preventScroll: true });
+    }, { once: true });
+  }
   const requestId = crypto.randomUUID();
   dialog.innerHTML = `<form id="todoCreateForm"><div class="dlg-h"><strong>일정 추가</strong></div><div class="dlg-b">
     <p class="todo-help">선택한 날짜에 일정을 바로 등록합니다.</p>
@@ -29,10 +35,11 @@ function openTodoCreate(day) {
     <div class="calendar-form-dates"><div class="field"><label for="todoCreateDate">예정일</label><input id="todoCreateDate" type="date" required value="${day}"></div>
     <div class="field"><label for="todoCreateDue">마감일 (선택)</label><input id="todoCreateDue" type="date"></div></div>
     <p class="todo-help">예정일은 할 날짜, 마감일은 끝내야 하는 날짜입니다. 등록 내용은 메모에도 함께 저장됩니다.</p>
-    ${scheduleTagField("todoCreateTags", todoBoard.tag ? [todoBoard.tag] : [])}
+    ${scheduleTagField("todoCreateTags", todoBoard.registeredTags.some((tag) => tag.name === todoBoard.tag) ? [todoBoard.tag] : [])}
     <p id="todoCreateError" class="todo-error" role="alert"></p></div>
     <div class="dlg-f"><button class="btn" type="button" id="todoCreateCancel">닫기</button><button class="btn primary" type="submit" id="todoCreateSave">추가</button></div></form>`;
   $("#todoCreateCancel").onclick = () => dialog.close();
+  bindScheduleTagField("todoCreateTags");
   $("#todoCreateForm").oninput = () => { calendarEntry.dirty = true; };
   $("#todoCreateForm").onsubmit = async (event) => {
     event.preventDefault();
@@ -45,8 +52,9 @@ function openTodoCreate(day) {
     $("#todoCreateError").textContent = "";
     try {
       await api("/api/todos", { method: "POST", body: payload });
+      if (!payload.tags.includes(todoBoard.tag)) todoBoard.tag = null;
       dialog.close();
-      await selectTodoCalendarDay(planned);
+      await selectTodoCalendarDay(planned, fromDayCell);
       toast("일정을 추가했습니다.");
     } catch (error) { $("#todoCreateError").textContent = error.message; }
     finally {

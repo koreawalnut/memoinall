@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient
 from icalendar import Calendar
 from playwright.sync_api import expect, sync_playwright
-from memoinall import calendar_import, db, store
+from memoinall import config, db, store
 from memoinall.api import app
 
 
@@ -21,6 +21,8 @@ async def no_prepare():
 
 
 def main():
+    if config.DB_PATH.resolve() != (Path(TMP.name) / "memo.db").resolve():
+        raise RuntimeError("공유 화면 테스트는 전용 임시 DB에서만 실행할 수 있습니다.")
     errors, fail = [], {"tags": False, "share": False}
     with patch.object(store, "start_worker"), patch.object(store, "enqueue"), patch("memoinall.api._prepare_search_later", new=no_prepare), TestClient(app) as client, sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
@@ -50,6 +52,13 @@ def main():
         page.route("http://127.0.0.1:8787/**", serve)
         page.goto("http://127.0.0.1:8787/")
         expect(page.locator("#capture")).to_be_enabled()
+        page.locator("#moreMenu > summary").click()
+        page.locator('[data-tab="settings"]').click()
+        for name in ("업무", "팀", "개인", "공유팀", "외부팀"):
+            page.locator("#newTag").fill(name)
+            page.locator("#newTagColor").select_option("teal")
+            page.locator("#addTag").click()
+            expect(page.locator(f'[data-trename="{name}"]')).to_be_visible()
         expect(page.locator('#tabs > [data-tab="todos"]')).to_have_text("일정")
         page.locator('[data-tab="todos"]').click()
         expect(page.locator("#lead h2")).to_contain_text("일정")
@@ -60,15 +69,16 @@ def main():
         expect(page.locator('[data-todo-layout="calendar"]')).to_have_attribute("aria-pressed", "true")
         print("OK schedule opens directly from primary menu and returns to calendar")
 
-        def create(title, tags):
+        def create(title, *tags):
             page.locator("#todoCalendarAdd").click()
             page.locator("#todoCreateTitle").fill(title)
-            page.locator("#todoCreateTags").fill(tags)
+            for tag in tags:
+                page.locator(f'#todoCreateTags .t-teal[data-tag="{tag}"]').click()
             page.locator("#todoCreateSave").click()
             expect(page.locator("#todoCreate")).not_to_be_visible()
             expect(page.locator(".todo-calendar-agenda")).to_contain_text(title)
 
-        create("팀 교육계획안 보내기", "업무, 팀")
+        create("팀 교육계획안 보내기", "업무", "팀")
         create("개인 서류 정리", "개인")
         page.locator('.todo [data-schedule-filter="업무"]').click()
         expect(page.locator("#scheduleTagFilter")).to_have_value("업무")
@@ -78,29 +88,38 @@ def main():
         expect(page.locator(".todo-overview")).to_contain_text("오늘 챙길 일 1건")
         page.locator('[data-todo-layout="calendar"]').click()
         page.locator("#todoCalendarAdd").click()
-        expect(page.locator("#todoCreateTags")).to_have_value("업무")
+        expect(page.locator('#todoCreateTags [data-tag="업무"]')).to_have_attribute("aria-pressed", "true")
         page.locator("#todoCreateCancel").click()
         print("OK tags are saved on creation, filter both layouts, and prefill new schedules")
 
         page.locator("[data-schedule-tags]").click()
-        page.locator("#scheduleTagsInput").fill("업무, 공유팀")
+        page.locator('#scheduleTagsInput [data-tag="팀"]').click()
+        page.locator('#scheduleTagsInput [data-tag="공유팀"]').click()
         fail["tags"] = True
         page.locator("#scheduleTagsDialog").get_by_role("button", name="저장", exact=True).click()
         expect(page.locator("#scheduleTagsError")).to_contain_text("일시적인 저장 오류")
-        expect(page.locator("#scheduleTagsInput")).to_have_value("업무, 공유팀")
+        expect(page.locator('#scheduleTagsInput [data-tag="공유팀"]')).to_have_attribute("aria-pressed", "true")
         page.locator("#scheduleTagsDialog").get_by_role("button", name="저장", exact=True).click()
         expect(page.locator("#scheduleTagsDialog")).not_to_be_visible()
         expect(page.locator(".todo-calendar-agenda")).to_contain_text("#공유팀")
         print("OK editing tags retains failed input and saves changes")
 
         page.locator("#scheduleShareOpen").click()
-        expect(page.locator("#scheduleShareTag")).to_have_value("업무")
+        share_tags = page.locator("#scheduleShareTag")
+        def chip(name):
+            return share_tags.get_by_role("button", name=f"#{name}", exact=True)
+        expect(chip("업무")).to_have_attribute("aria-pressed", "true")
         expect(page.locator("#scheduleShareExternal")).not_to_be_checked()
         expect(page.locator("#scheduleShareDetails")).to_be_disabled()
+        chip("업무").click()
+        chip("외부팀").click()
+        page.locator("#scheduleSharePreviewRun").click()
+        expect(page.locator("#scheduleShareCount")).to_have_text("0개 선택")
+        chip("업무").click()
         page.locator("#scheduleSharePreviewRun").click()
         expect(page.locator("#scheduleShareCount")).to_have_text("1개 선택")
         expect(page.locator("#scheduleSharePreview")).not_to_contain_text("개인 서류")
-        page.locator("#scheduleShareTag").select_option("")
+        chip("개인").click()
         expect(page.locator("#scheduleSharePreview")).to_be_empty()
         page.locator("#scheduleSharePreviewRun").click()
         expect(page.locator("#scheduleShareCount")).to_have_text("2개 선택")
@@ -139,7 +158,9 @@ def main():
         page.locator("#scheduleClearTag").click()
         expect(page.locator("#scheduleTagFilter")).to_have_value("")
         page.locator("#todoCalendarImport").click()
-        page.locator("#calendarFile").set_input_files({"name": "팀이 보낸 일정.ics", "mimeType": "text/calendar", "buffer": exported})
+        received = Calendar.from_ical(exported)
+        received.walk("VEVENT")[0].add("CATEGORIES", ["받은태그"])
+        page.locator("#calendarFile").set_input_files({"name": "팀이 보낸 일정.ics", "mimeType": "text/calendar", "buffer": received.to_ical()})
         page.locator("#calendarPreviewRun").click()
         expect(page.locator("#calendarPreview")).to_contain_text("추가 1")
         page.locator("#calendarApply").click()
@@ -147,12 +168,21 @@ def main():
         page.locator("#calendarImportClose").click()
         expect(page.locator(".external-calendar-card")).to_contain_text("#공유팀")
         page.locator(".external-calendar-card [data-schedule-tags]").click()
-        page.locator("#scheduleTagsInput").fill("외부팀")
+        expect(page.locator('#scheduleTagsInput [data-tag="받은태그"]')).to_have_attribute("aria-pressed", "true")
+        page.locator('#scheduleTagsInput [data-tag="외부팀"]').click()
         page.locator("#scheduleTagsDialog").get_by_role("button", name="저장", exact=True).click()
         expect(page.locator("#scheduleTagsDialog")).not_to_be_visible()
         page.locator('.external-calendar-card [data-schedule-filter="외부팀"]').click()
         expect(page.locator(".todo-calendar-agenda .todo")).to_have_count(0)
         expect(page.locator(".external-calendar-card")).to_have_count(1)
+        expect(page.locator(".external-calendar-card")).to_contain_text("#받은태그")
+        page.locator('.external-calendar-card [data-schedule-filter="받은태그"]').click()
+        expect(page.locator("#scheduleTagFilter")).to_have_value("받은태그")
+        page.locator("#scheduleShareOpen").click()
+        expect(page.locator("#scheduleShareWholePeriod")).not_to_be_checked()
+        page.locator("#scheduleSharePreviewRun").click()
+        expect(page.locator("#scheduleSharePreview")).to_be_empty()
+        page.locator("#scheduleShareClose").click()
         print("OK receiving the ICS preserves tags; imported events can be retagged and filtered")
 
         page.locator("#scheduleClearTag").click()
@@ -166,10 +196,14 @@ def main():
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
             expect(page.locator('#tabs > [data-tab="todos"]')).to_be_visible()
             page.locator("#scheduleShareOpen").click()
+            expect(chip("받은태그")).to_have_count(0)
+            expect(page.locator("#scheduleShareWholePeriod")).not_to_be_checked()
+            page.locator("#scheduleShareWholePeriod").check()
             page.locator("#scheduleShareExternal").check()
             expect(page.locator("#scheduleShareDetails")).to_be_enabled()
             page.locator("#scheduleSharePreviewRun").click()
             expect(page.locator("#scheduleShareCount")).to_have_text("3개 선택")
+            expect(page.locator("#scheduleSharePreview")).not_to_contain_text("#받은태그")
             assert page.locator("#scheduleShareDialog .dlg-b").evaluate("el => el.scrollWidth <= el.clientWidth + 1")
             page.screenshot(path=str(artifacts / f"schedule-share-{width}.png"), full_page=True)
             page.locator("#scheduleShareClose").click()

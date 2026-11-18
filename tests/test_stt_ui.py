@@ -20,7 +20,7 @@ import numpy as np  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from playwright.sync_api import expect, sync_playwright  # noqa: E402
 
-from memoinall import db, settings, store, stt  # noqa: E402
+from memoinall import config, db, settings, store, stt  # noqa: E402
 from memoinall.api import app  # noqa: E402
 
 
@@ -47,6 +47,7 @@ WATCH = """() => { window.__seen = []; let last = null;
 
 
 def main():
+    assert config.DB_PATH.resolve() == (Path(TMP.name) / "memo.db").resolve()
     errors, dialogs, heard, calls, downloads = [], [], [], [], []
     downloaded = {}
     mic_file = Path(TMP.name) / "mic.wav"
@@ -218,6 +219,43 @@ def main():
         expect(mic).to_have_attribute("data-state", "idle", timeout=10000)
         assert calls and all(engine == "gemini" and not partial for engine, partial in calls), calls
         print("OK Gemini only gets one request per pause, no drafts")
+
+        page.locator("#moreMenu > summary").click()
+        page.locator('[data-tab="settings"]').click()
+        page.locator("#sttTransport").select_option("live")
+        expect(page.locator("#sttGeminiModel")).to_be_hidden()
+        expect(page.locator("#sttLiveField")).to_contain_text("gemini-3.5-transcribe-live")
+        page.locator("#sttSave").click()
+        expect(page.locator("#sttState")).to_contain_text("gemini-3.5-transcribe-live")
+        page.locator('[data-tab="feed"]').click()
+        sockets, commands = [], []
+
+        def live_socket(ws):
+            sockets.append(ws)
+            def receive(frame):
+                if isinstance(frame, bytes):
+                    assert len(frame) % 2 == 0
+                    ws.send('{"interim":"초안"}')
+                else:
+                    commands.append(frame)
+                    if frame == "end":
+                        ws.send('{"final":"확정 문장."}')
+                    elif frame == "finish":
+                        ws.send('{"done":true}')
+            ws.on_message(receive)
+            ws.send('{"ready":true}')
+
+        page.route_web_socket("**/api/stt/live", live_socket)
+        page.reload()  # Playwright installs its WebSocket routing hook on navigation.
+        calls.clear()
+        capture.fill("메모")
+        mic.click()
+        expect(capture).to_have_value(re.compile("초안"), timeout=10000)
+        mic.click()
+        expect(mic).to_have_attribute("data-state", "idle")
+        assert capture.input_value() == "메모 " + " ".join(["확정 문장."] * commands.count("end"))
+        assert len(sockets) == 1 and commands[-1] == "finish" and not calls
+        print("OK one live socket streams PCM, replaces drafts and drains final text on stop")
 
         # 좁은 창에서도 입력 줄이 넘치지 않는다.
         page.set_viewport_size({"width": 390, "height": 844})

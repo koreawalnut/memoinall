@@ -66,6 +66,7 @@ DEFAULT_LOCAL_MODEL = "small"
 
 GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"]
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+LIVE_MODEL = "gemini-3.5-transcribe-live"
 GEMINI_PROMPT = (
     "첨부한 음성을 들리는 그대로 받아 적으세요. 한국어는 한글로, 영어 단어와 숫자는 들린 대로 적습니다. "
     "요약·설명·제목·따옴표 없이 받아쓴 문장만 출력하세요. 말소리가 없으면 아무것도 출력하지 마세요."
@@ -91,6 +92,13 @@ def local_model_name() -> str:
 
 def gemini_model_name() -> str:
     return settings.get("stt.gemini.model").strip() or DEFAULT_GEMINI_MODEL
+
+
+def gemini_transport() -> str:
+    saved = settings.get("stt.gemini.transport")
+    if saved in {"basic", "live"}:
+        return saved
+    return "live" if gemini_model_name().removeprefix("models/") == LIVE_MODEL else "basic"
 
 
 def _module_available(name: str) -> bool:
@@ -205,6 +213,10 @@ def _readiness(engine: str, local: str, job: dict, gemini_key: bool) -> tuple[st
     if engine == "gemini":
         if not gemini_key:
             return "needs_key", "Gemini API 키가 없습니다. 설정 → 음성 입력에서 키를 넣으세요."
+        if gemini_transport() == "live":
+            return "ready", f"Gemini Live {LIVE_MODEL}로 음성을 실시간 전송합니다."
+        if gemini_model_name().removeprefix("models/") == LIVE_MODEL:
+            return "needs_transport", "이 모델은 설정 → 음성 입력에서 실시간 WebSocket 방식을 선택하세요."
         if not _module_available("openai"):
             return "missing_package", "openai 패키지가 없어 Gemini 음성 인식을 쓸 수 없습니다.  pip install openai"
         return "ready", f"Gemini {gemini_model_name()} 로 옮깁니다. 음성이 Google 로 전송됩니다."
@@ -242,6 +254,8 @@ def status() -> dict:
         ],
         "local_package": local_package_available(),
         "gemini_model": gemini_model_name(),
+        "gemini_transport": gemini_transport(),
+        "gemini_live_model": LIVE_MODEL,
         "gemini_models": GEMINI_MODELS,
         "gemini_key": gemini_key,
         "download": job,
@@ -281,6 +295,8 @@ def transcribe(data: bytes, *, partial: bool = False) -> dict:
         raise SttError(f"녹음은 한 번에 {MAX_SECONDS // 60}분까지 옮길 수 있습니다.")
 
     engine = engine_name()
+    if engine == "gemini" and gemini_transport() == "live":
+        raise SttError("실시간 음성 입력은 WebSocket으로 연결하세요.")
     model = gemini_model_name() if engine == "gemini" else local_model_name()
     started = time.monotonic()
     peak = float(np.abs(pcm).max()) if pcm.size else 0.0

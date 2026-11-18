@@ -7,19 +7,25 @@ import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
-from . import calendar_import, db, schedule_tags, todos
+from . import calendar_import, db, schedule_tags, tags as my_tags, todos
 
 LABELS = {"due": "마감", "review": "다시 보기", "scheduled": "예정", "range": "기간 중", "external": "외부 일정"}
 MAX_ITEMS = 5000
 
 
 def _options(payload: dict) -> dict:
-    if set(payload) - {"start", "end", "tag", "include_external", "include_details"}:
+    if set(payload) - {"start", "end", "tag", "tags", "include_external", "include_details"} or ("tag" in payload and "tags" in payload):
         raise ValueError("공유할 일정 조건을 확인해 주세요.")
     start, end = todos.validate_date(payload.get("start"), "시작"), todos.validate_date(payload.get("end"), "종료")
     if not start or not end or not "1970-01-01" <= start <= end <= "2100-12-31" or (date.fromisoformat(end) - date.fromisoformat(start)).days > 366:
         raise ValueError("공유 기간은 1970~2100년 사이에서 최대 1년으로 지정해 주세요.")
-    opts = {"start": start, "end": end, "tag": schedule_tags.filter_tag(payload.get("tag"))}
+    opts = {"start": start, "end": end}
+    if "tag" in payload:
+        opts["tag"] = schedule_tags.filter_tag(payload["tag"])
+    else:
+        opts["tags"] = schedule_tags.validate(payload.get("tags", []))
+        if set(opts["tags"]).difference(my_tags.names()):
+            raise ValueError("설정의 내 태그가 변경되었습니다. 일정 화면을 다시 열고 태그를 선택해 주세요.")
     for field, default in (("include_external", False), ("include_details", False)):
         value = payload.get(field, default)
         if type(value) is not bool:
@@ -47,10 +53,19 @@ def _external_end(item: dict) -> str:
 def _items(opts: dict) -> tuple[list[dict], int]:
     todos.refresh_pending()
     items, undated = [], 0
+    # Older clients and saved previews use the single schedule-tag filter.
+    registered = set(my_tags.names()) if "tags" in opts else None
+    wanted = set(opts.get("tags", []))
+    if opts.get("tag"):
+        wanted.add(opts["tag"])
+
+    def shared_tags(values):
+        return [tag for tag in values if registered is None or tag in registered]
+
     for row in db.query("SELECT t.* FROM todos t JOIN memos m ON m.id=t.memo_id WHERE t.active=1 AND m.archived=0 AND t.status IN ('open','waiting')"):
         item = dict(row)
-        tags = schedule_tags.for_todo(item)
-        if opts["tag"] and opts["tag"] not in tags:
+        tags = shared_tags(schedule_tags.for_todo(item))
+        if wanted and wanted.isdisjoint(tags):
             continue
         spans = {}
         for field, kind in (("due", "due"), ("review_on", "review")):
@@ -70,11 +85,12 @@ def _items(opts: dict) -> tuple[list[dict], int]:
                           "tags": tags, "location": "", "description": f"{label} 일정", "external": False})
     if opts["include_external"]:
         for item in calendar_import.events_between(opts["start"], opts["end"]):
-            if opts["tag"] and opts["tag"] not in item["tags"]:
+            tags = shared_tags(item["tags"])
+            if wanted and wanted.isdisjoint(tags):
                 continue
             items.append({"key": item["id"], "title": item["title"], "kind": "외부 일정", "start_day": item["start_day"],
                           "end_day": item["end_day"], "all_day": item["all_day"], "start_time": item["sort_time"] or None,
-                          "end_time": _external_end(item) if not item["all_day"] else None, "tags": item["tags"],
+                          "end_time": _external_end(item) if not item["all_day"] else None, "tags": tags,
                           "location": item["location"] if opts["include_details"] else "",
                           "description": item["description"] if opts["include_details"] else "", "external": True})
     if len(items) > MAX_ITEMS:
@@ -115,7 +131,8 @@ def export(plan_id: str, selected) -> dict:
     cal = Calendar()
     cal.add("prodid", "-//memoinall//Schedule sharing//KO")
     cal.add("version", "2.0")
-    cal.add("x-wr-calname", "공유 일정" + (f" · {plan['options']['tag']}" if plan["options"]["tag"] else ""))
+    scope = ", ".join(plan["options"].get("tags", [])) or plan["options"].get("tag")
+    cal.add("x-wr-calname", "공유 일정" + (f" · {scope}" if scope else ""))
     stamp = datetime.now(timezone.utc)
     for key in selected:
         item = reviewed[key]

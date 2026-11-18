@@ -39,7 +39,7 @@ function todoCalendarHTML(data) {
     const mobileKinds = kindCounts.slice(0, 2);
     const otherCount = day.events.filter((event) => !mobileKinds.some((item) => event.kinds.includes(item.kind))).length;
     return `<td class="${day.in_month ? "" : "outside-month"}"><button type="button" class="todo-calendar-day ${selected ? "selected" : ""} ${day.is_today ? "is-today" : ""}"
-      data-calendar-day="${day.date}" aria-label="${day.date}, ${day.count ? summary : "할 일 없음"}" aria-pressed="${selected}" ${day.is_today ? 'aria-current="date"' : ""} tabindex="${selected ? "0" : "-1"}">
+      data-calendar-day="${day.date}" aria-label="${day.date}, ${day.count ? summary : "할 일 없음"}, 일정 추가" aria-haspopup="dialog" aria-pressed="${selected}" ${day.is_today ? 'aria-current="date"' : ""} tabindex="${selected ? "0" : "-1"}">
       <span class="todo-calendar-number"><span class="todo-calendar-date-number">${+day.date.slice(8)}</span>${day.is_today ? '<span class="todo-calendar-today-label">오늘</span>' : ""}</span>
       <span class="todo-calendar-events">${day.events.slice(0, 2).map((event) => `<span class="todo-calendar-event ${event.overdue ? "overdue" : event.kinds[0]}" title="${esc(event.time_label ? event.time_label + " · " + event.title : event.title)}"><b>${event.kinds[0] === "external" ? esc(event.time_label?.split("–")[0] || "일정") : todoCalendarKinds[event.kinds[0]]}</b> ${esc(event.title)}</span>`).join("")}</span>
       <span class="todo-calendar-dots">${mobileKinds.map(({kind, label, count}) => `<span class="${kind}">${kind === "review" ? "확인" : kind === "external" ? "외부" : label} ${count}</span>`).join("")}${otherCount ? `<span class="todo-calendar-dots-more">+${otherCount}건</span>` : ""}</span>
@@ -61,7 +61,7 @@ function todoCalendarHTML(data) {
       ${data.undated_waiting ? `<button class="btn ghost" data-todo-view="waiting">날짜 없는 대기 ${data.undated_waiting}건</button>` : ""}
       <button class="btn ghost" data-todo-view="review">확인 필요 ${data.counts.review}건</button>
     </div>
-    <p class="todo-calendar-footnote">날짜를 선택해 하루의 일정을 확인하세요. ‘기간 중’은 매일 반복하는 일이 아닙니다.</p>
+    <p class="todo-calendar-footnote">날짜를 누르면 그날의 일정을 추가할 수 있습니다. ‘기간 중’은 매일 반복하는 일이 아닙니다.</p>
     </div>
     <section class="todo-calendar-agenda" aria-labelledby="todoCalendarDayTitle">
       <div class="todo-calendar-agenda-head"><span class="todo-agenda-date" aria-hidden="true">${+data.selected.slice(8)}</span><div><p class="todo-agenda-eyebrow">${data.selected === data.today ? "오늘의 일정" : "선택한 날짜"}</p><h3 class="todo-group-title" id="todoCalendarDayTitle">${todoDate(data.selected)}${data.selected === data.today ? " · 오늘" : ""} <span>${data.total}건</span></h3></div></div>
@@ -103,7 +103,11 @@ function bindTodoCalendar() {
   $("#todoMonthNext").onclick = () => moveTodoCalendarMonth(1);
   $("#todoCalendarToday").onclick = () => selectTodoCalendarDay(todoLocalDate());
   document.querySelectorAll("[data-calendar-day]").forEach((button) => {
-    button.onclick = () => selectTodoCalendarDay(button.dataset.calendarDay, true);
+    button.onclick = () => {
+      const day = button.dataset.calendarDay;
+      selectTodoCalendarDay(day, true);
+      openTodoCreate(day, true);
+    };
     button.onkeydown = (event) => {
       const steps = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
       if (!(event.key in steps)) return;

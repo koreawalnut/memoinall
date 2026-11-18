@@ -65,6 +65,12 @@ def main():
         page.goto("http://127.0.0.1:8787/")
         page.locator('[data-tab="import"]').click()
         page.locator('[data-exchange-tab="share"]').click()
+        expect(page.locator("#sharedFile")).to_be_visible()
+        expect(page.locator("#sharedQr")).to_be_hidden()
+        expect(page.locator("#mobileInstall")).to_be_hidden()
+        page.get_by_role("button", name="휴대폰 QR·설치").click()
+        expect(page.locator("#sharedFile")).to_be_hidden()
+        expect(page.locator("#mobileInstall")).to_be_visible()
 
         # 휴대폰이 띄운 QR 여러 장을 웹캠으로 찍어 받는다
         page.locator("#sharedQr").click()
@@ -74,7 +80,8 @@ def main():
         picker = page.locator("#impOut-shared")
         expect(picker.locator("[data-pick]")).to_have_count(3, timeout=30000)
         expect(dlg).to_be_hidden()
-        expect(page.locator("#sharedFileStatus")).not_to_contain_text("실패")
+        expect(picker).to_be_visible()
+        expect(page.locator("#sharedQrStatus")).not_to_contain_text("실패")
         assert page.evaluate("typeof jsQR") == "function"  # 필요할 때 불러왔다
         page.locator('[data-src-run="shared"]').click()
         expect(picker).to_contain_text("가져오기 완료")
@@ -89,10 +96,13 @@ def main():
         print("OK scanning the same QR again marks every memo as already imported")
 
         # 한 방향: PC 는 메모를 QR 로 만들지 않는다 (사내 메모가 휴대폰으로 나가는 길을 두지 않는다)
+        page.locator('[data-exchange-tab="share"]').click()
+        expect(picker).to_be_hidden()
         page.locator("#expPreview").click()
         expect(page.locator("#expReview [data-picker-count]")).to_contain_text("5건 선택")
         assert page.locator("#expQr").count() == 0
         assert page.evaluate("typeof qrcode") == "undefined"      # QR 을 그리는 라이브러리 자체를 싣지 않는다
+        page.locator('[data-exchange-tab="mobile"]').click()
         expect(page.locator("#sharedQr")).to_be_visible()
         print("OK one way only: the PC has no 'show as QR' and does not even load a QR drawing library")
 
@@ -137,7 +147,7 @@ def main():
           const c = new QrShare.Collector(); c.add(part);
           await loadShared(async () => c.text(), "QR로 받은 메모", { what: "QR" });
         }""", qr2["parts"][0])
-        expect(page.locator("#sharedFileStatus")).to_contain_text("암호화된 파일입니다")
+        expect(page.locator("#sharedQrStatus")).to_contain_text("잠긴 메모")
         page.locator("#impSharedPw").fill("현장 비번")
         page.locator("#impSharedPw").press("Enter")
         expect(picker.locator("[data-pick]")).to_have_count(1)
@@ -145,6 +155,22 @@ def main():
         expect(picker).to_contain_text("가져오기 완료")
         assert any(body in m["body"] for m in store.list_memos()), [m["body"][:20] for m in store.list_memos()]
         print("OK a password-locked phone QR asks for the password and then imports")
+
+        page.locator('[data-exchange-tab="share"]').click()
+        expect(page.locator("#sharedFileStatus")).not_to_contain_text("QR")
+        file_pack = exchange.seal(pack, "파일 비번")
+        page.locator("#sharedFile").set_input_files({
+            "name": "동료.json", "mimeType": "application/json",
+            "buffer": json.dumps(file_pack).encode(),
+        })
+        expect(page.locator("#sharedFileStatus")).to_contain_text("동료.json")
+        expect(page.locator("#impSharedPw")).to_be_focused()
+        expect(page.locator("#impSharedPw")).to_have_value("")
+        page.locator("#impSharedPw").fill("파일 비번")
+        page.locator("#impSharedPw").press("Enter")
+        expect(picker.locator("[data-pick]")).to_have_count(3)
+        expect(picker).to_be_visible()
+        print("OK file review works independently after receiving a locked QR")
 
         assert not errors, errors
         browser.close()

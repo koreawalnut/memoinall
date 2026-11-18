@@ -67,6 +67,7 @@ async function renderTodoBoard(version) {
   todoBoard.items = data.items;
   todoBoard.date = data.today;
   todoBoard.tagChoices = data.tag_choices || [];
+  todoBoard.registeredTags = data.registered_tags;
   const empty = {
     today: "오늘 챙길 일은 없습니다. 날짜가 없는 일은 ‘일정 미정’에서 오늘 볼 일로 고를 수 있습니다.",
     upcoming: "앞으로 예정된 일이 없습니다. 날짜가 적힌 메모는 여기에 자동으로 모입니다.",

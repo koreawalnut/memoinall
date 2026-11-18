@@ -12,7 +12,7 @@ from pathlib import Path
 
 from urllib.parse import quote, urlsplit
 
-from fastapi import Body, FastAPI, HTTPException, Query, Request
+from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
@@ -38,6 +38,7 @@ from . import (
     settings,
     store,
     stt,
+    stt_live,
     tags,
     todos,
     calendar_import,
@@ -918,6 +919,8 @@ def write_settings(payload: dict = Body(...)):
         raise HTTPException(400, f"알 수 없는 프로바이더: {values['llm.provider']}")
     if values.get("stt.engine") and values["stt.engine"] not in stt.ENGINES:
         raise HTTPException(400, f"알 수 없는 음성 인식 엔진: {values['stt.engine']}")
+    if values.get("stt.gemini.transport") and values["stt.gemini.transport"] not in ("basic", "live"):
+        raise HTTPException(400, "Gemini 전송 방식은 기본 또는 실시간 중에서 선택하세요.")
     if values.get("stt.local.model") and values["stt.local.model"] not in stt.LOCAL_MODELS:
         raise HTTPException(400, f"알 수 없는 음성 인식 모델: {values['stt.local.model']}")
     if values.get("mobile.url"):
@@ -973,6 +976,38 @@ def test_llm(payload: dict = Body(default={})):
 @app.get("/api/stt/status")
 def stt_status():
     return stt.status()
+
+
+@app.post("/api/stt/live/test")
+async def stt_live_test(payload: dict = Body(default={})):
+    try:
+        async with stt_live.connection(payload.get("api_key") or ""):
+            return {"ok": True, "message": "Gemini Live WebSocket 연결을 확인했습니다."}
+    except stt.SttError as exc:
+        return {"ok": False, "message": str(exc)}
+
+
+@app.websocket("/api/stt/live")
+async def stt_live_session(socket: WebSocket):
+    origin = socket.headers.get("origin", "")
+    scheme = "https" if socket.url.scheme == "wss" else "http"
+    if origin != f"{scheme}://{socket.headers.get('host')}":
+        await socket.close(code=1008)
+        return
+    await socket.accept()
+    try:
+        if stt.engine_name() != "gemini" or stt.gemini_transport() != "live":
+            raise stt.SttError("설정에서 Gemini 실시간 WebSocket 방식을 선택하세요.")
+        async with stt_live.connection() as cloud:
+            await stt_live.relay(socket, cloud)
+    except WebSocketDisconnect:
+        return
+    except stt.SttError as exc:
+        with suppress(WebSocketDisconnect):
+            await socket.send_json({"error": str(exc)})
+    finally:
+        with suppress(RuntimeError, WebSocketDisconnect):
+            await socket.close()
 
 
 @app.post("/api/stt/download")

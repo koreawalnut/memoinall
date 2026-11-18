@@ -55,9 +55,9 @@ def main():
         page.locator('[data-tab="todos"]').click()
         expect(page.locator('[data-todo-layout="calendar"]')).to_have_attribute("aria-pressed", "true")
         page.locator('[data-calendar-day="2026-11-20"]').click()
-        page.locator("#todoCalendarDayAdd").click()
         expect(page.locator("#todoCreateDate")).to_have_value("2026-11-20")
         expect(page.locator("#todoCreateTitle")).to_be_focused()
+        expect(page.locator("#todoCreateTags")).to_contain_text("설정 → 내 태그")
         page.locator("#todoCreateTitle").fill("교육계획안 보내기")
         page.locator("#todoCreateDue").fill("2026-11-21")
         fail["create"] = True
@@ -77,6 +77,7 @@ def main():
         expect(page.locator("#todoEditor")).not_to_be_visible()
         expect(page.locator("#todoCalendarDayTitle")).to_contain_text("0건")
         page.locator('[data-calendar-day="2026-11-19"]').click()
+        page.keyboard.press("Escape")
         expect(page.locator(".todo-calendar-agenda")).to_contain_text("교육계획안 보내기")
         print("OK direct task can be rescheduled through existing editor")
 
@@ -92,6 +93,7 @@ def main():
         expect(page.locator("#calendarSources")).to_contain_text("네이버")
         page.locator("#calendarImportClose").click()
         page.locator('[data-calendar-day="2026-11-20"]').click()
+        page.locator("#todoCreateCancel").click()
         expect(page.locator(".external-calendar-card")).to_contain_text("팀 회의")
         expect(page.locator(".external-calendar-card")).to_contain_text("09:00–10:00")
         expect(page.locator(".external-calendar-card input[type=checkbox]")).to_have_count(0)
@@ -155,6 +157,7 @@ def main():
         assert db.one("SELECT count(*) n FROM calendar_events")["n"] == 1
         page.locator("#calendarImportClose").click()
         page.locator('[data-calendar-day="2026-11-21"]').click()
+        page.locator("#todoCreateCancel").click()
         expect(page.locator(".todo-calendar-agenda .todo-title")).to_have_count(2)
         page.set_viewport_size({"width": 1280, "height": 1000})
         page.screenshot(path=str(artifacts / "calendar-entry-desktop.png"), full_page=True)
