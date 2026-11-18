@@ -1547,6 +1547,14 @@ async function renderImport(version = renderVersion) {
   const byName = Object.fromEntries(sources.map((x) => [x.name, x]));
   const usable = sources.filter((x) => !["shared", "evernote"].includes(x.name) && x.available).length;
 
+  // 에버노트는 ENEX 파일을 직접 골라야 하므로 파일 선택이 칸 안에 있다.
+  const evernoteExtra = `
+    <div class="meta" style="margin-top:4px">Evernote 데스크톱 앱에서 메모 또는 노트북을 <b>ENEX로 내보내기</b> 한 뒤 선택하세요.
+      제목·본문·태그·작성 시각을 가져옵니다. 이미지·첨부파일과 암호화된 내용은 저장하지 않으니 원본 파일을 보관하세요.</div>
+    <label for="evernoteFile" class="status" style="display:block;margin-top:8px">ENEX 파일 (50MB·1,000건 이하)</label>
+    <input id="evernoteFile" type="file" accept=".enex" style="margin-top:6px" />
+    <div id="evernoteFileStatus" class="note">${esc(evernoteFile.name || "파일 선택 후 필요한 메모만 체크해 가져올 수 있습니다.")}</div>`;
+
   // 텍스트 폴더는 경로 입력이 칸 안에 있어야 한다 — 다른 데 있으면 뭘 가져올지 안 보인다.
   const filesExtra = `
     <div class="field" style="margin:9px 0 0;grid-template-columns:80px 1fr">
@@ -1590,14 +1598,6 @@ async function renderImport(version = renderVersion) {
         <span class="status">${col.job || col.upload ? "취합 중인 작업이 있습니다" : "부서별 엑셀을 한 표로 모으기"}</span></div>
       <input id="documentFile" type="file" accept=".xlsx,.xlsm,.xls,.pdf,.hwp,.hwpx,.txt,.md" hidden />
       <div id="documentPreview" aria-live="polite"></div>
-    </div>
-    <div class="panel" data-exchange-section="import">
-      <h3>에버노트에서 가져오기</h3>
-      <div class="desc">Evernote 데스크톱 앱에서 메모 또는 노트북을 <b>ENEX로 내보내기</b> 한 뒤 선택하세요.
-        제목·본문·태그·작성 시각을 가져옵니다. 이미지·첨부파일과 암호화된 내용은 저장하지 않으니 원본 파일을 보관하세요.</div>
-      ${sourceCard(byName.evernote, `<label for="evernoteFile" class="status">ENEX 파일 (50MB·1,000건 이하)</label>
-        <input id="evernoteFile" type="file" accept=".enex" style="margin-top:8px" />
-        <div id="evernoteFileStatus" class="note">${esc(evernoteFile.name || "파일 선택 후 필요한 메모만 체크해 가져올 수 있습니다.")}</div>`)}
     </div>
     <div class="panel" data-exchange-section="share">
       <h3>메모 내보내기</h3>
@@ -1727,6 +1727,7 @@ async function renderImport(version = renderVersion) {
       <div class="desc">가져올 앱을 골라 미리보기로 확인하세요. 원본은 그대로 유지됩니다.</div>
       ${sourceCard(byName.sticky)}
       ${sourceCard(byName.samsung)}
+      ${sourceCard(byName.evernote, evernoteExtra)}
       ${sourceCard(byName.files, filesExtra)}
     </div>
 
