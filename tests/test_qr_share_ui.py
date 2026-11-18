@@ -72,6 +72,10 @@ def main():
         page.get_by_role("button", name="휴대폰 QR·설치").click()
         expect(page.locator("#sharedFile")).to_be_hidden()
         expect(page.locator("#mobileInstall")).to_be_visible()
+        expect(page.locator('[data-exchange-section="mobile"] h3').first).to_have_text("휴대폰 앱 설치")
+        page.locator("#mobileInstall").focus()
+        page.keyboard.press("Tab")
+        expect(page.locator("#sharedQr")).to_be_focused()
 
         # 휴대폰이 띄운 QR 여러 장을 웹캠으로 찍어 받는다
         page.locator("#sharedQr").click()

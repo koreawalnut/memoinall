@@ -12,6 +12,6 @@ build/
 dist/*
 !dist/installer/
 dist/installer/*
-!dist/installer/memoinall-Setup-0.1.0.exe
+!dist/installer/memoinall-Setup-*.exe
 *.manifest
 artifacts/ux-review/

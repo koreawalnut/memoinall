@@ -1673,6 +1673,11 @@ async function renderImport(version = renderVersion) {
       ${imp.sharedViaQr ? sharedExtra + resetRow(byName.shared) : sourceCard(byName.shared, sharedExtra + sharedPasswordField)}
     </div>
     <div class="panel" data-exchange-section="mobile">
+      <h3>휴대폰 앱 설치</h3>
+      <p class="desc">휴대폰 카메라로 설치 QR을 찍으면 앱 주소가 열립니다.</p>
+      <button class="btn" type="button" id="mobileInstall">설치 QR 보기</button>
+    </div>
+    <div class="panel" data-exchange-section="mobile">
       <h3>휴대폰 메모·일정 QR로 받기</h3>
       <p class="desc">휴대폰 앱에서 보낼 메모나 일정을 고르고, 휴대폰 화면에 뜬 QR을 PC 웹캠에 비추세요.
         일정은 확인한 뒤 PC 일정에 추가됩니다.</p>
@@ -1680,12 +1685,6 @@ async function renderImport(version = renderVersion) {
       <div class="note" role="status" id="sharedQrStatus">${imp.sharedViaQr && imp.sharedLocked ? "잠긴 메모입니다. 비밀번호를 입력하세요." : ""}</div>
       ${imp.sharedViaQr ? sharedPasswordField + sourceActions(byName.shared) + '<div id="impOut-shared"></div>' : ""}
     </div>
-    <div class="panel" data-exchange-section="mobile">
-      <h3>휴대폰 앱 설치</h3>
-      <p class="desc">휴대폰 카메라로 설치 QR을 찍으면 앱 주소가 열립니다.</p>
-      <button class="btn" type="button" id="mobileInstall">설치 QR 보기</button>
-    </div>
-
     <details class="panel" id="importOptions">
       <summary>가져오기 옵션 (선택)</summary>
       <div style="margin-top:12px">
