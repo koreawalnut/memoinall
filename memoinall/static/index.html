@@ -161,7 +161,6 @@
     padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
     box-shadow: 0 10px 30px #0002; z-index: 20; }
   .more-items .tab { display: block; text-align: left; width: 100%; }
-  .more-items .tab:last-child { margin-top: 5px; border-top: 1px solid var(--line); border-radius: 0; }
   @media (max-width: 600px) { .nav { gap: 0; } .nav .tab { padding: 8px 7px; font-size: 13px; } }
 
   /* 화면마다 뭘 하는 곳인지 한 줄로 알려준다 */
@@ -412,7 +411,7 @@
     <div class="lead" id="lead"></div>
     <div class="capture">
       <textarea id="capture" aria-label="새 메모" disabled placeholder="회의 내용, 할 일, 떠오른 생각… 자유롭게 적어두세요."></textarea>
-      <details id="captureTags" class="capture-options" hidden>
+      <details id="captureTags" class="capture-options">
         <summary>태그 추가 (선택)</summary>
         <div id="capTags" class="tagrow" style="margin:9px 0 2px"></div>
       </details>
@@ -1059,15 +1058,16 @@ const TABS = [
     title: "무엇이든 적어두세요", lead: "나중에 검색해서 찾고, 필요한 메모로 AI 문서나 인수인계 자료를 만들 수 있어요." },
   { id: "todos", primary: true, icon: "📅", name: "일정",
     title: "일정", lead: "메모 속 할 일과 외부 일정을 모아, 태그로 정리하고 함께 나눕니다." },
-  { id: "clusters", icon: "🧩", name: "주제별", sub: "자동 묶음",
-    title: "주제별 묶음", lead: "비슷한 내용끼리 자동으로 묶었습니다. 태그를 달지 않아도 주제가 드러납니다." },
+  { id: "tagboard", icon: "🏷️", name: "태그별", sub: "내 태그",
+    title: "태그별 메모", lead: "설정에서 정한 내 태그마다 메모를 모아 봅니다. 순서·색은 설정의 내 태그를 따릅니다." },
   { id: "rollup", icon: "📅", name: "기간 요약", sub: "일·주·월",
     title: "기간 요약", lead: "고른 기간의 메모에서 결정·할 일·열린 질문을 모아 보여줍니다." },
   { id: "generate", primary: true, icon: "✨", name: "AI로 정리",
     title: "메모로 문서 만들기", lead: "원하는 내용을 적고, 필요한 메모로 정리해 보세요. 만든 내용은 다시 고쳐 쓸 수 있습니다." },
   { id: "import", primary: true, icon: "📥", name: "가져오기·공유",
     title: "메모 가져오기·공유", lead: "다른 앱에 적은 메모를 가져오거나, 필요한 기록을 동료에게 전달하세요." },
-  { id: "settings", icon: "⚙️", name: "설정", sub: "AI·검색",
+  // 설정은 자주 찾으므로 '더 보기' 안에 숨기지 않고 주메뉴 끝(가져오기·공유 옆)에 둔다.
+  { id: "settings", primary: true, icon: "⚙️", name: "설정", sub: "AI·검색",
     title: "설정", lead: "어떤 AI 를 쓸지, 검색용 임베딩은 어떤 상태인지 여기서 봅니다." },
   // 메뉴에는 없다. 가져오기·공유 → 문서 가져오기에서 연다.
   { id: "collect", hidden: true, parent: "import", icon: "📊", name: "엑셀 폴더 취합",
@@ -1079,9 +1079,11 @@ function renderTabs() {
   const current = TAB_BY_ID[state.tab]?.parent || state.tab;
   const button = (t) => `<button class="tab ${current === t.id ? "on" : ""}" data-tab="${t.id}"${current === t.id ? ' aria-current="page"' : ""}>${esc(t.name)}</button>`;
   const secondary = TABS.find((t) => !t.primary && !t.hidden && t.id === current);
-  $("#tabs").innerHTML = TABS.filter((t) => t.primary).map(button).join("")
+  // 왼쪽: 주메뉴(설정 포함) · 오른쪽: 더 보기 (end 탭이 있으면 그 뒤 맨 끝)
+  $("#tabs").innerHTML = TABS.filter((t) => t.primary && !t.end).map(button).join("")
     + `<details class="nav-more" id="moreMenu"><summary class="tab ${secondary ? "on" : ""}">${secondary ? esc(secondary.name) : "더 보기"} <span aria-hidden="true">⌄</span></summary>
-         <div class="more-items">${TABS.filter((t) => !t.primary && !t.hidden).map(button).join("")}</div></details>`;
+         <div class="more-items">${TABS.filter((t) => !t.primary && !t.hidden).map(button).join("")}</div></details>`
+    + TABS.filter((t) => t.end).map(button).join("");
   $("#tabs").querySelectorAll("[data-tab]").forEach((b) => {
     b.onclick = () => { goTab(b.dataset.tab); };
   });
@@ -1127,17 +1129,24 @@ function tagChip(t, active, attrs = "") {
 }
 
 // 적는 칸의 칩 — 누르면 본문에서 #태그가 붙었다 떨어진다.
+// 내 태그가 아직 없어도 칸은 늘 보인다 — 숨기면 기능이 사라진 것처럼 보인다. 그때는 본문에서
+// 이미 쓰는 태그를 대신 보여주고 설정으로 안내한다.
 function paintTagRows() {
   const row = $("#capTags");
   if (!row) return;
-  $("#captureTags").hidden = !myTags.length;
-  if (!myTags.length) { row.innerHTML = ""; return; }
+  $("#captureTags").hidden = false;
   const inBody = new Set(bodyTags($("#capture").value).map((t) => t.toLowerCase()));
-  row.innerHTML = myTags.map((t) => tagChip(t, inBody.has(t.name.toLowerCase()))).join("")
-    + `<span class="hint" style="margin-left:4px">눌러서 태그 넣기</span>`;
+  const chips = myTags.length ? myTags : tagSuggestions;
+  row.innerHTML = chips.map((t) => tagChip(t, inBody.has(t.name.toLowerCase()))).join("")
+    + (myTags.length
+      ? `<span class="hint" style="margin-left:4px">눌러서 태그 넣기</span>`
+      : `<span class="hint" style="margin-left:4px">${chips.length ? "자주 쓰는 태그입니다 · 눌러서 넣기 · " : "본문에 #태그를 적으면 태그가 됩니다 · "}
+          <a href="#" id="capTagSettings" style="color:var(--accent)">설정에서 내 태그 정하기</a></span>`);
   row.querySelectorAll("[data-tag]").forEach((b) => {
     b.onclick = () => toggleTagInCapture(b.dataset.tag);
   });
+  const link = $("#capTagSettings");
+  if (link) link.onclick = (e) => { e.preventDefault(); goTab("settings"); };
 }
 
 function toggleTagInCapture(name) {
@@ -1231,7 +1240,7 @@ async function render() {
   view.innerHTML = `<div class="empty">불러오는 중…</div>`;
   try {
     const views = {
-      feed: renderFeed, todos: renderTodos, clusters: renderClusters, rollup: renderRollup,
+      feed: renderFeed, todos: renderTodos, tagboard: renderTagBoard, rollup: renderRollup,
       generate: renderGenerate, import: renderImport, settings: renderSettings, collect: renderCollect,
     };
     await (views[state.tab] || renderFeed)(version);
@@ -1387,21 +1396,65 @@ async function renderTodos(version = renderVersion) {
   return renderTodoBoard(version);
 }
 
-async function renderClusters(version = renderVersion) {
-  const { clusters } = await api("/api/clusters");
+// 태그별: 설정의 '내 태그' 순서대로 묶는다. 자동 군집은 묶은 기준이 보이지 않아 쓸모가 적었다.
+async function renderTagBoard(version = renderVersion) {
+  const d = await api("/api/tags/board?per=5");
   if (version !== renderVersion) return;
-  if (!clusters.length) {
-    $("#view").innerHTML = `<div class="empty">묶을 메모가 아직 없습니다.<br/>
-      <span style="font-size:14px">메모가 몇 개 쌓이면 비슷한 것끼리 자동으로 묶입니다.
-      (방금 넣었다면 정리 중일 수 있어요)</span></div>`;
-    return;
+  const memoList = (memos) => `<ul>${memos.map((m) =>
+    `<li data-memo="${m.id}" tabindex="0" role="button">· ${esc(m.title)} <span class="meta">${fmt(m.created_at)}</span></li>`).join("")}</ul>`;
+  const suggest = d.suggested.length ? `<div class="cluster">
+      <h3>내 태그에 없는 자주 쓰는 태그</h3>
+      <div class="status" style="margin-bottom:8px">눌러서 내 태그로 등록하면 여기에 묶음이 생깁니다.</div>
+      <div class="row" style="gap:6px;margin:0">${d.suggested.map((t) =>
+        `<button class="btn ghost" type="button" data-tb-adopt="${esc(t.value)}">+ #${esc(t.value)} <span class="meta">${t.count}</span></button>`).join("")}</div>
+    </div>` : "";
+  let html;
+  if (!d.groups.length) {
+    html = `<div class="empty">아직 내 태그가 없습니다.<br/>
+        <span style="font-size:14px">설정에서 자주 쓰는 태그를 정하면 태그마다 메모가 모입니다.</span>
+        <div style="margin-top:12px"><button class="btn primary" type="button" id="tbSettings">설정에서 내 태그 정하기</button></div></div>`;
+  } else {
+    html = d.groups.map((g) => `<div class="cluster" data-tb-group="${esc(g.name)}">
+        <h3><span class="tagchip t-${esc(g.color || "slate")}">#${esc(g.name)}</span> <span class="meta">${g.count}건${g.note ? " · " + esc(g.note) : ""}</span></h3>
+        ${g.memos.length ? memoList(g.memos) : '<div class="status">이 태그가 달린 메모가 아직 없습니다.</div>'}
+        ${g.count ? `<div class="row" style="margin:8px 0 0;gap:6px">
+          <button class="btn ghost" type="button" data-tb-all="${esc(g.name)}">${g.count > g.memos.length ? `${g.count}건 모두 보기` : "목록에서 보기"}</button>
+          <button class="btn ghost" type="button" data-tb-ai="${esc(g.name)}">이 태그로 AI 정리</button></div>` : ""}
+      </div>`).join("");
+    if (d.untagged.count) {
+      html += `<div class="cluster">
+        <h3>내 태그가 없는 메모 <span class="meta">${d.untagged.count}건</span></h3>
+        ${memoList(d.untagged.memos)}
+        <div class="status">메모를 열어 태그를 달거나 본문에 #태그를 붙이면 해당 묶음으로 옮겨집니다.</div></div>`;
+    }
   }
-  $("#view").innerHTML =
-    clusters.map((c) => `<div class="cluster">
-      <h3>${esc(c.label)} <span class="meta">${c.size}건</span></h3>
-      <ul>${c.memos.map((m) => `<li data-memo="${m.id}">· ${esc(m.title)} <span class="meta">${fmt(m.created_at)}</span></li>`).join("")}</ul>
-    </div>`).join("");
-  document.querySelectorAll("[data-memo]").forEach((li) => (li.onclick = () => openMemo(+li.dataset.memo)));
+  $("#view").innerHTML = html + suggest;
+  $("#view").querySelectorAll("[data-memo]").forEach((li) => {
+    li.onclick = () => openMemo(+li.dataset.memo);
+    li.onkeydown = (e) => { if (e.key === "Enter") openMemo(+li.dataset.memo); };
+  });
+  $("#view").querySelectorAll("[data-tb-all]").forEach((b) => {
+    b.onclick = () => {
+      Object.assign(state, { q: "", tags: [b.dataset.tbAll], person: null, since: "", until: "", offset: 0 });
+      loadSidebar();
+      goTab("feed");
+    };
+  });
+  $("#view").querySelectorAll("[data-tb-ai]").forEach((b) => {
+    b.onclick = () => startGenerateForTag(b.dataset.tbAi, `#${b.dataset.tbAi} 메모의 핵심 내용과 진행 상황, 남은 할 일을 정리해줘`);
+  });
+  $("#view").querySelectorAll("[data-tb-adopt]").forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        await api("/api/tags/adopt", { method: "POST", body: { names: [b.dataset.tbAdopt] } });
+        toast(`#${b.dataset.tbAdopt} 를 내 태그로 등록했습니다`);
+        await loadTags();
+        render();
+      } catch (err) { b.disabled = false; toast(err.message); }
+    };
+  });
+  if ($("#tbSettings")) $("#tbSettings").onclick = () => goTab("settings");
 }
 
 async function renderRollup(version = renderVersion) {
@@ -1426,7 +1479,7 @@ async function renderRollup(version = renderVersion) {
     ${list("결정/결론", d.decisions, (x) => `<li data-memo="${x.memo_id}">· ${esc(x.text)}</li>`)}
     ${list("미완 할일", d.todos_open, (x) => `<li data-memo="${x.memo_id}">· ${esc(x.text)}${x.due ? ` <span class="due">(${x.due})</span>` : ""}</li>`)}
     ${list("열린 질문", d.questions, (x) => `<li data-memo="${x.memo_id}">· ${esc(x.text)}</li>`)}
-    ${list("주제 묶음", d.clusters, (c) => `<li>· ${esc(c.label)} (${c.size}건)</li>`)}
+    ${rollupTagGroups(d)}
     <details style="margin-top:12px"><summary class="status" style="cursor:pointer">브리핑 재료 원문 보기</summary><pre class="pack">${esc(d.prompt)}</pre></details>`;
 
   $("#period").onchange = (e) => { state.period = e.target.value; render(); };
@@ -1447,6 +1500,34 @@ async function renderRollup(version = renderVersion) {
     finally { aiWaitStop(); if (button.isConnected) button.disabled = false; }
   };
   document.querySelectorAll("[data-memo]").forEach((li) => (li.onclick = () => openMemo(+li.dataset.memo)));
+  // 이 기간·이 태그의 메모 목록으로
+  document.querySelectorAll("[data-rollup-tag]").forEach((b) => {
+    b.onclick = () => {
+      Object.assign(state, { q: "", tags: [b.dataset.rollupTag], since: d.start, until: d.end, offset: 0 });
+      loadSidebar();
+      goTab("feed");
+    };
+  });
+  if ($("#rollupTagSettings")) $("#rollupTagSettings").onclick = () => goTab("settings");
+}
+
+// 기간 요약의 '내 태그별' 칸. 태그별 화면과 같은 기준 — 설정의 내 태그 순서, 내 태그 없는 메모는 따로.
+function rollupTagGroups(d) {
+  const groups = d.tag_groups || [], rest = d.untagged || { count: 0, memos: [] };
+  if (!groups.length && !rest.count) return "";
+  const titles = (memos, count) => `<ul>${memos.map((m) => `<li data-memo="${m.id}">· ${esc(m.title)} <span class="meta">${fmt(m.created_at)}</span></li>`).join("")}${
+    count > memos.length ? `<li class="meta">… 외 ${count - memos.length}건</li>` : ""}</ul>`;
+  return `<div class="cluster" id="rollupTags"><h3>내 태그별 <span class="meta">${groups.length}개 태그</span></h3>
+    ${groups.map((g) => `<div class="rollup-tag" data-rollup-group="${esc(g.name)}" style="margin:10px 0 4px">
+        <div class="row" style="margin:0;gap:6px"><span class="tagchip t-${esc(g.color || "slate")}">#${esc(g.name)}</span>
+          <span class="meta">${g.count}건</span><span class="spacer"></span>
+          <button class="btn ghost" type="button" data-rollup-tag="${esc(g.name)}">이 기간 메모 보기</button></div>
+        ${titles(g.memos, g.count)}</div>`).join("")}
+    ${rest.count ? `<div style="margin:10px 0 4px"><div class="row" style="margin:0;gap:6px"><b>내 태그 없음</b><span class="meta">${rest.count}건</span></div>
+        ${titles(rest.memos, rest.count)}</div>` : ""}
+    ${groups.length ? "" : `<div class="status">설정에서 내 태그를 정하면 이 기간의 메모를 태그별로 묶어 보여줍니다.
+        <button class="btn ghost" type="button" id="rollupTagSettings">설정 열기</button></div>`}
+  </div>`;
 }
 
 // ---------------------------------------------------------------- 생성

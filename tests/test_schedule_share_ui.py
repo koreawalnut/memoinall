@@ -52,7 +52,6 @@ def main():
         page.route("http://127.0.0.1:8787/**", serve)
         page.goto("http://127.0.0.1:8787/")
         expect(page.locator("#capture")).to_be_enabled()
-        page.locator("#moreMenu > summary").click()
         page.locator('[data-tab="settings"]').click()
         for name in ("업무", "팀", "개인", "공유팀", "외부팀"):
             page.locator("#newTag").fill(name)

@@ -87,6 +87,33 @@ def _usage() -> dict[str, int]:
     }
 
 
+def board(per: int = 5) -> dict:
+    """'태그별' 화면: 내 태그마다 메모 수와 최근 메모, 내 태그가 하나도 없는 메모, 등록 권유.
+
+    자동 군집은 묶음 기준이 사용자에게 보이지 않는다. 내가 정한 태그로 묶어야 무엇이 어디 있는지 안다.
+    """
+    per = max(1, min(int(per), 20))
+    defs = all_tags()
+    groups = []
+    for tag in defs:
+        rows = db.query(
+            "SELECT m.id, m.title, m.created_at FROM memos m "
+            "JOIN facets f ON f.memo_id=m.id AND f.kind='tag' AND f.value=? "
+            "WHERE m.archived=0 ORDER BY m.pinned DESC, m.created_at DESC, m.id DESC LIMIT ?",
+            (tag["name"], per),
+        )
+        groups.append({**tag, "memos": [dict(r) for r in rows]})
+    mine = [t["name"] for t in defs]
+    marks = ",".join("?" * len(mine))
+    outside = (f"AND NOT EXISTS (SELECT 1 FROM facets f WHERE f.memo_id=m.id AND f.kind='tag' AND f.value IN ({marks}))"
+               if mine else "")
+    count = db.one(f"SELECT COUNT(*) n FROM memos m WHERE m.archived=0 {outside}", mine)["n"]
+    rows = db.query(f"SELECT m.id, m.title, m.created_at FROM memos m WHERE m.archived=0 {outside} "
+                    "ORDER BY m.created_at DESC, m.id DESC LIMIT ?", [*mine, per])
+    return {"groups": groups, "untagged": {"count": count, "memos": [dict(r) for r in rows]},
+            "suggested": unregistered()}
+
+
 def unregistered(limit: int = 12) -> list[dict]:
     """본문에서는 자주 쓰는데 아직 등록 안 한 태그.
 

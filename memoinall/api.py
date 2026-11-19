@@ -287,6 +287,12 @@ def get_tags():
     }
 
 
+@app.get("/api/tags/board")
+def tag_board(per: int = Query(5, ge=1, le=20)):
+    """내 태그별로 메모를 모아 보는 화면."""
+    return tags.board(per)
+
+
 @app.post("/api/tags")
 def create_tag(payload: dict = Body(...)):
     try:

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -62,29 +63,38 @@ def main():
         page.goto("http://127.0.0.1:8787/")
         expect(page.locator("#capture")).to_be_enabled()
         expect(page.locator(".card[data-id]")).to_have_count(40)
-        expect(page.locator("#tabs > button")).to_have_count(4)
-        expect(page.locator("#tabs > button")).to_have_text(["내 메모", "일정", "AI로 정리", "가져오기·공유"])
-        expect(page.locator('[data-tab="settings"]')).not_to_be_visible()
+        expect(page.locator("#tabs > button")).to_have_count(5)
+        expect(page.locator("#tabs > button")).to_have_text(["내 메모", "일정", "AI로 정리", "가져오기·공유", "설정"])
+        # 설정은 '더 보기' 안이 아니라 가져오기·공유 바로 옆에 있다. '더 보기'는 맨 오른쪽.
+        expect(page.locator('[data-tab="settings"]')).to_be_visible()
+        assert page.evaluate("document.querySelector('[data-tab=\"settings\"]').previousElementSibling.dataset.tab") == "import"
+        assert page.evaluate("document.querySelector('#tabs').lastElementChild.id") == "moreMenu"
+        assert page.locator('.more-items [data-tab="settings"]').count() == 0
         expect(page.locator("#feedFilters")).not_to_be_visible()
         expect(page.locator("#selectionBar")).not_to_be_visible()
         expect(page.locator("[data-select]").first).not_to_be_visible()
-        expect(page.locator("#captureTags")).not_to_be_visible()
-        print("OK first screen shows four primary menus and hides optional tools")
+        # 태그 넣기 칸은 내 태그가 없어도 늘 보인다(접힌 채로)
+        expect(page.locator("#captureTags")).to_be_visible()
+        expect(page.locator("#captureTags")).not_to_have_attribute("open", "")
+        print("OK first screen shows four primary menus with settings next to 가져오기·공유 and hides optional tools")
         # 보조 메뉴는 마우스와 키보드로 열 수 있고 실제 화면에 연결돼야 한다.
         page.locator("#moreMenu > summary").focus()
         page.keyboard.press("Enter")
-        expect(page.locator('[data-tab="clusters"]')).to_be_visible()
+        expect(page.locator('[data-tab="tagboard"]')).to_be_visible()
         page.keyboard.press("Escape")
-        expect(page.locator('[data-tab="clusters"]')).not_to_be_visible()
+        expect(page.locator('[data-tab="tagboard"]')).not_to_be_visible()
         page.locator('[data-tab="todos"]').click()
         expect(page.locator("#lead h2")).to_contain_text("일정")
         expect(page.locator('[data-todo-layout="calendar"]')).to_have_attribute("aria-pressed", "true")
-        for tab, text in [("clusters", "주제별 묶음"), ("rollup", "기간 요약"), ("settings", "설정")]:
-            page.locator("#moreMenu > summary").click()
+        for tab, text in [("tagboard", "태그별 메모"), ("rollup", "기간 요약"), ("settings", "설정")]:
+            if tab != "settings":
+                page.locator("#moreMenu > summary").click()
             page.locator(f'[data-tab="{tab}"]').click()
             expect(page.locator("#lead h2")).to_contain_text(text)
             expect(page.locator("#view")).not_to_contain_text("불러오는 중")
             expect(page.locator("#view")).not_to_contain_text("오류:")
+        expect(page.locator('[data-tab="settings"]')).to_have_class(re.compile(r"\bon\b"))
+        expect(page.locator("#moreMenu > summary")).to_have_text(re.compile("더 보기"))   # 설정을 열어도 '더 보기'는 그대로
         page.locator('[data-tab="feed"]').click()
         expect(page.locator(".card[data-id]")).to_have_count(40)
         print("OK secondary menus stay reachable with keyboard and pointer")
@@ -393,7 +403,6 @@ def main():
         }""")
         page.locator("#q").fill("결제")
         page.wait_for_timeout(300)
-        page.locator("#moreMenu > summary").click()
         page.locator('[data-tab="settings"]').click()
         expect(page.locator("#view")).to_contain_text("LLM 연결")
         page.wait_for_timeout(800)

@@ -40,6 +40,19 @@ async function startGenerate(ids, instruction) {
   await goTab("generate");
 }
 
+// 태그 하나를 찾을 범위로 정해 'AI로 정리'를 연다(태그별 화면의 '이 태그로 AI 정리').
+async function startGenerateForTag(tag, instruction) {
+  if (gen.busy) { toast("진행 중인 정리가 끝난 뒤 다시 선택하세요"); return; }
+  gen.busy = true; setGenBusy(true);
+  try { await flushGenDraft(); } catch { toast("수정 내용을 보관하지 못했습니다. 다시 시도해 주세요"); return; }
+  finally { gen.busy = false; setGenBusy(false); }
+  ++gen.finderVersion;
+  Object.assign(gen, { instruction, memoIds: null, scope: { tags: [tag], period: "all", since: "", until: "", person: null },
+    queries: null, plan: null, output: null, collection: null, review: null, body: "", savedDraft: "", editing: false,
+    initialized: true, error: "", followup: "", oldVersion: null, periodDay: genToday() });
+  await goTab("generate");
+}
+
 // 취합 자료의 한 버전을 고정해 정리한다. 메모 검색·태그 범위는 쓰지 않는다.
 async function startCollectionGenerate(collection, instruction = "") {
   if (gen.busy) { toast("진행 중인 정리가 끝난 뒤 다시 선택하세요"); return; }

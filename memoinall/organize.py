@@ -1,7 +1,8 @@
 """정리 계층 — 쌓인 메모를 사람이 소화할 수 있는 단위로 묶는다.
 
-- cluster(): 임베딩 기반 주제 자동 묶음. 태그를 안 달아도 주제가 드러난다.
-- rollup(): 기간별 브리핑 재료(메모/할일/결정/사람/태그 집계).
+- cluster(): 임베딩 기반 주제 자동 묶음. CLI `clusters` 와 /api/clusters 에서만 쓴다
+  (화면은 묶은 기준이 보이는 '내 태그' 단위로 보여준다 — tags.board, rollup 의 tag_groups).
+- rollup(): 기간별 브리핑 재료(메모/할일/결정/사람/태그 집계, 내 태그별 묶음).
 """
 
 from __future__ import annotations
@@ -161,8 +162,28 @@ def rollup(period: str = "week", anchor: str | None = None) -> dict:
         "todos_done": todos_done,
         "top_tags": [{"value": v, "count": c} for v, c in tag_counter.most_common(10)],
         "top_people": [{"value": v, "count": c} for v, c in people_counter.most_common(10)],
-        "clusters": cluster(since=since, until=until),
+        **_tag_groups(memos),
     }
+
+
+def _tag_groups(memos: list[dict], per: int = 8) -> dict:
+    """기간 안의 메모를 설정의 '내 태그' 순서대로 묶는다. 자동 군집과 달리 묶은 기준이 사용자에게 보인다.
+
+    한 메모에 내 태그가 여럿이면 각 묶음에 다 들어간다. 내 태그가 하나도 없는 메모는 따로 모은다.
+    """
+    from . import tags  # tags → store 순환을 피해 여기서 부른다
+
+    brief = lambda m: {"id": m["id"], "title": m["title"], "created_at": m["created_at"]}  # noqa: E731
+    mine = tags.all_tags(with_counts=False)
+    groups = []
+    for tag in mine:
+        hit = [m for m in memos if tag["name"] in (m.get("facets") or {}).get("tag", [])]
+        if hit:
+            groups.append({"name": tag["name"], "color": tag["color"], "count": len(hit),
+                           "memos": [brief(m) for m in hit[:per]]})
+    names = {t["name"] for t in mine}
+    rest = [m for m in memos if not names & set((m.get("facets") or {}).get("tag", []))]
+    return {"tag_groups": groups, "untagged": {"count": len(rest), "memos": [brief(m) for m in rest[:per]]}}
 
 
 def rollup_prompt(data: dict) -> str:
@@ -172,11 +193,15 @@ def rollup_prompt(data: dict) -> str:
         f"메모 {data['memo_count']}건",
         "",
     ]
-    if data["clusters"]:
-        lines.append("## 자동 주제 묶음")
-        for c in data["clusters"]:
-            titles = ", ".join(m["title"] for m in c["memos"][:5])
-            lines.append(f"- {c['label']} ({c['size']}건): {titles}")
+    untagged = data.get("untagged") or {"count": 0, "memos": []}
+    if data.get("tag_groups") or untagged["count"]:
+        lines.append("## 내 태그별")
+        for g in data.get("tag_groups", []):
+            titles = ", ".join(m["title"] for m in g["memos"][:5])
+            lines.append(f"- #{g['name']} ({g['count']}건): {titles}")
+        if untagged["count"]:
+            titles = ", ".join(m["title"] for m in untagged["memos"][:5])
+            lines.append(f"- 내 태그 없음 ({untagged['count']}건): {titles}")
         lines.append("")
     if data["decisions"]:
         lines.append("## 결정/결론")

@@ -220,7 +220,6 @@ def main():
         assert calls and all(engine == "gemini" and not partial for engine, partial in calls), calls
         print("OK Gemini only gets one request per pause, no drafts")
 
-        page.locator("#moreMenu > summary").click()
         page.locator('[data-tab="settings"]').click()
         page.locator("#sttTransport").select_option("live")
         expect(page.locator("#sttGeminiModel")).to_be_hidden()
