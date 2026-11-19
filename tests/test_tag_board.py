@@ -37,6 +37,17 @@ def main():
         page.route("http://127.0.0.1:8787/**", serve)
         page.goto("http://127.0.0.1:8787/")
 
+        # 메모 입력칸: 내 태그가 없으면 접힌 상태에서도 '내 태그 정하기' 링크가 보이고, 누르면 새 태그 입력으로 간다
+        setup = page.locator("#capTagSetup a")
+        expect(setup).to_be_visible()
+        expect(setup).to_have_text("내 태그 정하기")
+        setup.click()
+        expect(page.locator('[data-tab="settings"]')).to_have_class(re.compile(r"\bon\b"))
+        expect(page.locator("#newTag")).to_be_focused()
+        page.locator('[data-tab="feed"]').click()
+        expect(page.locator("#captureTags")).not_to_have_attribute("open", "")     # 링크를 눌러도 칸은 펼쳐지지 않았다
+        print("OK with no 'my tags', a hint link next to '태그 추가' jumps straight to the new-tag field in settings")
+
         # 내 태그가 없으면 설정으로 안내한다
         page.locator("#moreMenu > summary").click()
         expect(page.locator('.more-items [data-tab="tagboard"]')).to_have_text("태그별")
@@ -46,6 +57,7 @@ def main():
         expect(page.locator("#view")).to_contain_text("아직 내 태그가 없습니다")
         page.locator("#tbSettings").click()
         expect(page.locator('[data-tab="settings"]')).to_have_class(re.compile(r"\bon\b"))
+        expect(page.locator("#newTag")).to_be_focused()
         print("OK with no 'my tags' yet, the tag view points to settings")
 
         tags.add("회의", color="teal")
@@ -70,6 +82,8 @@ def main():
         assert any(s["value"] == "개인" for s in d["suggested"])
         print("OK API groups memos by my tags in my order, leaves out archived memos, and lists the rest")
 
+        page.reload()
+        expect(page.locator("#capTagSetup")).to_be_hidden()          # 내 태그가 생기면 안내 링크는 사라진다
         page.locator("#moreMenu > summary").click()
         page.locator('[data-tab="tagboard"]').click()
         expect(page.locator("[data-tb-group]")).to_have_count(3)

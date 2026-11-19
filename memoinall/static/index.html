@@ -412,7 +412,7 @@
     <div class="capture">
       <textarea id="capture" aria-label="새 메모" disabled placeholder="회의 내용, 할 일, 떠오른 생각… 자유롭게 적어두세요."></textarea>
       <details id="captureTags" class="capture-options">
-        <summary>태그 추가 (선택)</summary>
+        <summary>태그 추가 (선택)<span id="capTagSetup" class="hint" hidden> · <a href="#" style="color:var(--accent)">내 태그 정하기</a></span></summary>
         <div id="capTags" class="tagrow" style="margin:9px 0 2px"></div>
       </details>
       <div class="capture-bar">
@@ -1135,6 +1135,8 @@ function paintTagRows() {
   const row = $("#capTags");
   if (!row) return;
   $("#captureTags").hidden = false;
+  // 내 태그가 없으면 접힌 상태에서도 바로 보이는 안내 링크를 제목 옆에 둔다.
+  $("#capTagSetup").hidden = myTags.length > 0;
   const inBody = new Set(bodyTags($("#capture").value).map((t) => t.toLowerCase()));
   const chips = myTags.length ? myTags : tagSuggestions;
   row.innerHTML = chips.map((t) => tagChip(t, inBody.has(t.name.toLowerCase()))).join("")
@@ -1146,7 +1148,18 @@ function paintTagRows() {
     b.onclick = () => toggleTagInCapture(b.dataset.tag);
   });
   const link = $("#capTagSettings");
-  if (link) link.onclick = (e) => { e.preventDefault(); goTab("settings"); };
+  if (link) link.onclick = (e) => { e.preventDefault(); openTagSettings(); };
+}
+// 제목 줄의 링크를 눌러도 칸이 펼쳐지지 않게 한다(summary 안의 클릭은 기본으로 펼침/접힘).
+$("#capTagSetup a").onclick = (e) => { e.preventDefault(); e.stopPropagation(); openTagSettings(); };
+
+// 설정의 '내 태그' 칸으로 가서 새 태그 입력에 바로 커서를 둔다.
+async function openTagSettings() {
+  await goTab("settings");
+  const input = $("#newTag");
+  if (!input) return;
+  input.scrollIntoView({ block: "center" });
+  input.focus();
 }
 
 function toggleTagInCapture(name) {
@@ -1454,7 +1467,7 @@ async function renderTagBoard(version = renderVersion) {
       } catch (err) { b.disabled = false; toast(err.message); }
     };
   });
-  if ($("#tbSettings")) $("#tbSettings").onclick = () => goTab("settings");
+  if ($("#tbSettings")) $("#tbSettings").onclick = openTagSettings;
 }
 
 async function renderRollup(version = renderVersion) {
@@ -1508,7 +1521,7 @@ async function renderRollup(version = renderVersion) {
       goTab("feed");
     };
   });
-  if ($("#rollupTagSettings")) $("#rollupTagSettings").onclick = () => goTab("settings");
+  if ($("#rollupTagSettings")) $("#rollupTagSettings").onclick = openTagSettings;
 }
 
 // 기간 요약의 '내 태그별' 칸. 태그별 화면과 같은 기준 — 설정의 내 태그 순서, 내 태그 없는 메모는 따로.
