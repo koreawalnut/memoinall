@@ -44,7 +44,8 @@ def main():
             if fail_patch and request.method == "PATCH" and path.startswith("/api/todos/"):
                 route.fulfill(status=503, content_type="application/json", body=json.dumps({"detail": "저장 오류 테스트"}))
                 return
-            response = client.request(request.method, path, content=request.post_data_buffer)
+            sent = {"content-type": request.headers["content-type"]} if "content-type" in request.headers else {}
+            response = client.request(request.method, path, content=request.post_data_buffer, headers=sent)
             headers = {key: value for key, value in response.headers.items() if key not in {"content-length", "content-encoding"}}
             route.fulfill(status=response.status_code, headers=headers, body=response.content)
 

@@ -47,14 +47,14 @@ def main():
                 fail["refresh"] = False
                 route.fulfill(status=503, content_type="application/json", body='{"detail":"연결 실패"}')
                 return
-            response = client.request(request.method, path, content=request.post_data_buffer)
+            sent = {"content-type": request.headers["content-type"]} if "content-type" in request.headers else {}
+            response = client.request(request.method, path, content=request.post_data_buffer, headers=sent)
             headers = {key: value for key, value in response.headers.items() if key not in {"content-length", "content-encoding"}}
             route.fulfill(status=response.status_code, headers=headers, body=response.content)
 
         page.route("http://127.0.0.1:8787/**", serve)
         page.goto("http://127.0.0.1:8787/")
         expect(page.locator("#capture")).to_be_enabled()
-        page.locator("#moreMenu > summary").click()
         page.locator('[data-tab="todos"]').click()
         expect(page.locator('[data-todo-layout="calendar"]')).to_have_attribute("aria-pressed", "true")
         page.locator('[data-calendar-day="2026-11-20"]').click()
@@ -83,6 +83,32 @@ def main():
         page.locator('[data-calendar-day="2026-11-19"]').click()
         expect(page.locator(".todo-calendar-agenda")).to_contain_text("교육계획안 보내기")
         print("OK direct task can be rescheduled through existing editor")
+
+        # 한 번 누르면 고르기만, 두 번 누르거나 포커스된 날짜에서 Enter 면 바로 일정 추가
+        page.locator('[data-calendar-day="2026-11-24"]').click()
+        expect(page.locator('[data-calendar-day="2026-11-24"]')).to_have_attribute("aria-pressed", "true")
+        page.wait_for_timeout(500)
+        expect(page.locator("#todoCreate")).not_to_be_visible()
+        page.locator('[data-calendar-day="2026-11-25"]').dblclick()
+        expect(page.locator("#todoCreate")).to_be_visible()
+        expect(page.locator("#todoCreate .dlg-h")).to_have_text("일정 추가")         # 메모 등록 창이 아니다
+        expect(page.locator("#todoCreateDate")).to_have_value("2026-11-25")
+        expect(page.locator("#todoCreateTitle")).to_be_focused()
+        page.locator("#todoCreateCancel").click()
+        expect(page.locator("#todoCreate")).not_to_be_visible()
+        expect(page.locator('[data-calendar-day="2026-11-25"]')).to_have_attribute("aria-pressed", "true")
+        page.locator('[data-calendar-day="2026-11-25"]').focus()
+        page.keyboard.press("ArrowLeft")
+        expect(page.locator('[data-calendar-day="2026-11-24"]')).to_be_focused()
+        expect(page.locator("#todoCreate")).not_to_be_visible()                   # 화살표로 옮길 때는 열리지 않는다
+        page.keyboard.press("Enter")
+        expect(page.locator("#todoCreateDate")).to_have_value("2026-11-24")
+        expect(page.locator("#todoCreateTitle")).to_be_focused()
+        page.keyboard.press("Escape")
+        expect(page.locator("#todoCreate")).not_to_be_visible()
+        expect(page.locator('[data-calendar-day="2026-11-24"]')).to_be_focused()   # 닫으면 그 날짜로 돌아온다
+        assert db.one("SELECT count(*) n FROM todos")["n"] == 1
+        print("OK click selects, double-click or Enter on a focused day opens '일정 추가' for that day; arrows only move")
 
         page.locator("#todoCalendarImport").click()
         expect(page.locator("#calendarUrlField")).not_to_be_visible()

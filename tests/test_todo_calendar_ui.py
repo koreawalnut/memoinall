@@ -37,14 +37,14 @@ def main():
         def serve(route):
             request = route.request
             path = request.url.split("127.0.0.1:8787", 1)[-1]
-            response = client.request(request.method, path, content=request.post_data_buffer)
+            sent = {"content-type": request.headers["content-type"]} if "content-type" in request.headers else {}
+            response = client.request(request.method, path, content=request.post_data_buffer, headers=sent)
             headers = {key: value for key, value in response.headers.items() if key not in {"content-length", "content-encoding"}}
             route.fulfill(status=response.status_code, headers=headers, body=response.content)
 
         page.route("http://127.0.0.1:8787/**", serve)
         page.goto("http://127.0.0.1:8787/")
         expect(page.locator("#capture")).to_be_enabled()
-        page.locator("#moreMenu > summary").click()
         page.locator('[data-tab="todos"]').click()
         expect(page.locator("#todoCalendarMonth")).to_have_text("2026년 11월")
         expect(page.locator('[data-todo-layout]').first).to_have_attribute("data-todo-layout", "calendar")
@@ -59,7 +59,6 @@ def main():
         assert abs(agenda_box["y"] - month_box["y"]) < 2
         page.locator('[data-todo-layout="list"]').click()
         page.locator('[data-tab="feed"]').click()
-        page.locator("#moreMenu > summary").click()
         page.locator('[data-tab="todos"]').click()
         expect(page.locator('[data-todo-layout="calendar"]')).to_have_attribute("aria-pressed", "true")
         print("OK calendar opens first on entry/reentry; desktop date agenda sits beside month")
@@ -112,7 +111,7 @@ def main():
         expect(page.locator(".todo-calendar-agenda .todo")).to_have_count(3)
         report.get_by_role("checkbox").check()
         expect(page.locator("#todoCalendarDayTitle")).to_contain_text("2건")
-        expect(page.locator('[data-calendar-day="2026-11-20"]')).to_have_attribute("aria-label", "2026-11-20, 마감 2건, 작성한 메모 0건")
+        expect(page.locator('[data-calendar-day="2026-11-20"]')).to_have_attribute("aria-label", "2026-11-20, 마감 2건, 작성한 메모 0건, Enter로 일정 추가")
         page.locator("#todoUndo").click()
         expect(page.locator("#todoCalendarDayTitle")).to_contain_text("3건")
         report.get_by_role("button", name="수정·날짜").click()

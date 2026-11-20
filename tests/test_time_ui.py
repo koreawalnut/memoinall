@@ -30,7 +30,8 @@ def main():
             def serve(route):
                 request = route.request
                 path = request.url.split("127.0.0.1:8787", 1)[-1]
-                response = client.request(request.method, path, content=request.post_data_buffer)
+                sent = {"content-type": request.headers["content-type"]} if "content-type" in request.headers else {}
+                response = client.request(request.method, path, content=request.post_data_buffer, headers=sent)
                 headers = {k: v for k, v in response.headers.items() if k not in {"content-length", "content-encoding"}}
                 route.fulfill(status=response.status_code, headers=headers, body=response.content)
 

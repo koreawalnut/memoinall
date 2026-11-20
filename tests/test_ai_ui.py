@@ -43,7 +43,8 @@ def main():
             if path.endswith("/draft") and switches["fail_draft"]:
                 route.fulfill(status=503, content_type="application/json", body=json.dumps({"detail": "테스트 저장 실패"}))
                 return
-            response = client.request(request.method, path, content=request.post_data_buffer)
+            sent = {"content-type": request.headers["content-type"]} if "content-type" in request.headers else {}
+            response = client.request(request.method, path, content=request.post_data_buffer, headers=sent)
             headers = {k: v for k, v in response.headers.items() if k not in {"content-length", "content-encoding"}}
             route.fulfill(status=response.status_code, headers=headers, body=response.content)
 

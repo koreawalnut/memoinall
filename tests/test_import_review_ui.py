@@ -35,7 +35,8 @@ def main():
                 payload = json.loads(content)
                 payload["path"] = str(output)
                 content = json.dumps(payload).encode()
-            response = client.request(request.method, path, content=content)
+            sent = {"content-type": request.headers["content-type"]} if "content-type" in request.headers else {}
+            response = client.request(request.method, path, content=content, headers=sent)
             headers = {k: v for k, v in response.headers.items() if k not in {"content-length", "content-encoding"}}
             route.fulfill(status=response.status_code, headers=headers, body=response.content)
 

@@ -39,7 +39,7 @@ function todoCalendarHTML(data) {
     const mobileKinds = kindCounts.slice(0, 2);
     const otherCount = day.events.filter((event) => !mobileKinds.some((item) => event.kinds.includes(item.kind))).length;
     return `<td class="${day.in_month ? "" : "outside-month"}"><button type="button" class="todo-calendar-day ${selected ? "selected" : ""} ${day.is_today ? "is-today" : ""}"
-      data-calendar-day="${day.date}" aria-label="${day.date}, ${day.count ? summary : "일정 없음"}, 작성한 메모 ${day.memo_count}건" aria-pressed="${selected}" ${day.is_today ? 'aria-current="date"' : ""} tabindex="${selected ? "0" : "-1"}">
+      data-calendar-day="${day.date}" aria-label="${day.date}, ${day.count ? summary : "일정 없음"}, 작성한 메모 ${day.memo_count}건, Enter로 일정 추가" aria-pressed="${selected}" ${day.is_today ? 'aria-current="date"' : ""} tabindex="${selected ? "0" : "-1"}">
       ${day.memo_count ? `<span class="todo-memo-mark" aria-hidden="true" title="이날 작성한 메모 ${day.memo_count}건">▤</span>` : ""}
       <span class="todo-calendar-number"><span class="todo-calendar-date-number">${+day.date.slice(8)}</span>${day.is_today ? '<span class="todo-calendar-today-label">오늘</span>' : ""}</span>
       <span class="todo-calendar-events">${day.events.slice(0, 2).map((event) => `<span class="todo-calendar-event ${event.overdue ? "overdue" : event.kinds[0]}" title="${esc(event.time_label ? event.time_label + " · " + event.title : event.title)}"><b>${event.kinds[0] === "external" ? esc(event.time_label?.split("–")[0] || "일정") : todoCalendarKinds[event.kinds[0]]}</b> ${esc(event.title)}</span>`).join("")}</span>
@@ -62,7 +62,7 @@ function todoCalendarHTML(data) {
       ${data.undated_waiting ? `<button class="btn ghost" data-todo-view="waiting">날짜 없는 대기 ${data.undated_waiting}건</button>` : ""}
       <button class="btn ghost" data-todo-view="review">확인 필요 ${data.counts.review}건</button>
     </div>
-    <p class="todo-calendar-footnote">날짜를 누르면 그날의 일정과 작성한 메모를 볼 수 있습니다. ‘기간 중’은 매일 반복하는 일이 아닙니다.</p>
+    <p class="todo-calendar-footnote">날짜를 누르면 그날의 일정과 작성한 메모를 보고, <b>두 번 누르거나 Enter</b>를 누르면 바로 일정을 추가합니다. ‘기간 중’은 매일 반복하는 일이 아닙니다.</p>
     </div>
     <section class="todo-calendar-agenda" aria-labelledby="todoCalendarDayTitle">
       <div class="todo-calendar-agenda-head"><span class="todo-agenda-date" aria-hidden="true">${+data.selected.slice(8)}</span><div><p class="todo-agenda-eyebrow">선택한 날짜</p><h3 class="todo-group-title" id="todoCalendarDayTitle">${todoDate(data.selected)}${data.selected === data.today ? " · 오늘" : ""} <span>일정 ${data.total}건</span></h3></div></div>
@@ -99,6 +99,18 @@ function selectTodoCalendarDay(day, focus = false) {
   return refreshTodoBoard();
 }
 
+document.addEventListener("dblclick", (event) => {
+  const button = event.target.closest?.("[data-calendar-day]");
+  if (button) openTodoCalendarEntry(button.dataset.calendarDay);
+});
+
+// 그 날짜로 일정 추가 창을 연다. 이미 열려 있으면 다시 열지 않는다.
+function openTodoCalendarEntry(day) {
+  if (document.getElementById("todoCreate")?.open) return;
+  if (day !== todoCalendar.selected) selectTodoCalendarDay(day, true);
+  openTodoCreate(day);
+}
+
 function moveTodoCalendarMonth(delta) {
   const day = +todoCalendar.selected.slice(8);
   const month = new Date(todoCalendar.month + "-01T12:00:00");
@@ -122,9 +134,21 @@ function bindTodoCalendar(memos) {
   $("#todoMonthPrev").onclick = () => moveTodoCalendarMonth(-1);
   $("#todoMonthNext").onclick = () => moveTodoCalendarMonth(1);
   $("#todoCalendarToday").onclick = () => selectTodoCalendarDay(todoLocalDate());
+  // 한 번 누르면 날짜만 고르고(오른쪽에 그날 일정·메모), 두 번 누르거나 Enter 면 바로 일정 추가 창을 연다.
+  // 두 번째 클릭은 브라우저가 세는 클릭 수(detail)로 안다. 이미 고른 날짜를 다시 눌러도 다시 그리지 않아야
+  // 두 번째 클릭이 같은 버튼에 닿는다. 혹시 끊기면 아래 문서 전체의 dblclick 이 받는다.
   document.querySelectorAll("[data-calendar-day]").forEach((button) => {
-    button.onclick = () => selectTodoCalendarDay(button.dataset.calendarDay, true);
+    button.onclick = (event) => {
+      const day = button.dataset.calendarDay;
+      if (event.detail >= 2) { openTodoCalendarEntry(day); return; }
+      if (day !== todoCalendar.selected) selectTodoCalendarDay(day, true);
+    };
     button.onkeydown = (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();               // 버튼 기본 동작(클릭 = 선택)을 막고 바로 입력
+        openTodoCalendarEntry(button.dataset.calendarDay);
+        return;
+      }
       const steps = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
       if (!(event.key in steps)) return;
       event.preventDefault();

@@ -122,7 +122,8 @@ def main():
         def serve(route):
             request = route.request
             path = request.url.split("127.0.0.1:8787", 1)[-1]
-            response = client.request(request.method, path, content=request.post_data_buffer)
+            sent = {"content-type": request.headers["content-type"]} if "content-type" in request.headers else {}
+            response = client.request(request.method, path, content=request.post_data_buffer, headers=sent)
             headers = {key: value for key, value in response.headers.items()
                        if key not in {"content-length", "content-encoding"}}
             if path == "/api/generate" and response.status_code == 200:
