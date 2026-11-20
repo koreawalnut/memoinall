@@ -56,7 +56,7 @@ function scheduleToolbar() {
 }
 
 function bindSchedule() {
-  const filter = (tag) => { todoBoard.tag = tag || null; todoBoard.offset = 0; refreshTodoBoard(); };
+  const filter = (tag) => { todoBoard.tag = tag || null; todoBoard.offset = 0; todoCalendar.memoOffset = 0; refreshTodoBoard(); };
   $("#scheduleTagFilter").onchange = (event) => filter(event.target.value);
   if ($("#scheduleClearTag")) $("#scheduleClearTag").onclick = () => filter(null);
   document.querySelectorAll("[data-schedule-filter]").forEach((button) => { button.onclick = () => filter(button.dataset.scheduleFilter); });

@@ -5,7 +5,8 @@ import json
 import re
 import calendar
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from . import db, todo_extract, schedule_tags, tags
 
@@ -278,8 +279,46 @@ def board(*, today: str | None = None, view: str = "all", limit: int = 100, offs
             "today": today, "offset": offset, "has_more": offset + limit < total}
 
 
+def _calendar_memos(grid: list[date], selected: str, tag: str | None, tz: str | None, memo_offset: int):
+    try:
+        zone = ZoneInfo(tz) if tz else None
+    except (ZoneInfoNotFoundError, ValueError):
+        raise ValueError("메모 작성 시각을 표시할 시간대를 확인하세요.") from None
+    # Mixed legacy timestamps can have an explicit offset or represent local wall time.
+    # Use the creation index to bound the scan before resolving dates near midnight.
+    criteria = "m.archived=0 AND m.created_at>=? AND m.created_at<?"
+    params = [(grid[0] - timedelta(days=2)).isoformat(), (grid[-1] + timedelta(days=3)).isoformat()]
+    if tag:
+        criteria += " AND EXISTS (SELECT 1 FROM facets f WHERE f.memo_id=m.id AND f.kind='tag' AND f.value=?)"
+        params.append(tag)
+    counts, selected_rows = Counter(), []
+    for row in db.connect().execute("SELECT m.id, m.title, m.created_at FROM memos m WHERE " + criteria, params):
+        try:
+            written = datetime.fromisoformat(row["created_at"])
+            local = written.astimezone(zone) if written.tzinfo else written.replace(tzinfo=zone)
+        except (ValueError, OverflowError, OSError):
+            continue
+        day = local.date().isoformat()
+        counts[day] += 1
+        if day == selected:
+            # During a clock change two different instants can have the same local time.
+            try:
+                instant = local.astimezone(timezone.utc)
+            except (OverflowError, OSError, ValueError):
+                instant = local.replace(tzinfo=timezone.utc)
+            selected_rows.append((instant, row["id"], row["title"], local.strftime("%H:%M")))
+    selected_rows.sort(reverse=True)
+    page_size = 5
+    total = len(selected_rows)
+    offset = min(memo_offset, max(0, (total - 1) // page_size) * page_size)
+    items = [{"id": mid, "title": title, "time": clock}
+             for _, mid, title, clock in selected_rows[offset:offset + page_size]]
+    return counts, {"items": items, "total": total, "offset": offset, "limit": page_size}
+
+
 def calendar_view(*, month: str, selected: str | None = None, today: str | None = None,
-                  limit: int = 50, offset: int = 0, tag: str | None = None) -> dict:
+                  limit: int = 50, offset: int = 0, tag: str | None = None,
+                  tz: str | None = None, memo_offset: int = 0) -> dict:
     """Calendar dates are evidence/decisions, never synthetic workload dates.
 
     One task can have a deadline and a follow-up on different days. On the same
@@ -290,7 +329,7 @@ def calendar_view(*, month: str, selected: str | None = None, today: str | None 
     if not isinstance(month, str) or not re.fullmatch(r"\d{4}-\d{2}", month):
         raise ValueError("달력의 월을 YYYY-MM 형식으로 지정해 주세요.")
     year, number = map(int, month.split("-"))
-    if not 2 <= year <= 9998 or not 1 <= number <= 12 or not 1 <= limit <= 500 or offset < 0:
+    if not 2 <= year <= 9998 or not 1 <= number <= 12 or not 1 <= limit <= 500 or min(offset, memo_offset) < 0:
         raise ValueError("달력 조회 범위를 확인해 주세요.")
     grid = list(calendar.Calendar(firstweekday=6).itermonthdates(year, number))
     selected = validate_date(selected, "선택한") or (today if today.startswith(month) else month + "-01")
@@ -347,12 +386,13 @@ def calendar_view(*, month: str, selected: str | None = None, today: str | None 
     def order(item):
         kinds = item.get("kinds", item.get("calendar_kinds", []))
         return ("due" not in kinds, "review" not in kinds, "external" in kinds, item.get("sort_time", ""), item["title"], str(item["id"]))
-    cells = [{"date": day, "in_month": day.startswith(month), "is_today": day == today,
+    memo_counts, day_memos = _calendar_memos(grid, selected, tag, tz, memo_offset)
+    cells = [{"date": day, "in_month": day.startswith(month), "is_today": day == today, "memo_count": memo_counts[day],
               "events": sorted(events.values(), key=order), "count": len(events)} for day, events in days.items()]
     items.sort(key=order)
     return {"month": month, "selected": selected, "today": today, "days": cells, "counts": counts, "tag": tag, "tag_choices": schedule_tags.choices(),
             "registered_tags": tags.all_tags(with_counts=False),
             "month_count": len(month_ids), "external_count": len(external_ids), "sources": calendar_import.sources(),
-            "overdue_count": overdue, "undated_waiting": undated_waiting,
+            "overdue_count": overdue, "undated_waiting": undated_waiting, "day_memos": day_memos,
             "items": items[offset:offset + limit], "total": len(items), "offset": offset,
             "has_more": offset + limit < len(items)}

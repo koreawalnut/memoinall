@@ -71,6 +71,14 @@ main.is-todos { max-width: 1480px; }
 .todo-calendar-day:hover { background: color-mix(in srgb, var(--accent) 4%, var(--panel)); }
 .todo-calendar-day.selected { box-shadow: inset 0 0 0 2px var(--accent); background: color-mix(in srgb, var(--accent) 5%, var(--panel)); }
 .todo-calendar-day:focus-visible { outline-offset: -4px; }
+.todo-memo-mark { position: absolute; right: 3px; top: 3px; color: var(--dim); font-size: 10px; line-height: 1; }
+.calendar-day-memos { margin: 10px 0 14px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.calendar-day-memos h4 { font-size: 14px; margin: 0 0 4px; }
+.calendar-day-memos h4 span { font-weight: 400; color: var(--dim); }
+.calendar-memo-row { display: flex; align-items: baseline; gap: 9px; width: 100%; text-align: left; background: transparent; border: 0; color: var(--fg); padding: 6px 2px; font: inherit; cursor: pointer; }
+.calendar-memo-row time { color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; }
+.calendar-memo-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.calendar-memo-row:hover span, .calendar-memo-row:focus-visible span { text-decoration: underline; }
 .todo-calendar-number { display: flex; align-items: center; gap: 3px; color: var(--fg); font-size: 12px; }
 .todo-calendar-date-number { display: flex; align-items: center; justify-content: center; width: 25px; height: 25px; border-radius: 50%; font-variant-numeric: tabular-nums; }
 .is-today .todo-calendar-date-number { background: var(--accent); color: var(--planner-primary-text); font-weight: 600; }

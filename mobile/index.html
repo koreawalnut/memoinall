@@ -148,6 +148,13 @@
   .cal .dots { display: flex; gap: 3px; height: 6px; }
   .cal .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
   .cal .dots i.done { background: var(--dim); opacity: .6; }
+  .cal .day { position: relative; }
+  .cal .memo-mark { position: absolute; top: 2px; right: 1px; color: var(--dim); font-size: 10px; }
+  .cal-legend { margin: 4px 0 12px; font-size: 12px; color: var(--dim); }
+  .day-memo { display: flex; align-items: baseline; gap: 10px; width: 100%; padding: 10px 0; border: 0; background: transparent; color: var(--fg); text-align: left; font: inherit; cursor: pointer; }
+  .day-memo + .day-memo { border-top: 1px solid var(--line); }
+  .day-memo time { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--dim); }
+  .day-memo span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .event { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--line); }
   .event:last-child { border-bottom: 0; }
   .event input[type=checkbox] { width: 22px; height: 22px; min-height: 0; flex: none; margin-top: 2px; }
@@ -244,11 +251,19 @@
       <button class="btn small" id="calToday" type="button">오늘</button>
     </div>
     <div class="cal" id="cal" role="grid" aria-labelledby="calTitle"></div>
+    <div class="cal-legend"><span aria-hidden="true">●</span> 일정 · <span aria-hidden="true">▤</span> 작성한 메모</div>
     <div class="row" style="margin:16px 0 4px">
       <h2 id="dayTitle" style="margin:0"></h2><span class="spacer"></span>
       <button class="btn primary small" id="addEvent" type="button">+ 일정 추가</button>
     </div>
     <div id="dayList" class="card" style="padding:4px 14px"></div>
+    <h2 id="dayMemoTitle">이날 작성한 메모</h2>
+    <div id="dayMemos" class="card" style="padding:0 14px" aria-labelledby="dayMemoTitle"></div>
+    <div id="dayMemoPager" class="row" hidden>
+      <button id="dayMemoPrev" class="btn small" type="button">이전 메모</button>
+      <span id="dayMemoRange" class="muted"></span>
+      <button id="dayMemoNext" class="btn small" type="button">다음 메모</button>
+    </div>
     <div class="row" style="margin:22px 0 10px">
       <h2 style="margin:0;flex:1">다가오는 일정</h2>
       <button class="btn small" id="calSend" type="button">PC로 보내기</button>

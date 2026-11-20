@@ -439,9 +439,11 @@ def create_todo(payload: dict = Body(...)):
 
 @app.get("/api/todos/calendar")
 def get_todo_calendar(month: str, selected: str | None = None, today: str | None = None,
-                      limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0), tag: str | None = None):
+                      limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0), tag: str | None = None,
+                      tz: str | None = None, memo_offset: int = Query(0, ge=0)):
     try:
-        return {**todos.calendar_view(month=month, selected=selected, today=today, limit=limit, offset=offset, tag=tag),
+        return {**todos.calendar_view(month=month, selected=selected, today=today, limit=limit, offset=offset,
+                                      tag=tag, tz=tz, memo_offset=memo_offset),
                 "ai": todo_ai.availability()}
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

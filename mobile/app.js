@@ -84,7 +84,7 @@ const PROVIDERS = {
 const S = {
   memos: [], events: [], ai: { provider: "gemini", keys: {}, models: {} }, lastBackup: null,
   tab: "memos", q: "", tag: "", shown: 50, selecting: false, picked: new Set(),
-  month: null, day: null,
+  month: null, day: null, memoPageDay: null, memoOffset: 0,
 };
 
 // ================================================================ 날짜
@@ -94,8 +94,9 @@ const todayStr = () => ymd(new Date());
 const parseYmd = (s) => { const [y, m, d] = String(s).split("-").map(Number); return new Date(y, m - 1, d); };
 const DOW = ["일", "월", "화", "수", "목", "금", "토"];
 const dayLabel = (s) => { const d = parseYmd(s); return `${d.getMonth() + 1}월 ${d.getDate()}일 (${DOW[d.getDay()]})`; };
+const memoDate = (iso) => new Date(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso + "T00:00:00" : iso || "");
 function whenLabel(iso) {
-  const d = new Date(iso);
+  const d = memoDate(iso);
   if (isNaN(d)) return String(iso || "");
   const day = ymd(d), hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
   if (day === todayStr()) return `오늘 ${hm}`;
@@ -104,7 +105,7 @@ function whenLabel(iso) {
   if (d.getFullYear() === new Date().getFullYear()) return `${d.getMonth() + 1}월 ${d.getDate()}일`;
   return `${d.getFullYear()}. ${d.getMonth() + 1}. ${d.getDate()}.`;
 }
-const fullLabel = (iso) => { const d = new Date(iso); return isNaN(d) ? String(iso || "") : `${ymd(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const fullLabel = (iso) => { const d = memoDate(iso); return isNaN(d) ? String(iso || "") : `${ymd(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 const stamp = () => { const d = new Date(); return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`; };
 function ago(iso) {
   const days = Math.floor((Date.now() - new Date(iso)) / 86400000);
@@ -263,7 +264,7 @@ function renderMemos() {
   paintSelection();
 }
 
-function renderAllMemos() { renderTagChips(); renderMemos(); }
+function renderAllMemos() { renderTagChips(); renderMemos(); if (S.tab === "cal") renderCal(); }
 
 // ---- 새 메모
 const capture = $("#capture");
@@ -916,11 +917,44 @@ $("#aiKeep").onclick = async () => {
 };
 
 // ================================================================ 일정
+const DAY_MEMO_PAGE = 5;
+
+function renderDayMemos() {
+  const counts = new Map(), items = [];
+  for (const memo of S.memos) {
+    const time = memoDate(memo.created_at);
+    if (isNaN(time)) continue;
+    const day = ymd(time);
+    counts.set(day, (counts.get(day) || 0) + 1);
+    if (day === S.day) items.push({memo, time});
+  }
+  items.sort((a, b) => b.time - a.time || b.memo.id - a.memo.id);
+  if (S.memoPageDay !== S.day) { S.memoPageDay = S.day; S.memoOffset = 0; }
+  S.memoOffset = Math.min(S.memoOffset, Math.floor(Math.max(0, items.length - 1) / DAY_MEMO_PAGE) * DAY_MEMO_PAGE);
+  const page = items.slice(S.memoOffset, S.memoOffset + DAY_MEMO_PAGE);
+  $("#dayMemoTitle").textContent = `이날 작성한 메모 ${items.length}건`;
+  $("#dayMemos").hidden = !items.length;
+  $("#dayMemos").innerHTML = page.map(({memo, time}) =>
+    `<button class="day-memo" type="button" data-day-memo="${memo.id}"><time>${pad(time.getHours())}:${pad(time.getMinutes())}</time><span>${esc(X.titleFrom(memo.body))}</span></button>`).join("");
+  $("#dayMemoPager").hidden = items.length <= DAY_MEMO_PAGE;
+  $("#dayMemoRange").textContent = items.length ? `${S.memoOffset + 1}–${S.memoOffset + page.length} / ${items.length}건` : "";
+  $("#dayMemoPrev").disabled = S.memoOffset === 0;
+  $("#dayMemoNext").disabled = S.memoOffset + page.length >= items.length;
+  return counts;
+}
+$("#dayMemos").onclick = (event) => {
+  const button = event.target.closest("[data-day-memo]");
+  if (button) openMemo(+button.dataset.dayMemo);
+};
+$("#dayMemoPrev").onclick = () => { S.memoOffset -= DAY_MEMO_PAGE; renderDayMemos(); };
+$("#dayMemoNext").onclick = () => { S.memoOffset += DAY_MEMO_PAGE; renderDayMemos(); };
+
 function renderCal() {
   if (!S.month) return;
   const y = S.month.getFullYear(), mo = S.month.getMonth();
   $("#calTitle").textContent = `${y}년 ${mo + 1}월`;
   const today = todayStr();
+  const memoCounts = renderDayMemos();
   const byDay = new Map();
   S.events.forEach((e) => { if (!byDay.has(e.date)) byDay.set(e.date, []); byDay.get(e.date).push(e); });
   const start = new Date(y, mo, 1 - new Date(y, mo, 1).getDay());
@@ -930,7 +964,9 @@ function renderCal() {
     const evs = byDay.get(key) || [];
     const cls = ["day", d.getMonth() !== mo ? "out" : "", key === today ? "today" : "", key === S.day ? "sel" : "",
       d.getDay() === 0 ? "sun" : "", d.getDay() === 6 ? "sat" : ""].filter(Boolean).join(" ");
-    html += `<button class="${cls}" type="button" data-day="${key}" aria-label="${dayLabel(key)}${evs.length ? `, 일정 ${evs.length}건` : ""}"${key === S.day ? ' aria-current="date"' : ""}>
+    const memoCount = memoCounts.get(key) || 0;
+    html += `<button class="${cls}" type="button" data-day="${key}" aria-label="${dayLabel(key)}, 일정 ${evs.length}건, 작성한 메모 ${memoCount}건" aria-pressed="${key === S.day}"${key === today ? ' aria-current="date"' : ""}>
+      ${memoCount ? '<span class="memo-mark" aria-hidden="true">▤</span>' : ""}
       <span class="n">${d.getDate()}</span><span class="dots">${evs.slice(0, 3).map((e) => `<i class="${e.done ? "done" : ""}"></i>`).join("")}</span></button>`;
   }
   $("#cal").innerHTML = html;

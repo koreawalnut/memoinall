@@ -56,6 +56,34 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(result["month_count"], 1)
         self.assertEqual(result["items"][0]["due"], "2026-11-20")
 
+    def test_written_day_uses_local_time_tag_and_independent_pages(self):
+        deadline, _ = self.add("금요일까지 보고서 보내야 함 #업무")
+        notes = [store.add_memo(f"회의 기록 {i} #업무", created_at="2026-11-15T15:15:00Z", enqueue_enrich=False)
+                 for i in range(5)]
+        hidden = store.add_memo("보관 항목 #업무", created_at="2026-11-16T19:00:00", enqueue_enrich=False)
+        store.set_flag(hidden["id"], archived=True)
+        other = store.add_memo("다른 태그 #개인", created_at="2026-11-16T16:00:00", enqueue_enrich=False)
+        store.update_memo(other["id"], "수정한 기록 #개인")
+        result = self.month(selected="2026-11-16", tz="Asia/Seoul", tag="업무", offset=50)
+        self.assertEqual(self.cell(result, "2026-11-16")["memo_count"], 6)
+        self.assertEqual(self.cell(result, "2026-11-20")["memo_count"], 0)
+        first = result["day_memos"]
+        self.assertEqual(first["items"][0]["id"], deadline["id"])
+        self.assertEqual(first["items"][1]["time"], "00:15")
+        self.assertEqual(len(first["items"]), 5)
+        tail = self.month(selected="2026-11-16", tz="Asia/Seoul", tag="업무", memo_offset=5)["day_memos"]
+        self.assertEqual([m["id"] for m in tail["items"]], [notes[0]["id"]])
+        self.assertEqual(self.month(selected="2026-11-16", tz="Asia/Seoul")["day_memos"]["total"], 7)
+        west = self.month(selected="2026-11-15", tz="America/New_York")
+        self.assertEqual(self.cell(west, "2026-11-15")["memo_count"], 5)
+        self.assertEqual(west["day_memos"]["total"], 5)
+
+    def test_memos_sort_by_instant_when_local_clock_repeats(self):
+        for title, instant in (("첫 기록", "2026-11-01T05:50:00Z"), ("다음 기록", "2026-11-01T06:10:00Z")):
+            store.add_memo(title, created_at=instant, enqueue_enrich=False)
+        day = self.month(selected="2026-11-01", tz="America/New_York")["day_memos"]
+        self.assertEqual([(m["title"], m["time"]) for m in day["items"]], [("다음 기록", "01:10"), ("첫 기록", "01:50")])
+
     def test_same_day_task_is_not_counted_twice(self):
         _, task = self.add("금요일까지 보고서 보내야 함")
         todos.update(task["id"], {"review_on": "2026-11-20"})

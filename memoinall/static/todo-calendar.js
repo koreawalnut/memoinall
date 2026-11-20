@@ -1,4 +1,4 @@
-const todoCalendar = { month: null, selected: null, focusDay: null };
+const todoCalendar = { month: null, selected: null, focusDay: null, memoOffset: 0 };
 const todoCalendarKinds = { due: "마감", review: "다시 보기", scheduled: "예정", range: "기간 중", external: "외부 일정" };
 
 function todoIcon(name) {
@@ -39,7 +39,8 @@ function todoCalendarHTML(data) {
     const mobileKinds = kindCounts.slice(0, 2);
     const otherCount = day.events.filter((event) => !mobileKinds.some((item) => event.kinds.includes(item.kind))).length;
     return `<td class="${day.in_month ? "" : "outside-month"}"><button type="button" class="todo-calendar-day ${selected ? "selected" : ""} ${day.is_today ? "is-today" : ""}"
-      data-calendar-day="${day.date}" aria-label="${day.date}, ${day.count ? summary : "할 일 없음"}, 일정 추가" aria-haspopup="dialog" aria-pressed="${selected}" ${day.is_today ? 'aria-current="date"' : ""} tabindex="${selected ? "0" : "-1"}">
+      data-calendar-day="${day.date}" aria-label="${day.date}, ${day.count ? summary : "일정 없음"}, 작성한 메모 ${day.memo_count}건" aria-pressed="${selected}" ${day.is_today ? 'aria-current="date"' : ""} tabindex="${selected ? "0" : "-1"}">
+      ${day.memo_count ? `<span class="todo-memo-mark" aria-hidden="true" title="이날 작성한 메모 ${day.memo_count}건">▤</span>` : ""}
       <span class="todo-calendar-number"><span class="todo-calendar-date-number">${+day.date.slice(8)}</span>${day.is_today ? '<span class="todo-calendar-today-label">오늘</span>' : ""}</span>
       <span class="todo-calendar-events">${day.events.slice(0, 2).map((event) => `<span class="todo-calendar-event ${event.overdue ? "overdue" : event.kinds[0]}" title="${esc(event.time_label ? event.time_label + " · " + event.title : event.title)}"><b>${event.kinds[0] === "external" ? esc(event.time_label?.split("–")[0] || "일정") : todoCalendarKinds[event.kinds[0]]}</b> ${esc(event.title)}</span>`).join("")}</span>
       <span class="todo-calendar-dots">${mobileKinds.map(({kind, label, count}) => `<span class="${kind}">${kind === "review" ? "확인" : kind === "external" ? "외부" : label} ${count}</span>`).join("")}${otherCount ? `<span class="todo-calendar-dots-more">+${otherCount}건</span>` : ""}</span>
@@ -53,7 +54,7 @@ function todoCalendarHTML(data) {
     <div class="todo-calendar-layout"><div class="todo-calendar-month-panel">
     <div class="todo-calendar-toolbar"><div><h3 id="todoCalendarMonth">${monthTitle}</h3><span class="todo-help">이번 달 ${data.month_count}개 할 일${data.external_count ? ` · 외부 일정 ${data.external_count}개` : ""}</span></div>
       <div class="row"><button class="btn" type="button" id="todoMonthPrev" aria-label="이전 달">${todoIcon("left")}</button><button class="btn" type="button" id="todoCalendarToday">오늘</button><button class="btn" type="button" id="todoMonthNext" aria-label="다음 달">${todoIcon("right")}</button></div></div>
-    <div class="todo-calendar-legend" aria-label="달력 범례">${Object.entries(todoCalendarKinds).map(([kind, label]) => `<span class="${kind}"><i aria-hidden="true"></i>${label}</span>`).join("")}</div>
+    <div class="todo-calendar-legend" aria-label="달력 범례">${Object.entries(todoCalendarKinds).map(([kind, label]) => `<span class="${kind}"><i aria-hidden="true"></i>${label}</span>`).join("")}<span><b aria-hidden="true">▤</b> 작성한 메모</span></div>
     <div class="todo-calendar-grid-wrap"><table class="todo-calendar-table" aria-labelledby="todoCalendarMonth"><thead><tr>${["일", "월", "화", "수", "목", "금", "토"].map((day) => `<th scope="col">${day}</th>`).join("")}</tr></thead><tbody>${weeks.join("")}</tbody></table></div>
     <div class="todo-calendar-notices">
       ${data.counts.today ? `<button class="btn ghost ${data.overdue_count ? "todo-calendar-late" : ""}" data-todo-view="today">오늘 챙길 일 ${data.counts.today}건${data.overdue_count ? ` · 기한 지난 일 ${data.overdue_count}건` : ""}</button>` : ""}
@@ -61,17 +62,28 @@ function todoCalendarHTML(data) {
       ${data.undated_waiting ? `<button class="btn ghost" data-todo-view="waiting">날짜 없는 대기 ${data.undated_waiting}건</button>` : ""}
       <button class="btn ghost" data-todo-view="review">확인 필요 ${data.counts.review}건</button>
     </div>
-    <p class="todo-calendar-footnote">날짜를 누르면 그날의 일정을 추가할 수 있습니다. ‘기간 중’은 매일 반복하는 일이 아닙니다.</p>
+    <p class="todo-calendar-footnote">날짜를 누르면 그날의 일정과 작성한 메모를 볼 수 있습니다. ‘기간 중’은 매일 반복하는 일이 아닙니다.</p>
     </div>
     <section class="todo-calendar-agenda" aria-labelledby="todoCalendarDayTitle">
-      <div class="todo-calendar-agenda-head"><span class="todo-agenda-date" aria-hidden="true">${+data.selected.slice(8)}</span><div><p class="todo-agenda-eyebrow">${data.selected === data.today ? "오늘의 일정" : "선택한 날짜"}</p><h3 class="todo-group-title" id="todoCalendarDayTitle">${todoDate(data.selected)}${data.selected === data.today ? " · 오늘" : ""} <span>${data.total}건</span></h3></div></div>
-      <button type="button" class="btn ghost" id="todoCalendarDayAdd">${todoIcon("plus")} 이 날짜에 추가</button>
+      <div class="todo-calendar-agenda-head"><span class="todo-agenda-date" aria-hidden="true">${+data.selected.slice(8)}</span><div><p class="todo-agenda-eyebrow">선택한 날짜</p><h3 class="todo-group-title" id="todoCalendarDayTitle">${todoDate(data.selected)}${data.selected === data.today ? " · 오늘" : ""} <span>일정 ${data.total}건</span></h3></div></div>
+      ${calendarDayMemos(data.day_memos)}
+      <button type="button" class="btn ghost" id="todoCalendarDayAdd">${todoIcon("plus")} 이 날짜에 일정 추가</button>
       ${data.items.length ? `<div class="todo-list">${data.items.map((item) => `<div class="todo-calendar-agenda-item agenda-${item.calendar_kinds[0]}"><div class="todo-calendar-agenda-kinds">${item.calendar_kinds.map((kind) => `<span class="${kind}">${todoCalendarKinds[kind]}</span>`).join("")}</div>${item.external ? externalCalendarCard(item) : todoCard(item, data.today)}</div>`).join("")}</div>` : `<div class="todo-agenda-empty"><span>${todoIcon("calendar")}</span><strong>예정된 일정이 없어요</strong><p>이날 하고 싶은 일을<br>가볍게 적어 두세요.</p></div>`}
       <div class="row todo-pager" ${data.total <= 50 ? "hidden" : ""}><button class="btn" id="todoPrev" ${data.offset ? "" : "disabled"}>이전</button><span class="hint">${data.total ? `${data.offset + 1}–${data.offset + data.items.length} / ${data.total}건` : "0건"}</span><button class="btn" id="todoNext" ${data.has_more ? "" : "disabled"}>다음</button></div>
       <p class="todo-agenda-history">완료한 일은 <button type="button" data-todo-view="done">완료 목록</button>에서 다시 볼 수 있어요.</p>
     </section>
     </div>
   </section>`;
+}
+
+function calendarDayMemos({items, total, offset, limit}) {
+  return `<section class="calendar-day-memos" aria-labelledby="calendarMemoTitle">
+    <h4 id="calendarMemoTitle">이날 작성한 메모 <span>${total}건</span></h4>
+    ${items.map((memo) => `<button type="button" class="calendar-memo-row" data-todo-memo="${memo.id}"><time>${esc(memo.time)}</time><span>${esc(memo.title || "제목 없는 메모")}</span></button>`).join("")}
+    ${total > limit ? `<div class="row todo-pager"><button type="button" class="btn" id="calendarMemoPrev" ${offset ? "" : "disabled"}>이전 메모</button>
+      <span class="hint">${offset + 1}–${offset + items.length} / ${total}건</span>
+      <button type="button" class="btn" id="calendarMemoNext" ${offset + limit < total ? "" : "disabled"}>다음 메모</button></div>` : ""}
+    </section>`;
 }
 
 function todoCalendarISO(value) {
@@ -82,6 +94,7 @@ function selectTodoCalendarDay(day, focus = false) {
   todoCalendar.selected = day;
   todoCalendar.month = day.slice(0, 7);
   todoCalendar.focusDay = focus ? day : null;
+  todoCalendar.memoOffset = 0;
   todoBoard.offset = 0;
   return refreshTodoBoard();
 }
@@ -95,7 +108,14 @@ function moveTodoCalendarMonth(delta) {
   return selectTodoCalendarDay(todoCalendarISO(month));
 }
 
-function bindTodoCalendar() {
+function bindTodoCalendar(memos) {
+  for (const [id, delta] of [["calendarMemoPrev", -1], ["calendarMemoNext", 1]]) {
+    const button = $("#" + id);
+    if (button) button.onclick = () => {
+      todoCalendar.memoOffset = memos.offset + delta * memos.limit;
+      refreshTodoBoard();
+    };
+  }
   $("#todoCalendarAdd").onclick = () => openTodoCreate(todoCalendar.selected);
   $("#todoCalendarDayAdd").onclick = () => openTodoCreate(todoCalendar.selected);
   $("#todoCalendarImport").onclick = () => openCalendarImport();
@@ -103,11 +123,7 @@ function bindTodoCalendar() {
   $("#todoMonthNext").onclick = () => moveTodoCalendarMonth(1);
   $("#todoCalendarToday").onclick = () => selectTodoCalendarDay(todoLocalDate());
   document.querySelectorAll("[data-calendar-day]").forEach((button) => {
-    button.onclick = () => {
-      const day = button.dataset.calendarDay;
-      selectTodoCalendarDay(day, true);
-      openTodoCreate(day, true);
-    };
+    button.onclick = () => selectTodoCalendarDay(button.dataset.calendarDay, true);
     button.onkeydown = (event) => {
       const steps = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
       if (!(event.key in steps)) return;

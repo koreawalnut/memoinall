@@ -659,7 +659,7 @@ function updateCaptureSchedule() {
 }
 $("#scheduleCapture").onclick = () => {
   const body = $("#capture").value;
-  if (body.trim() && !captureSaving && !mic.starting && mic.state === "idle") openTodoCreate(todoLocalDate(), false, body);
+  if (body.trim() && !captureSaving && !mic.starting && mic.state === "idle") openTodoCreate(todoLocalDate(), body);
 };
 $("#capture").addEventListener("keydown", (e) => {
   if (!e.isComposing && (e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); save(); }
@@ -3470,6 +3470,7 @@ window.addEventListener("pywebviewready", bindQuickCapture);
 bindQuickCapture();
 window.addEventListener("quick-memo-saved", () => {
   if (state.tab === "feed") render();
+  if (state.tab === "todos" && todoBoard.layout === "calendar") refreshTodoBoard();
   loadSidebar(); loadTags();
 });
 

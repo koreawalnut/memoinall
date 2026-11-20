@@ -58,6 +58,11 @@ async function renderTodoBoard(version) {
   todoCalendarInit();
   const params = new URLSearchParams({ ...(calendar ? { month: todoCalendar.month, selected: todoCalendar.selected } : { view: todoBoard.view }), offset: todoBoard.offset, limit: 50, today: todoLocalDate() });
   if (todoBoard.tag) params.set("tag", todoBoard.tag);
+  if (calendar) {
+    params.set("memo_offset", todoCalendar.memoOffset);
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (zone) params.set("tz", zone);
+  }
   const data = await api(`/api/todos${calendar ? "/calendar" : ""}?${params}`);
   if (version !== renderVersion || state.tab !== "todos") return;
   if (!data.items.length && todoBoard.offset > 0) {
@@ -123,7 +128,7 @@ async function renderTodoBoard(version) {
     else control.onclick = action;
   });
   if ($("#todoUndo")) $("#todoUndo").onclick = undoTodo;
-  if (calendar) bindTodoCalendar();
+  if (calendar) bindTodoCalendar(data.day_memos);
   bindTodoAi();
   bindSchedule();
 }
@@ -239,6 +244,7 @@ function refreshTodoDay() {
       && !todoBoard.busy && !document.querySelector("dialog[open]")) {
     if (todoCalendar.selected === todoBoard.date) {
       todoCalendar.selected = todoLocalDate();
+      todoCalendar.memoOffset = 0;
       todoCalendar.month = todoLocalDate().slice(0, 7);
       todoBoard.offset = 0;
     }

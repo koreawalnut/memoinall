@@ -20,16 +20,10 @@ function calendarDialog(id, title) {
   return dialog;
 }
 
-function openTodoCreate(day, fromDayCell = false, memoBody = null) {
+function openTodoCreate(day, memoBody = null) {
   const fromMemo = memoBody !== null;
   const heading = fromMemo ? "메모를 일정으로 등록" : "일정 추가";
   const dialog = calendarDialog("todoCreate", heading);
-  if (fromDayCell) {
-    // Refreshing the agenda replaces the day button that opened this dialog.
-    dialog.addEventListener("close", () => {
-      document.querySelector(`[data-calendar-day="${todoCalendar.selected}"]`)?.focus({ preventScroll: true });
-    }, { once: true });
-  }
   const requestId = crypto.randomUUID();
   const registered = fromMemo ? myTags : todoBoard.registeredTags;
   const memoTags = new Set(fromMemo ? bodyTags(memoBody).map((name) => name.toLowerCase()) : []);
@@ -76,7 +70,7 @@ function openTodoCreate(day, fromDayCell = false, memoBody = null) {
         await Promise.allSettled([render(), loadSidebar(), loadTags()]);
         $("#capture").focus();
       }
-      await selectTodoCalendarDay(planned, fromDayCell);
+      await selectTodoCalendarDay(planned, !fromMemo);
       toast(fromMemo ? `${todoDate(planned)} 일정으로 등록했습니다.` : "일정을 추가했습니다.");
     } catch (error) { $("#todoCreateError").textContent = error.message; }
     finally {

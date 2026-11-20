@@ -186,9 +186,8 @@
     }
 
     .slide-kicker {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
+      display: block;
+      text-align: left;
       font-size: 0.82rem;
       font-weight: 700;
       text-transform: uppercase;
@@ -293,9 +292,9 @@
       font-size: 1.08rem;
       font-weight: 700;
       color: var(--text-main);
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      display: block;
+      text-align: left;
+      line-height: 1.4;
     }
 
     .card p, .card li {
@@ -667,7 +666,7 @@
     <div class="control-actions">
       <button class="btn-ctrl active" id="btnScrollMode" onclick="setViewMode('scroll')">전체 스크롤 보기</button>
       <button class="btn-ctrl" id="btnSlideMode" onclick="setViewMode('slide')">PPT 슬라이드 모드 (←/→)</button>
-      <span class="slide-counter" id="slideCounter">총 12장</span>
+      <span class="slide-counter" id="slideCounter">총 13장</span>
       <button class="btn-ctrl" id="btnPrev" onclick="moveSlide(-1)" style="display:none;">◀ 이전</button>
       <button class="btn-ctrl" id="btnNext" onclick="moveSlide(1)" style="display:none;">다음 ▶</button>
       <button class="btn-ctrl" id="btnToggleGuide" onclick="toggleGuides()">💡 캡처/발표 가이드 숨기기</button>
@@ -721,7 +720,7 @@
               <div class="slot-icon">📸 1</div>
               <div class="slot-title">[캡처 1] memoinall 전체 메인 화면</div>
               <div class="slot-desc">
-                앱을 실행한 뒤 상단 주메뉴(<strong>내 메모 · 일정 · AI로 정리 · 가져오기·공유</strong>)와<br />
+                앱을 실행한 뒤 상단 주메뉴(<strong>내 메모 · 일정 · 메모로 문서 만들기 · 가져오기·공유</strong> 및 <strong>더 보기 · 설정</strong>)와<br />
                 메모 입력창·검색창·메모 목록이 한눈에 보이는 기본 화면을 캡처해 넣어주세요.
               </div>
               <div class="slot-tip">클릭하거나 캡처 이미지를 이곳에 드래그 앤 드롭하세요</div>
@@ -737,7 +736,7 @@
 
       <div class="slide-footer">
         <span>memoinall — 적을 땐 무형식, 꺼낼 땐 구조화</span>
-        <span>Slide 01 / 12</span>
+        <span>Slide 01 / 13</span>
       </div>
     </section>
 
@@ -806,7 +805,7 @@
 
       <div class="slide-footer">
         <span>핵심 주안점: 쉽게 메모하고 → 빠르게 검색하고 → AI를 활용하고 → 외부 메모·엑셀을 쉽게 가져오고 → 쉽게 공유한다</span>
-        <span>Slide 02 / 12</span>
+        <span>Slide 02 / 13</span>
       </div>
     </section>
 
@@ -817,7 +816,7 @@
           <div>
             <div class="slide-kicker">02. 주요 기능 ① — 쉽게 메모하고, 빠르게 검색하기 (내 메모 &amp; #태그 활용)</div>
             <h2 class="slide-title">형식 없이 적고 <code>#태그</code>만 붙여두면, 언제든 주제별로 즉시 찾아낸다</h2>
-            <p class="slide-subtitle">작성 내용 유실을 막는 초안 보호·음성 받아쓰기와 한글 하이브리드 검색 · <code>#태그</code> 필터의 결합</p>
+            <p class="slide-subtitle">초안 보호·빠른 메모(<code>Ctrl+Alt+M</code>)·음성 받아쓰기와 한글 하이브리드 검색 · <code>#태그</code> 필터의 결합</p>
           </div>
           <span class="score-pill blue">핵심 주안점 1 &amp; 2</span>
         </div>
@@ -828,17 +827,17 @@
               <div class="card white">
                 <div class="card-title">✍️ 1. 쉽게 메모 &amp; 간편한 <code>#태그</code> 지정</div>
                 <ul>
-                  <li><strong>단일 입력창 &amp; <code>Ctrl+Enter</code> 즉시 저장:</strong> 제목이나 폴더를 먼저 고를 필요 없이 떠오르는 업무 내용을 그대로 입력 (초안 자동 보관·복원)</li>
-                  <li><strong>🎤 음성 받아쓰기(STT) 지원:</strong> 키보드 입력뿐 아니라 메모 저장 옆 <code>🎤</code> 버튼을 누르고 말하면 커서 위치에 바로 받아쓰기가 되어 바쁜 순간에도 빠르게 기록 가능 (기본 로컬 Whisper 동작)</li>
-                  <li><strong>작성 중에도, 저장 후에도 쉬운 <code>#태그</code> 관리:</strong> 본문에 <code>#업무명</code>을 바로 적거나 상세 화면에서 클릭만으로 태그를 추가·제거(<code>×</code>)하면 본문과 검색 색인이 즉시 동기화됨</li>
+                  <li><strong>단일 입력창 &amp; <code>빠른 메모(Ctrl+Alt+M)</code>:</strong> 폴더·제목 고민 없이 바로 적고 <code>Ctrl+Enter</code>로 저장(초안 자동 보관·복원)하며, 다른 프로그램 사용 중에도 <strong><code>Ctrl+Alt+M</code>으로 빠른 메모창</strong>을 띄워 즉시 기록하거나 작성 중 <strong><code>일정으로 등록</code></strong> 가능</li>
+                  <li><strong>🎤 음성 받아쓰기(STT) 지원:</strong> 메모 저장 옆 <code>🎤</code> 버튼을 누르고 말하면 커서 위치에 바로 받아쓰기가 되어 바쁜 순간에도 빠르게 기록 가능 (기본 로컬 Whisper 동작)</li>
+                  <li><strong>작성 중에도, 저장 후에도 쉬운 <code>#태그</code> 관리:</strong> 본문에 <code>#업무명</code>을 적거나 상세 화면에서 클릭만으로 태그를 추가·제거(<code>×</code>)하면 본문과 색인이 즉시 동기화됨(태그가 없을 땐 태그 설정으로 바로 이동)</li>
                 </ul>
               </div>
 
               <div class="card highlight-green">
-                <div class="card-title">⚡ 2. 빠르게 검색 — 하이브리드 검색 &amp; <code>#태그</code> 필터</div>
+                <div class="card-title">⚡ 2. 빠르게 검색 — 하이브리드 검색 · <code>#태그</code> · <code>저장된 검색</code></div>
                 <ul>
-                  <li><strong><code>#태그</code>로 주제·업무별 모아보기:</strong> 업무나 프로젝트별 태그(예: <code>#예산</code>, <code>#인수인계</code>, <code>#회의</code>)만 클릭하면 관련 메모만 즉시 필터링되며, 선택한 태그 범위를 그대로 <strong>AI 정리나 동료 공유로 연결</strong> 가능</li>
-                  <li><strong>의미 검색 + 한글 2-gram 검색 결합(RRF):</strong> 조사(<em>‘회의록을’</em>)가 붙어 있거나 정확한 단어가 기억나지 않는 애매한 표현도 <code>#태그</code>·작성일·<code>@사람</code> 조건과 조합해 정확히 탐색</li>
+                  <li><strong><code>#태그</code> 모아보기 &amp; <code>이 결과로 문서 만들기</code>:</strong> 업무별 태그만 클릭해 관련 메모를 즉시 필터링하고, 검색된 모든 페이지의 메모를 그대로 <strong>문서 만들기나 동료 공유로 연결</strong> 가능</li>
+                  <li><strong>의미 + 한글 2-gram 검색 &amp; <code>저장된 검색</code>:</strong> 단어가 가물가물한 표현도 <code>#태그</code>·작성일·<code>@사람</code>과 조합해 찾고, 자주 쓰는 조건은 <strong><code>이 검색 저장</code></strong>에 이름을 붙여 언제든 다시 실행</li>
                 </ul>
               </div>
             </div>
@@ -871,18 +870,18 @@
 
       <div class="slide-footer">
         <span>원문 보호 원칙: 색인과 태그는 언제든 재생성 가능한 구조로 관리되어 원본 메모를 안전하게 보존</span>
-        <span>Slide 03 / 12</span>
+        <span>Slide 03 / 13</span>
       </div>
     </section>
 
-    <!-- ==================== SLIDE 4: 핵심 기능 2 - AI로 정리 & 자주 하는 업무 저장 ==================== -->
+    <!-- ==================== SLIDE 4: 핵심 기능 2 - 메모로 문서 만들기(AI로 정리) & 자주 하는 업무 저장 ==================== -->
     <section class="slide">
       <div>
         <div class="slide-header">
           <div>
-            <div class="slide-kicker">03. 주요 기능 ② — 출처(<code>[M번호]</code>) 기반 AI 정리 &amp; ‘자주 하는 업무’ 프롬프트 저장</div>
+            <div class="slide-kicker">03. 주요 기능 ② — 출처(<code>[M번호]</code>) 기반 문서 만들기(AI 정리) &amp; ‘자주 하는 업무’ 저장</div>
             <h2 class="slide-title">내가 고른 근거로 정확히 정리하고, 자주 쓰는 요청은 저장해 원클릭 실행!</h2>
-            <p class="slide-subtitle"><code>#태그</code> 범위·메모 직접 선택부터 반복 프롬프트 저장·공유, 결과 직접 수정·다듬기까지</p>
+            <p class="slide-subtitle"><code>#태그</code> 범위·검색 결과 전체·메모 직접 선택부터 반복 프롬프트 저장·공유, 결과 직접 수정·다듬기까지</p>
           </div>
           <span class="score-pill green">핵심 주안점 3 (AI 활용)</span>
         </div>
@@ -943,7 +942,7 @@
 
       <div class="slide-footer">
         <span>사용할 AI(Claude·ChatGPT·Gemini 등)는 상단 [설정] 탭에서 간편 세팅하며, 키 없이도 완성형 프롬프트 복사 가능</span>
-        <span>Slide 04 / 12</span>
+        <span>Slide 04 / 13</span>
       </div>
     </section>
 
@@ -1007,7 +1006,7 @@
 
       <div class="slide-footer">
         <span>중복 방지 보장: 같은 외부 메모나 문서를 다시 가져와도 중복 생성되지 않으며, 미리보기 확인 후 저장만 반영</span>
-        <span>Slide 05 / 12</span>
+        <span>Slide 05 / 13</span>
       </div>
     </section>
 
@@ -1070,7 +1069,7 @@
 
       <div class="slide-footer">
         <span>숫자 무결성 보장: AI 결과에 들어간 숫자는 실제 전체 행 집계값과 대조하며, 행 출처([C번호]) 클릭 시 저장 당시 표의 행을 즉시 표시</span>
-        <span>Slide 06 / 12</span>
+        <span>Slide 06 / 13</span>
       </div>
     </section>
 
@@ -1133,41 +1132,105 @@
 
       <div class="slide-footer">
         <span>데이터 무결성: 공유 미리보기 도중 원본 메모가 수정·삭제되면 다시 확인하도록 안내하여 정확한 전달 보장</span>
-        <span>Slide 07 / 12</span>
+        <span>Slide 07 / 13</span>
       </div>
     </section>
 
-    <!-- ==================== SLIDE 8 (NEW): 부가 메뉴 가이드 - 달력 일정 & 휴대폰 설치/QR ==================== -->
+    <!-- ==================== SLIDE 8 (NEW): 부가 기능 가이드 1 - 빠른 메모 & 저장된 검색·태그별 요약 ==================== -->
     <section class="slide">
       <div>
         <div class="slide-header">
           <div>
-            <div class="slide-kicker">07. 부가 메뉴 둘러보기 — 상단 ‘일정’ 메뉴 &amp; ‘휴대폰 QR·설치’ 메뉴</div>
-            <h2 class="slide-title">메모와 함께 쓰면 더 편리한 ‘달력 일정 관리’와 ‘휴대폰 메모 연동’</h2>
-            <p class="slide-subtitle">화면 메뉴의 역할을 한눈에 이해하고 필요할 때 바로 활용할 수 있는 보조 기능 안내</p>
+            <div class="slide-kicker">07. 부가 기능 둘러보기 ① — ‘빠른 메모(<code>Ctrl+Alt+M</code>)’ &amp; 스마트 검색·요약 도구</div>
+            <h2 class="slide-title">다른 프로그램 작업 중에도 단축키로 즉시 메모하고, 자주 쓰는 검색·태그별로 모아본다</h2>
+            <p class="slide-subtitle">창 전환 없이 호출하는 빠른 메모창, 메모 작성 중 일정 등록, 저장된 검색, 내 태그별·기간 요약</p>
           </div>
-          <span class="score-pill amber">메뉴 이해 가이드</span>
+          <span class="score-pill blue">부가 기능 가이드 1</span>
+        </div>
+
+        <div class="slide-body">
+          <div class="grid-5-7">
+            <div style="display:flex; flex-direction:column; gap:14px;">
+              <div class="card white">
+                <div class="card-title">⚡ 1. 어디서나 즉시 여는 <code>빠른 메모 (Ctrl+Alt+M)</code> &amp; <code>일정으로 등록</code></div>
+                <ul>
+                  <li><strong>전역 단축키 <code>Ctrl+Alt+M</code> 호출:</strong> 데스크톱 앱 실행 중 엑셀·브라우저·메신저 등 다른 프로그램을 쓰다가도 <strong><code>Ctrl+Alt+M</code></strong>(단축키 중복 시 <code>Ctrl+Alt+Shift+M</code>)을 누르면 작은 <strong>빠른 메모창</strong>이 바로 열립니다(내 메모의 <strong><code>빠른 메모</code></strong> 버튼에서도 열기·단축키 확인 가능).</li>
+                  <li><strong>별도 초안 보관 &amp; 즉시 복귀:</strong> <strong><code>Ctrl+Enter</code>로 저장</strong>하거나 <strong><code>Esc</code>로 초안을 보관</strong>(본창 초안과 별도 유지)하고 원래 작업 창으로 즉시 돌아갑니다.</li>
+                  <li><strong>메모 입력 시 <code>일정으로 등록</code>:</strong> 메모를 적고 <strong><code>일정으로 등록</code></strong>을 누르면 첫 줄이 일정 이름으로 채워져 예정일 달력에 바로 추가됩니다.</li>
+                </ul>
+              </div>
+
+              <div class="card highlight-green">
+                <div class="card-title">🔖 2. <code>저장된 검색</code> · <code>이 결과로 문서 만들기</code> · <code>더 보기(태그별·기간 요약)</code></div>
+                <ul>
+                  <li><strong><code>이 검색 저장 / 저장된 검색</code>:</strong> 자주 쓰는 검색어·태그·사람·기간(<em>‘이번 주’</em> 등 실행일 기준 자동 계산) 조건에 이름을 붙여 저장하고 원클릭으로 다시 실행하며, <strong><code>이 결과로 문서 만들기</code></strong>로 검색된 모든 페이지 메모를 바로 문서화합니다.</li>
+                  <li><strong><code>더 보기 → 태그별 / 기간 요약</code>:</strong> 설정한 <strong>내 태그 순서대로</strong> 태그별 메모 수·최근 메모를 모아 보거나(<code>이 태그로 문서 만들기</code> 직결), 고른 기간의 메모를 내 태그별로 묶어 요약·AI 브리핑을 생성합니다.</li>
+                </ul>
+              </div>
+            </div>
+
+            <!-- 캡처 슬롯 #7 (빠른 메모 화면) -->
+            <div style="display:flex; flex-direction:column; justify-content:space-between;">
+              <div class="screenshot-slot" data-slot="7" style="flex:1;">
+                <input type="file" accept="image/*" hidden />
+                <img class="preview-img" alt="빠른 메모 창 및 부가기능 화면 캡처" />
+                <button type="button" class="slot-change-btn">이미지 변경</button>
+                <div class="slot-placeholder">
+                  <div class="slot-icon">📸 7</div>
+                  <div class="slot-title">[캡처 7] ‘빠른 메모(<code>Ctrl+Alt+M</code>)’ 창 실행 화면</div>
+                  <div class="slot-desc">
+                    단축키 <strong><code>Ctrl+Alt+M</code></strong>(또는 내 메모의 <strong><code>빠른 메모</code></strong> 버튼)으로 띄운 <strong>빠른 메모 팝업 창</strong> 화면(또는 <code>저장된 검색</code> / <code>일정으로 등록</code> 버튼이 함께 보이는 화면)을 캡처해 넣어주세요.
+                  </div>
+                  <div class="slot-tip">클릭하거나 캡처 이미지를 드래그 앤 드롭하세요</div>
+                </div>
+              </div>
+              <div class="guide-note">
+                <div>
+                  <strong>💡 실무 편의성 포인트:</strong> 회의나 문서 작업 중 메인 창을 찾아 열 필요 없이 <code>Ctrl+Alt+M → 메모 입력 → Ctrl+Enter</code>만으로 3초 만에 기록하고 원래 작업으로 돌아갈 수 있습니다.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="slide-footer">
+        <span>부가 기능 안내 1: 빠른 메모의 초안은 본창 초안과 독립적으로 보관되어 두 창을 오가며 작성해도 내용이 섞이거나 사라지지 않음</span>
+        <span>Slide 08 / 13</span>
+      </div>
+    </section>
+
+    <!-- ==================== SLIDE 9: 부가 메뉴 가이드 2 - 달력 일정 & 휴대폰 설치/QR ==================== -->
+    <section class="slide">
+      <div>
+        <div class="slide-header">
+          <div>
+            <div class="slide-kicker">08. 부가 기능 둘러보기 ② — 상단 ‘일정’ 메뉴 &amp; ‘휴대폰 QR·설치’ 메뉴</div>
+            <h2 class="slide-title">메모와 함께 쓰면 더 편리한 ‘달력 일정 관리’와 ‘휴대폰 메모·일정 연동’</h2>
+            <p class="slide-subtitle">화면 메뉴의 역할을 한눈에 이해하고 필요할 때 바로 활용할 수 있는 보조 메뉴 안내</p>
+          </div>
+          <span class="score-pill amber">부가 기능 가이드 2</span>
         </div>
 
         <div class="slide-body">
           <div class="grid-2">
-            <!-- 좌측: 달력 일정 메뉴 안내 + 캡처 #7 -->
+            <!-- 좌측: 달력 일정 메뉴 안내 + 캡처 #8 -->
             <div style="display:flex; flex-direction:column; gap:12px;">
               <div class="card white">
                 <div class="card-title">📅 상단 <code>[일정]</code> 메뉴 — 달력으로 일정 챙기기</div>
                 <ul>
-                  <li><strong>달력·목록 보기 &amp; 직접 등록:</strong> 메모 속 일정(마감·예정·다시 보기)을 달력에서 확인하고, 날짜를 클릭해 새 일정을 바로 추가합니다.</li>
-                  <li><strong>내 태그 필터 · 외부 캘린더 · 일정 공유(<code>.ics</code>):</strong> 태그별로 일정을 모아보고, 네이버·구글 캘린더(<code>.ics</code>/iCal)를 불러오거나 선택한 일정을 <code>.ics</code> 파일로 동료와 공유합니다. (선택적 AI 일정 정리 지원)</li>
+                  <li><strong>달력·목록 보기 &amp; 직접 등록:</strong> 메모 입력 시 <code>일정으로 등록</code>하거나 메모 속 기한(마감·예정·다시 보기)을 달력에서 확인하고, 날짜를 클릭해 새 일정을 바로 추가합니다.</li>
+                  <li><strong>내 태그 필터 · 외부 캘린더 · 일정 공유(<code>.ics</code>):</strong> 태그별로 일정을 모아보고, 네이버·구글 캘린더(<code>.ics</code>/iCal) 연동, <code>.ics</code> 일정 파일 공유, <strong><code>할 일·날짜 제안받기</code></strong>(AI 분석)를 지원합니다.</li>
                 </ul>
               </div>
 
-              <div class="screenshot-slot" data-slot="7" style="flex:1; min-height:220px;">
+              <div class="screenshot-slot" data-slot="8" style="flex:1; min-height:220px;">
                 <input type="file" accept="image/*" hidden />
                 <img class="preview-img" alt="상단 일정(달력) 메뉴 화면 캡처" />
                 <button type="button" class="slot-change-btn">이미지 변경</button>
                 <div class="slot-placeholder">
-                  <div class="slot-icon">📸 7</div>
-                  <div class="slot-title">[캡처 7] 상단 ‘일정’ 메뉴 (달력 및 일정 목록) 화면</div>
+                  <div class="slot-icon">📸 8</div>
+                  <div class="slot-title">[캡처 8] 상단 ‘일정’ 메뉴 (달력 및 일정 목록) 화면</div>
                   <div class="slot-desc">
                     상단 <strong>일정</strong> 탭을 열었을 때 보이는 <strong>달력·날짜별 일정 목록</strong>(태그 필터, 외부 캘린더, 일정 공유 버튼 포함) 화면을 캡처해 넣어주세요.
                   </div>
@@ -1176,25 +1239,25 @@
               </div>
             </div>
 
-            <!-- 우측: 휴대폰 설치 및 QR 받기 메뉴 안내 + 캡처 #8 -->
+            <!-- 우측: 휴대폰 설치 및 QR 받기 메뉴 안내 + 캡처 #9 -->
             <div style="display:flex; flex-direction:column; gap:12px;">
               <div class="card highlight-blue">
                 <div class="card-title">📱 <code>[가져오기·공유 → 휴대폰 QR·설치]</code> 메뉴</div>
                 <ul>
-                  <li><strong>휴대폰 앱(PWA) 간편 설치:</strong> <strong><code>설치 QR 보기</code></strong>를 휴대폰 카메라로 찍어 홈 화면에 추가하면, 외근·이동 중에도 오프라인으로 쓸 수 있는 휴대폰용 메모 앱이 설치됩니다.</li>
-                  <li><strong>휴대폰 → PC 한 방향 QR 받기:</strong> 사내 정보 보호를 위해 PC→휴대폰 반출은 막고, 휴대폰에 적은 메모만 화면 QR로 띄워 PC 웹캠(<strong><code>QR 찍기</code></strong>)으로 안전하게 가져옵니다.</li>
+                  <li><strong>휴대폰 앱(PWA) 간편 설치:</strong> <strong><code>설치 QR 보기</code></strong>를 휴대폰 카메라로 찍어 홈 화면에 추가하면, 외근·이동 중에도 오프라인으로 쓸 수 있는 휴대폰용 메모·일정 앱이 설치됩니다.</li>
+                  <li><strong>휴대폰 → PC 한 방향 QR 받기(메모+일정):</strong> 사내 정보 보호를 위해 PC→휴대폰 반출은 막고, 휴대폰에 적은 <strong>메모와 일정만 화면 QR로 띄워 PC 웹캠(<code>QR 찍기</code>)으로 찍으면 각각 PC 메모와 PC 일정으로</strong> 안전하게 들어옵니다.</li>
                 </ul>
               </div>
 
-              <div class="screenshot-slot" data-slot="8" style="flex:1; min-height:220px;">
+              <div class="screenshot-slot" data-slot="9" style="flex:1; min-height:220px;">
                 <input type="file" accept="image/*" hidden />
                 <img class="preview-img" alt="휴대폰 QR·설치 메뉴 화면 캡처" />
                 <button type="button" class="slot-change-btn">이미지 변경</button>
                 <div class="slot-placeholder">
-                  <div class="slot-icon">📸 8</div>
-                  <div class="slot-title">[캡처 8] ‘가져오기·공유 → 휴대폰 QR·설치’ 화면</div>
+                  <div class="slot-icon">📸 9</div>
+                  <div class="slot-title">[캡처 9] ‘가져오기·공유 → 휴대폰 QR·설치’ 화면</div>
                   <div class="slot-desc">
-                    <strong>휴대폰 QR·설치</strong> 영역의 <strong>설치 QR 보기</strong> 창이나 <strong>QR 찍기</strong>(웹캠으로 휴대폰 메모 받기) 화면을 캡처해 넣어주세요.
+                    <strong>휴대폰 QR·설치</strong> 영역의 <strong>설치 QR 보기</strong> 창이나 <strong>QR 찍기</strong>(웹캠으로 휴대폰 메모·일정 받기) 화면을 캡처해 넣어주세요.
                   </div>
                   <div class="slot-tip">클릭 또는 드래그 앤 드롭</div>
                 </div>
@@ -1205,19 +1268,19 @@
       </div>
 
       <div class="slide-footer">
-        <span>부가 메뉴 안내: 평소에는 내 메모·AI로 정리·가져오기·공유를 중심으로 쓰면서, 일정 관리나 외근 중 모바일 메모가 필요할 때 바로 활용</span>
-        <span>Slide 08 / 12</span>
+        <span>부가 기능 안내 2: 평소에는 내 메모·문서 만들기·가져오기·공유를 중심으로 쓰면서, 일정 관리나 외근 중 모바일 기록이 필요할 때 바로 활용</span>
+        <span>Slide 09 / 13</span>
       </div>
     </section>
 
-    <!-- ==================== SLIDE 9: 5대 핵심 기능별 전후 비교 및 실측 지표 ==================== -->
+    <!-- ==================== SLIDE 10: 5대 핵심 기능별 전후 비교 및 사용자 안심 포인트 ==================== -->
     <section class="slide">
       <div>
         <div class="slide-header">
           <div>
-            <div class="slide-kicker">08. 5대 핵심 기능별 도입 효과 및 실측 검증</div>
+            <div class="slide-kicker">09. 5대 핵심 기능별 도입 효과 및 사용자 안심 설계</div>
             <h2 class="slide-title">메모 · 검색 · AI 활용 · 가져오기(엑셀 취합) · 공유가 어떻게 달라지는가?</h2>
-            <p class="slide-subtitle">5대 핵심 기능별 기존 방식과의 차이점 및 프로젝트 실측 지표</p>
+            <p class="slide-subtitle">5대 핵심 기능별 기존 업무 방식과의 차이점과 실사용자를 배려한 3가지 안심 포인트</p>
           </div>
           <span class="score-pill blue">5대 핵심 기능 Before &amp; After</span>
         </div>
@@ -1235,14 +1298,14 @@
             <tbody>
               <tr>
                 <td><strong>① 쉽게 메모</strong></td>
-                <td>메모할 때마다 폴더·제목·양식을 먼저 고민해야 하고, 작성 중 창을 닫으면 적던 내용이 사라짐</td>
-                <td>분류 강요 없이 단일 입력창에 바로 적고(<code>Ctrl+Enter</code>, <code>🎤</code> 음성 입력 지원), <strong>초안 자동 복원 및 <code>#태그</code> 편집</strong> 지원</td>
+                <td>메모할 때마다 폴더·제목·양식을 먼저 고민해야 하고, 다른 작업 중 창을 찾아 열거나 닫으면 내용이 사라짐</td>
+                <td>단일 입력창 및 <strong><code>빠른 메모(Ctrl+Alt+M)</code>·<code>🎤</code> 음성 입력</strong>으로 즉시 적고, <strong>초안 자동 복원·<code>#태그</code> 편집</strong> 지원</td>
                 <td class="good">기록 장벽 해소 &amp;<br />작성 내용 유실 방지</td>
               </tr>
               <tr>
                 <td><strong>② 빠르게 검색</strong></td>
                 <td>정확한 단어가 기억나지 않거나 한글 조사가 다르게 붙으면 검색되지 않아 목록을 일일이 찾아야 함</td>
-                <td><strong>의미 벡터 + 한글 2-gram 하이브리드 검색</strong>에 <strong><code>#태그</code>·작성일·<code>@사람</code> 필터</strong>를 조합해 주제별 메모를 즉시 탐색</td>
+                <td><strong>의미 벡터 + 한글 2-gram 하이브리드 검색</strong>과 <strong><code>#태그</code>·<code>저장된 검색</code></strong>으로 주제별 메모를 즉시 탐색</td>
                 <td class="good"><code>#태그</code> &amp; 문맥 검색으로<br />원하는 메모 즉시 탐색</td>
               </tr>
               <tr>
@@ -1268,33 +1331,33 @@
 
           <div class="grid-3">
             <div class="card highlight-blue">
-              <div class="card-title">⚡ 실측 1: 모델 로드 17.8초 → 1.5초</div>
-              <p>PyTorch(590MB) 대신 <strong>ONNX Runtime(49MB)</strong>을 적용해 설치 파일은 <strong>46.2MB</strong>로 줄이고, 임베딩 모델 로드 시간을 <strong>17.8초에서 1.5초</strong>로 단축 (벡터 코사인 유사도 1.0 동일)</p>
+              <div class="card-title">🔒 실수로 닫아도 안전한 내 PC 보관</div>
+              <p>작성·수정 중인 글은 <strong>초안으로 자동 보관·복원</strong>되어 날아가지 않으며, 모든 메모는 외부 서버가 아닌 <strong>내 PC에만 저장</strong>되어 보안 걱정이 없고 앱을 업데이트해도 그대로 유지됩니다.</p>
             </div>
             <div class="card highlight-green">
-              <div class="card-title">🎯 실측 2: 토큰 예산 3,000 → 2,999 맞춤</div>
-              <p>19,000자 장문 메모가 섞인 실제 데이터에서 예산 3,000토큰 지정 시 <strong>2,999토큰 사용·근거 12건 자동 수록</strong> (미적용 시 메모 1건에 10,954토큰 초과하는 문제 해결)</p>
+              <div class="card-title">🔍 눈으로 먼저 확인하는 미리보기 &amp; 원문 대조</div>
+              <p>AI가 쓴 글이나 엑셀 분석은 <strong><code>[M번호]</code>·<code>[C번호]</code> 클릭 한 번으로 원본 메모·엑셀 행을 바로 확인</strong>할 수 있고, 가져오기·공유도 항상 <strong>사전 미리보기 후 선택한 항목만</strong> 반영합니다.</p>
             </div>
             <div class="card highlight-purple">
-              <div class="card-title">🔍 실측 3: 전체 행 정밀 집계 &amp; 자동 검증</div>
-              <p>엑셀 취합 시 일부 샘플이 아닌 <strong>전체 대상 행 Decimal 정밀 집계</strong>를 수행하며, 하이브리드 검색 및 Python·브라우저 UI 자동화 회귀 테스트로 동작 검증 완료</p>
+              <div class="card-title">⚡ 유료 AI 키나 복잡한 설치 없이 바로 시작</div>
+              <p><strong><code>Setup.exe</code> 설치 파일 하나</strong>로 누구나 바로 쓰며, 별도의 유료 AI 키가 없더라도 검색된 메모 근거가 정리된 <strong>‘완성형 프롬프트’를 복사</strong>해 사내 AI나 무료 웹 챗봇에 그대로 붙여 쓸 수 있습니다.</p>
             </div>
           </div>
         </div>
       </div>
 
       <div class="slide-footer">
-        <span>측정 근거: 프로젝트 실측 벤치마크(README.md) 및 엑셀 폴더 취합·AI 편집 검증 문서 기준</span>
-        <span>Slide 09 / 12</span>
+        <span>사용자 중심 설계: 기록 유실 방지 · 내 PC 로컬 보관 · 사전 미리보기 · 원문 출처 즉시 확인</span>
+        <span>Slide 10 / 13</span>
       </div>
     </section>
 
-    <!-- ==================== SLIDE 10: 종합 요약 및 확산 계획 ==================== -->
+    <!-- ==================== SLIDE 11: 종합 요약 및 확산 계획 ==================== -->
     <section class="slide">
       <div>
         <div class="slide-header">
           <div>
-            <div class="slide-kicker">09. 종합 요약 및 향후 활용 계획</div>
+            <div class="slide-kicker">10. 종합 요약 및 향후 활용 계획</div>
             <h2 class="slide-title">쉽게 적고, 빠르게 찾고, 엑셀 취합·AI 정리까지 동료와 나누는 스마트 워크</h2>
             <p class="slide-subtitle">실무 활용성 · 공유 가능성 · 창의적 업무 혁신 요약 및 확산 로드맵</p>
           </div>
@@ -1306,10 +1369,10 @@
             <div class="card highlight-blue">
               <div class="card-title">⚡ 실무 활용성</div>
               <ul>
-                <li>분류 없이 쉽게 적고(<code>🎤</code> 음성 지원) <strong><code>#태그</code>·하이브리드 검색</strong>으로 즉시 탐색</li>
-                <li><strong>자주 하는 업무(프롬프트) 저장</strong> 및 출처(<code>[M번호]</code>) 기반 AI 정리·다듬기</li>
+                <li>분류 없이 쉽게 적고(<code>빠른 메모</code>·<code>🎤</code> 음성) <strong><code>#태그</code>·하이브리드 검색</strong>으로 즉시 탐색</li>
+                <li><strong>자주 하는 업무(프롬프트) 저장</strong> 및 출처(<code>[M번호]</code>) 기반 문서 만들기·다듬기</li>
                 <li><strong>부서별 엑셀 폴더 일괄 취합·집계</strong> 및 한글(HWP)·PDF 선택 반입</li>
-                <li>초안 자동 보관·미저장 편집 보호 및 달력 일정 관리 지원</li>
+                <li>초안 자동 보관·미저장 편집 보호 및 달력 일정·태그별 요약 지원</li>
               </ul>
             </div>
 
@@ -1356,18 +1419,18 @@
 
       <div class="slide-footer">
         <span>감사합니다 — memoinall: 쉽게 메모하고, 빠르게 검색하고, AI로 정리해 쉽게 나누는 업무 에이전트</span>
-        <span>Slide 10 / 12</span>
+        <span>Slide 11 / 13</span>
       </div>
     </section>
 
-    <!-- ==================== SLIDE 11: 부록 A - 프로그램 설치 및 첫 실행 방법 ==================== -->
+    <!-- ==================== SLIDE 12: 부록 A - 프로그램 설치 및 첫 실행 방법 ==================== -->
     <section class="slide">
       <div>
         <div class="slide-header">
           <div>
             <div class="slide-kicker">Appendix A. 부록 — 프로그램 설치 및 첫 실행 방법</div>
             <h2 class="slide-title">Python 설치도, 관리자 권한도 필요 없는 1분 원클릭 설치</h2>
-            <p class="slide-subtitle">전달받은 <code>memoinall-Setup-0.1.0.exe</code> 파일 하나만 실행하면 모든 준비가 끝납니다</p>
+            <p class="slide-subtitle">전달받은 <code>memoinall-Setup-0.1.1.exe</code> 파일 하나만 실행하면 모든 준비가 끝납니다</p>
           </div>
           <span class="score-pill green">부록 1: 설치 가이드</span>
         </div>
@@ -1378,7 +1441,7 @@
               <div class="card white">
                 <div class="card-title">💿 1단계: 설치 파일 실행 (Windows 10/11 x64)</div>
                 <ul>
-                  <li><strong><code>memoinall-Setup-0.1.0.exe</code>(약 46MB) 더블클릭:</strong> 별도의 개발 환경(Python 등)이나 관리자 권한 없이 현재 사용자 폴더(<code>%LOCALAPPDATA%\Programs\memoinall</code>)에 즉시 설치됩니다.</li>
+                  <li><strong><code>memoinall-Setup-0.1.1.exe</code>(약 48MB) 더블클릭:</strong> 별도의 개발 환경(Python 등)이나 관리자 권한 없이 현재 사용자 폴더(<code>%LOCALAPPDATA%\Programs\memoinall</code>)에 즉시 설치됩니다.</li>
                   <li><strong>바로가기 자동 등록:</strong> 시작 메뉴에 <code>memoinall</code>이 등록되며, 바탕화면 바로가기 생성 여부를 선택할 수 있습니다. (무설치 단일/폴더 실행 파일 방식도 지원)</li>
                 </ul>
               </div>
@@ -1392,30 +1455,30 @@
               </div>
             </div>
 
-            <!-- 캡처 슬롯 #9 & #10 (설치 화면 + 첫 실행 화면) -->
+            <!-- 캡처 슬롯 #10 & #11 (설치 화면 + 첫 실행 화면) -->
             <div style="display:flex; flex-direction:column; gap:12px; justify-content:space-between;">
               <div class="grid-2" style="gap:14px; flex:1;">
-                <div class="screenshot-slot" data-slot="9" style="min-height:240px;">
+                <div class="screenshot-slot" data-slot="10" style="min-height:240px;">
                   <input type="file" accept="image/*" hidden />
                   <img class="preview-img" alt="Windows 설치 마법사 캡처" />
                   <button type="button" class="slot-change-btn">이미지 변경</button>
                   <div class="slot-placeholder">
-                    <div class="slot-icon">📸 9</div>
-                    <div class="slot-title">[캡처 9] Setup.exe 설치 화면</div>
+                    <div class="slot-icon">📸 10</div>
+                    <div class="slot-title">[캡처 10] Setup.exe 설치 화면</div>
                     <div class="slot-desc">
-                      <code>memoinall-Setup-0.1.0.exe</code> 실행 시 나타나는 설치 경로 확인 또는 바탕화면 바로가기 선택 화면을 캡처해 넣어주세요.
+                      <code>memoinall-Setup-0.1.1.exe</code> 실행 시 나타나는 설치 경로 확인 또는 바탕화면 바로가기 선택 화면을 캡처해 넣어주세요.
                     </div>
                     <div class="slot-tip">클릭 또는 드래그 앤 드롭</div>
                   </div>
                 </div>
 
-                <div class="screenshot-slot" data-slot="10" style="min-height:240px;">
+                <div class="screenshot-slot" data-slot="11" style="min-height:240px;">
                   <input type="file" accept="image/*" hidden />
                   <img class="preview-img" alt="설치 완료 또는 첫 실행 화면 캡처" />
                   <button type="button" class="slot-change-btn">이미지 변경</button>
                   <div class="slot-placeholder">
-                    <div class="slot-icon">📸 10</div>
-                    <div class="slot-title">[캡처 10] 설치 완료 / 첫 실행 화면</div>
+                    <div class="slot-icon">📸 11</div>
+                    <div class="slot-title">[캡처 11] 설치 완료 / 첫 실행 화면</div>
                     <div class="slot-desc">
                       설치 완료 화면이나 시작 메뉴에서 실행된 첫 화면(사이드바의 검색 모델 준비/완료 상태 안내 등)을 캡처해 넣어주세요.
                     </div>
@@ -1436,11 +1499,11 @@
 
       <div class="slide-footer">
         <span>부록 A: 프로그램 설치 및 업데이트 가이드 — 재설치·업데이트 시에도 기존 메모 데이터 100% 유지</span>
-        <span>Slide 11 / 12</span>
+        <span>Slide 12 / 13</span>
       </div>
     </section>
 
-    <!-- ==================== SLIDE 12: 부록 B - 사용할 AI 초기 세팅 방법 ==================== -->
+    <!-- ==================== SLIDE 13: 부록 B - 사용할 AI 초기 세팅 방법 ==================== -->
     <section class="slide">
       <div>
         <div class="slide-header">
@@ -1468,21 +1531,21 @@
                 <div class="card-title">💡 알아두면 좋은 활용 팁</div>
                 <ul>
                   <li><strong>모델 목록 자동 불러오기:</strong> <code>[서버에서 모델 목록 불러오기]</code>를 누르면 현재 사용 가능한 모델 이름을 직접 타이핑할 필요 없이 목록에서 고를 수 있습니다.</li>
-                  <li><strong>API 키가 없어도 100% 활용:</strong> 별도의 API 키를 세팅하지 않아도, <strong>[AI로 정리]</strong> 실행 시 관련 메모 근거가 완벽하게 묶인 <strong>완성형 프롬프트</strong>를 만들어주므로 사용 중인 웹 AI 화면에 그대로 붙여넣어 쓸 수 있습니다.</li>
-                  <li><strong>음성 입력(🎤) 설정:</strong> 같은 설정 화면에서 음성 받아쓰기 방식(기본 로컬 Whisper 또는 Gemini 음성 인식)도 선택·테스트할 수 있습니다.</li>
+                  <li><strong>API 키가 없어도 100% 활용:</strong> 별도의 API 키를 세팅하지 않아도, <strong>[메모로 문서 만들기]</strong> 실행 시 관련 메모 근거가 완벽하게 묶인 <strong>완성형 프롬프트</strong>를 만들어주므로 사용 중인 웹 AI 화면에 그대로 붙여넣어 쓸 수 있습니다.</li>
+                  <li><strong>내 태그 및 음성 입력(🎤) 설정:</strong> 같은 설정 화면에서 자주 쓰는 <strong>내 태그</strong>를 등록하거나 음성 받아쓰기 방식(기본 로컬 Whisper 또는 Gemini 음성 인식)을 선택·테스트할 수 있습니다.</li>
                 </ul>
               </div>
             </div>
 
-            <!-- 캡처 슬롯 #11 (AI 설정 화면) -->
+            <!-- 캡처 슬롯 #12 (AI 설정 화면) -->
             <div style="display:flex; flex-direction:column; justify-content:space-between;">
-              <div class="screenshot-slot" data-slot="11" style="flex:1;">
+              <div class="screenshot-slot" data-slot="12" style="flex:1;">
                 <input type="file" accept="image/*" hidden />
                 <img class="preview-img" alt="설정 탭 AI 세팅 화면 캡처" />
                 <button type="button" class="slot-change-btn">이미지 변경</button>
                 <div class="slot-placeholder">
-                  <div class="slot-icon">📸 11</div>
-                  <div class="slot-title">[캡처 11] ‘설정’ 탭 — 사용할 AI 선택 및 연결 테스트 화면</div>
+                  <div class="slot-icon">📸 12</div>
+                  <div class="slot-title">[캡처 12] ‘설정’ 탭 — 사용할 AI 선택 및 연결 테스트 화면</div>
                   <div class="slot-desc">
                     <strong>설정</strong> 탭 화면에서 프로바이더(Claude / ChatGPT / Gemini 등)를 선택하고,<br />
                     API 키(마스킹 표시)·모델 설정 및 <strong><code>연결 테스트</code> 성공 메시지</strong>가 뜬 화면을 캡처해 넣어주세요.
@@ -1502,7 +1565,7 @@
 
       <div class="slide-footer">
         <span>부록 B: AI 초기 세팅 가이드 — 프로바이더별 설정 자동 기억 및 호환 파라미터 자동 조정 지원</span>
-        <span>Slide 12 / 12</span>
+        <span>Slide 13 / 13</span>
       </div>
     </section>
 

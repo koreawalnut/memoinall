@@ -208,6 +208,14 @@ def main():
         # ---------------------------------------------------------- 일정
         tab("cal")
         today = date.today()
+        expect(page.locator("#dayMemoTitle")).to_contain_text("3건")
+        expect(page.locator(f'[data-day="{today.isoformat()}"] .memo-mark')).to_be_visible()
+        page.locator("#dayMemos button").filter(has_text="서버 로그").click()
+        expect(page.locator("#memoBody")).to_have_value(re.compile("서버 로그"))
+        page.locator("#memoBody").fill("서버 로그 다시 확인하기 #서버")
+        page.locator("#memoSave").click()
+        expect(page.locator("#dayMemos")).to_contain_text("서버 로그 다시 확인하기")
+        expect(page.locator("#tab-cal")).to_be_visible()
         page.locator("#addEvent").click()
         page.locator("#evTitle").fill("결제 시스템 점검 회의")
         page.locator("#evTime").fill("15:00")
@@ -226,6 +234,7 @@ def main():
         page.locator("#evDate").fill(later.isoformat())
         page.locator("#evSave").click()
         expect(page.locator("#calTitle")).to_have_text(f"{later.year}년 {later.month}월")
+        expect(page.locator("#dayMemoTitle")).to_contain_text("0건")
         expect(page.locator(f'[data-day="{later.isoformat()}"] .dots i')).to_have_count(1)
         page.locator("#calToday").click()
         expect(page.locator("#calTitle")).to_have_text(f"{today.year}년 {today.month}월")
@@ -306,7 +315,7 @@ def main():
         page.add_script_tag(path=str(JSQR))
         r = page.evaluate(READ_QR)
         packet = exchange.parse(r["text"])
-        assert sorted(m["body"] for m in packet["memos"]) == ["금요일까지 보고서 보내기 #보고서", "서버 로그 확인하기 #서버"]
+        assert sorted(m["body"] for m in packet["memos"]) == ["금요일까지 보고서 보내기 #보고서", "서버 로그 다시 확인하기 #서버"]
         assert packet["memos"][0]["tags"] and packet["memos"][0]["origin"] == "mobile" and "backup" not in packet
         page.locator("#sendPw").fill("폰 비번")
         expect(page.locator("#sendPwNote")).to_contain_text("이 비밀번호를 넣어야")
@@ -325,6 +334,12 @@ def main():
           renderAllMemos(); }""")
         page.locator("#q").fill("대량")
         expect(memos).to_have_count(25)
+        tab("cal")
+        expect(page.locator("#dayMemoTitle")).to_have_text("이날 작성한 메모 28건")
+        expect(page.locator("#dayMemos button")).to_have_count(5)
+        page.locator("#dayMemoNext").click()
+        expect(page.locator("#dayMemoRange")).to_have_text("6–10 / 28건")
+        tab("memos")
         page.locator("#selectToggle").click()
         page.locator("#selAll").click()
         expect(page.locator("#selCount")).to_have_text("25건 선택")
@@ -401,7 +416,7 @@ def main():
         assert call["url"].endswith("/models/gemini-2.5-flash:generateContent"), call["url"]
         assert call["headers"]["x-goog-api-key"] == "g-key"
         prompt = call["body"]["contents"][0]["parts"][0]["text"]
-        assert "해야 할 일" in prompt and "서버 로그 확인하기" in prompt and "금요일까지 보고서" in prompt
+        assert "해야 할 일" in prompt and "서버 로그 다시 확인하기" in prompt and "금요일까지 보고서" in prompt
         assert "근거" in call["body"]["systemInstruction"]["parts"][0]["text"]
         page.locator("#aiKeep").click()
         toast("메모로 저장했습니다")
@@ -465,7 +480,7 @@ def main():
         page.locator("#importRun").click()
         toast("되살렸습니다")
         expect(memos).to_have_count(4)
-        expect(memos.filter(has_text="서버 로그 확인하기").locator(".badge")).to_have_count(0)    # 내가 쓴 메모는 그대로
+        expect(memos.filter(has_text="서버 로그 다시 확인하기").locator(".badge")).to_have_count(0)    # 내가 쓴 메모는 그대로
         expect(memos.filter(has_text="AI 정리:").locator(".badge")).to_have_text("AI 정리")
         tab("cal")
         expect(page.locator(f'[data-day="{today.isoformat()}"] .dots i.done')).to_have_count(1)
@@ -478,6 +493,10 @@ def main():
         tab("memos")
         expect(memos).to_have_count(4)
         expect(page.locator("#offline")).to_be_visible()
+        tab("cal")
+        expect(page.locator("#dayMemoTitle")).to_have_text("이날 작성한 메모 4건")
+        page.locator("#dayMemos button").filter(has_text="서버 로그 다시 확인하기").click()
+        expect(page.locator("#memoBody")).to_have_value("서버 로그 다시 확인하기 #서버")
         ctx.set_offline(False)
         assert page.evaluate("APP_VERSION") == info["version"]
         print(f"OK offline: the installed app opens without network (version {info['version']})")

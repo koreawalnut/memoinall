@@ -66,10 +66,19 @@ def main():
 
         def select(day):
             page.locator(f'[data-calendar-day="{day}"]').click()
-            expect(page.locator("#todoCreateDate")).to_have_value(day)
-            page.keyboard.press("Escape")
             expect(page.locator(f'[data-calendar-day="{day}"]')).to_have_attribute("aria-pressed", "true")
             expect(page.locator(f'[data-calendar-day="{day}"]')).to_be_focused()
+            expect(page.locator("#todoCreate")).not_to_be_visible()
+
+        select("2026-11-16")
+        expect(page.locator("#calendarMemoTitle")).to_contain_text("9건")
+        page.locator("#calendarMemoNext").click()
+        expect(page.locator(".calendar-day-memos [data-todo-memo]")).to_have_count(4)
+        page.locator(f'.calendar-day-memos [data-todo-memo="{memos[0]["id"]}"]').click()
+        expect(page.locator("#dBody")).to_have_value(seeds[0])
+        page.locator("#dClose").click()
+        expect(page.locator("#todoCalendarDayTitle")).to_contain_text("11/16")
+        print("OK the writing day opens the original memo across pages and preserves the selected date")
 
         page.evaluate("window.scrollTo(0, 450)")
         before_scroll = page.evaluate("window.scrollY")
@@ -103,7 +112,7 @@ def main():
         expect(page.locator(".todo-calendar-agenda .todo")).to_have_count(3)
         report.get_by_role("checkbox").check()
         expect(page.locator("#todoCalendarDayTitle")).to_contain_text("2건")
-        expect(page.locator('[data-calendar-day="2026-11-20"]')).to_have_attribute("aria-label", "2026-11-20, 마감 2건, 일정 추가")
+        expect(page.locator('[data-calendar-day="2026-11-20"]')).to_have_attribute("aria-label", "2026-11-20, 마감 2건, 작성한 메모 0건")
         page.locator("#todoUndo").click()
         expect(page.locator("#todoCalendarDayTitle")).to_contain_text("3건")
         report.get_by_role("button", name="수정·날짜").click()
