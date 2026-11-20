@@ -780,6 +780,9 @@ def _run_imports(payload: dict, *, dry_run: bool):
         "shared_password": payload.get("shared_password"),
         "evernote_path": payload.get("evernote_path"),
         "evernote_content": payload.get("evernote_content"),
+        "onenote_path": payload.get("onenote_path"),
+        "onenote_filename": payload.get("onenote_filename"),
+        "onenote_content": payload.get("onenote_content"),
         **_redmine_opts(payload.get("redmine") or {}),
     }
     try:
@@ -802,7 +805,7 @@ def _run_imports(payload: dict, *, dry_run: bool):
 
     selected_keys = payload.get("selected_keys")
     if selected_keys is not None and (
-        source not in ("shared", "evernote") or not isinstance(selected_keys, list)
+        source not in ("shared", "evernote", "onenote") or not isinstance(selected_keys, list)
         or len(selected_keys) > 1000 or any(not isinstance(k, str) for k in selected_keys)
     ):
         raise HTTPException(400, "파일에서 선택한 메모 목록이 올바르지 않습니다.")
@@ -813,7 +816,7 @@ def _run_imports(payload: dict, *, dry_run: bool):
         r = importers.run_import(
             imp, dry_run=dry_run, min_chars=min_chars, update_existing=update_existing,
             extra_tags=extra_tags,
-            review=bool(payload.get("review")) and source in ("shared", "evernote"),
+            review=bool(payload.get("review")) and source in ("shared", "evernote", "onenote"),
             selected_keys=selected_keys,
             expected_revision=str(payload.get("revision") or ""),
         )

@@ -499,10 +499,15 @@
     <div class="badges" id="dBadges" style="margin-top:10px"></div>
     <div id="dSimilar" style="margin-top:14px"></div>
   </div>
+  <div id="dShareFeedback" hidden style="padding:8px 18px">
+    <span class="note" id="dShareMessage" role="status"></span>
+    <button class="btn ghost" id="dShareCopy" type="button">본문 복사</button>
+  </div>
   <div class="dlg-f">
     <button class="btn" id="dEdit">고치기</button>
     <button class="btn primary" id="dSave" hidden>저장</button>
     <button class="btn ghost" id="dPack">이 메모로 문서 만들기</button>
+    <button class="btn" id="dShare" title="현재 본문을 복사하고 Teams 새 채팅 열기">Teams로 본문 공유</button>
     <button class="btn" id="dCollection" hidden>취합표 보기</button>
     <span class="spacer"></span>
     <button class="btn ghost" id="dDelete" style="color:var(--danger)">삭제</button>
@@ -1607,16 +1612,23 @@ let exportReview = null;
 let exportPreviewVersion = 0;
 let sharedLoadVersion = 0;
 const importReviews = {};
-const evernoteFile = { content: "", name: "", version: 0 };
+const notebookFiles = {
+  evernote: { content: "", name: "", version: 0, error: "" },
+  onenote: { content: "", name: "", version: 0, error: "" },
+};
+const reviewSources = ["shared", ...Object.keys(notebookFiles)];
 const RM_KINDS = { issues: "이슈", wiki: "위키", documents: "문서", news: "공지" };
 
 // 소스 한 칸: 상태 + 자기 버튼 + 자기 결과. '일괄'도 같은 칸에 결과를 흘려보낸다.
 function sourceActions(x) {
   const disabled = x.available ? "" : "disabled";
+  const localPages = x.name === "onenote_local";
+  let action = reviewSources.includes(x.name) ? "선택한 메모 가져오기" : "가져오기";
+  if (localPages) action = "전자 필기장 일괄 가져오기";
   return `<div class="row" style="margin:9px 0 0">
     <span class="spacer"></span>
-    <button class="btn" data-src-preview="${x.name}" ${disabled}>미리보기</button>
-    <button class="btn primary" data-src-run="${x.name}" ${disabled}>${["shared", "evernote"].includes(x.name) ? "선택한 메모 가져오기" : "가져오기"}</button>
+    <button class="btn" data-src-preview="${x.name}" ${disabled}>${localPages ? "가져올 페이지 미리보기" : "미리보기"}</button>
+    <button class="btn primary" data-src-run="${x.name}" ${disabled}>${action}</button>
   </div>`;
 }
 
@@ -1624,7 +1636,7 @@ function sourceCard(x, extra = "") {
   return `<div class="src" style="align-items:stretch">
     <div class="src-body">
       <div><b>${esc(x.label)}</b>
-        <span class="${x.available ? "ok" : "no"}">${x.available ? "● 사용 가능" : "○ 없음"}</span>
+        <span class="${x.available ? "ok" : "no"}">${x.available ? "● 사용 가능" : notebookFiles[x.name] ? "파일 선택 전" : "○ 없음"}</span>
         ${x.network ? '<span class="badge">네트워크</span>' : ""}</div>
       <div class="meta" style="word-break:break-all">${esc(x.available ? x.path : x.reason)}</div>
       ${x.source_tag ? `<div class="meta">가져오면 #${esc(x.source_tag)} 태그가 붙습니다.</div>` : ""}
@@ -1700,11 +1712,14 @@ async function renderImport(version = renderVersion) {
     const shared = sources.find((x) => x.name === "shared");
     Object.assign(shared, { available: true, path: imp.sharedName });
   }
-  if (evernoteFile.content) Object.assign(sources.find((x) => x.name === "evernote"), { available: true, path: evernoteFile.name });
+  for (const [source, file] of Object.entries(notebookFiles)) {
+    if (file.content) Object.assign(sources.find(x => x.name === source), { available: true, path: file.name });
+  }
   const s = cfg.settings;
   const kinds = (s["import.redmine.kinds"].value || "").split(",").map((k) => k.trim());
   const byName = Object.fromEntries(sources.map((x) => [x.name, x]));
-  const usable = sources.filter((x) => !["shared", "evernote"].includes(x.name) && x.available).length;
+  const batchSources = sources.filter(x => !reviewSources.includes(x.name));
+  const usable = batchSources.filter(x => x.available).length;
 
   // 에버노트는 ENEX 파일을 직접 골라야 하므로 파일 선택이 칸 안에 있다.
   const evernoteExtra = `
@@ -1712,7 +1727,15 @@ async function renderImport(version = renderVersion) {
       제목·본문·태그·작성 시각을 가져옵니다. 이미지·첨부파일과 암호화된 내용은 저장하지 않으니 원본 파일을 보관하세요.</div>
     <label for="evernoteFile" class="status" style="display:block;margin-top:8px">ENEX 파일 (50MB·1,000건 이하)</label>
     <input id="evernoteFile" type="file" accept=".enex" style="margin-top:6px" />
-    <div id="evernoteFileStatus" class="note">${esc(evernoteFile.name || "파일 선택 후 필요한 메모만 체크해 가져올 수 있습니다.")}</div>`;
+    <div id="evernoteFileStatus" class="note">${esc(notebookFiles.evernote.error || notebookFiles.evernote.name || "파일 선택 후 필요한 메모만 체크해 가져올 수 있습니다.")}</div>`;
+
+  const onenoteExtra = `
+    <div class="meta" style="margin-top:4px">Windows용 OneNote는 <b>파일 → 내보내기</b>에서 페이지나 섹션을 PDF 또는 Word(.docx)로 저장하세요.
+      웹에서는 가져올 페이지를 <b>인쇄 → PDF로 저장</b>하세요. .one·.onepkg 원본은 Windows용 OneNote에서 열어 내보내세요.</div>
+    <label for="onenoteFile" class="status" style="display:block;margin-top:8px">OneNote에서 내보낸 파일 (20MB 이하)</label>
+    <input id="onenoteFile" type="file" accept=".pdf,.docx" />
+    <div class="note">미리보기에서 필요한 쪽을 선택하세요. PDF는 인쇄된 쪽별로, Word는 쪽 나누기를 기준으로 텍스트를 가져옵니다. 필기·이미지·첨부파일은 원본에서 확인하세요. 작성 시각에는 가져온 시각이 표시됩니다.</div>
+    <div id="onenoteFileStatus" class="note" role="status">${esc(notebookFiles.onenote.error || notebookFiles.onenote.name)}</div>`;
 
   // 텍스트 폴더는 경로 입력이 칸 안에 있어야 한다 — 다른 데 있으면 뭘 가져올지 안 보인다.
   const filesExtra = `
@@ -1821,8 +1844,10 @@ async function renderImport(version = renderVersion) {
         <span class="spacer"></span>
         <button class="btn" id="expPreview">무엇이 나가는지 보기</button>
         <button class="btn" id="expCopy">내용 복사</button>
-        <button class="btn primary" id="expSave">파일로 저장</button>
+        <button class="btn" id="expSave">파일로 저장</button>
+        <button class="btn primary" id="expShare" aria-describedby="expShareHint">Teams로 파일 공유</button>
       </div>
+      <div id="expShareHint" class="note">${window.pywebview?.api?.share_to_teams ? "Teams 새 채팅이 열리면 받는 사람을 선택하고 Ctrl+V로 파일을 첨부하세요." : "Teams에서 받는 사람과 첨부파일을 확인한 뒤 전송하세요."}</div>
       <div id="expReview"></div>
       <div id="expOut" aria-live="polite"></div>
     </div>
@@ -1848,7 +1873,7 @@ async function renderImport(version = renderVersion) {
       <summary>가져오기 옵션 (선택)</summary>
       <div style="margin-top:12px">
       <div class="desc">
-        원본은 <b>읽기만</b> 합니다(앱이 켜져 있어도 안전). 원래 작성 시각을 유지하고
+        원본은 <b>읽기만</b> 합니다. 원본에 기록된 작성 시각을 알 수 있으면 유지하고
         같은 메모가 두 번 들어가지 않습니다. <b>먼저 미리보기</b>로 확인한 뒤 실행하세요.
       </div>
       <div class="field">
@@ -1873,7 +1898,7 @@ async function renderImport(version = renderVersion) {
         </div>
       </div>` : ""}
       <div class="row" data-exchange-section="import" style="margin:12px 0 0">
-        <span class="meta">사용 가능한 소스 ${usable} / ${sources.length - 2} · ENEX와 받은 파일은 각 목록에서 선택</span>
+        <span class="meta">사용 가능한 소스 ${usable} / ${batchSources.length} · 내보내기 파일과 받은 파일은 각 목록에서 선택</span>
         <span class="spacer"></span>
         <button class="btn" id="impPreviewAll" ${usable ? "" : "disabled"}>전체 미리보기</button>
         <button class="btn primary" id="impRunAll" ${usable ? "" : "disabled"}>전체 가져오기</button>
@@ -1887,6 +1912,8 @@ async function renderImport(version = renderVersion) {
       ${sourceCard(byName.sticky)}
       ${sourceCard(byName.samsung)}
       ${sourceCard(byName.evernote, evernoteExtra)}
+      ${sourceCard(byName.onenote_local, '<div class="note">이 PC의 Windows용 OneNote에서 열어 둔 모든 전자 필기장을 읽습니다. 페이지마다 메모 한 건으로 제목·본문·원래 날짜를 가져옵니다. 잠긴 섹션과 휴지통은 건너뜁니다. 그림·손글씨·첨부파일은 OneNote에서 확인하세요.</div>')}
+      ${sourceCard(byName.onenote, onenoteExtra)}
       ${sourceCard(byName.files, filesExtra)}
     </div>
 
@@ -1954,28 +1981,9 @@ async function renderImport(version = renderVersion) {
   $("#chooseDocument").onclick = () => $("#documentFile").click();
   $("#openCollect").onclick = openCollect;
   paintDocumentPreview();
-  $("#evernoteFile").onchange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (imp.busy) { e.target.value = ""; toast("진행 중인 가져오기가 끝난 뒤 파일을 선택하세요"); return; }
-    const version = ++evernoteFile.version;
-    evernoteFile.content = evernoteFile.name = "";
-    delete importReviews.evernote;
-    delete imp.results.evernote;
-    document.querySelectorAll('[data-src-run="evernote"], [data-src-preview="evernote"]').forEach((b) => { b.disabled = true; });
-    $("#impOut-evernote").textContent = "";
-    try {
-      if (file.size > 50000000) throw new Error("50MB 이하의 ENEX 파일을 선택하세요. Evernote에서 나눠 내보낼 수 있습니다.");
-      const content = (await file.text()).replace(/^\uFEFF/, "");
-      if (version !== evernoteFile.version) return;
-      evernoteFile.content = content;
-      evernoteFile.name = file.name;
-      await render();
-      await doImport(true, "evernote");
-    } catch (err) {
-      if (version === evernoteFile.version && $("#evernoteFileStatus")) $("#evernoteFileStatus").textContent = err.message;
-    }
-  };
+  for (const source of Object.keys(notebookFiles)) {
+    $("#" + source + "File").onchange = e => previewNotebookFile(source, e.target.files[0]);
+  }
 
   $("#impPath").onchange = (e) => { imp.path = e.target.value.trim(); render(); };
   $("#impShared").onchange = (e) => {
@@ -2041,6 +2049,7 @@ async function renderImport(version = renderVersion) {
   $("#expArchived").onchange = (e) => { exp.archived = e.target.checked; };
   $("#expPreview").onclick = doExportPreview;
   $("#expSave").onclick = doExportSave;
+  $("#expShare").onclick = doExportShare;
   $("#expCopy").onclick = doExportCopy;
   ["expQ", "expTag", "expSince", "expUntil", "expArchived"].forEach((id) => {
     $("#" + id).addEventListener("input", invalidateExportReview);
@@ -2504,7 +2513,7 @@ function memoPicker(target, review, changed = () => {}) {
     find("[data-picker-list]").innerHTML = rows.slice(offset, offset + 50).map((m) => `<div style="padding:9px 0;border-bottom:1px solid var(--line)">
       <label style="display:flex;gap:8px;align-items:baseline"><input type="checkbox" data-pick="${esc(m.key)}" ${review.selected.has(m.key) ? "checked" : ""} ${m.eligible ? "" : "disabled"} />
         <span style="overflow-wrap:anywhere">${esc(m.title || "(제목 없음)")}</span></label>
-      <div class="meta">${esc((m.created_at || "").slice(0, 10))} · ${esc(m.status || ({web:"직접 작성",cli:"직접 작성",shared:"받은 메모",evernote:"에버노트",files:"파일",sticky:"스티커 메모",samsung:"삼성 노트",redmine:"Redmine"})[m.source] || "메모")}${m.tags?.length ? " · " + m.tags.map((t) => "#" + esc(t)).join(" ") : ""}</div>
+      <div class="meta">${esc((m.created_at || "").slice(0, 10))} · ${esc(m.status || ({web:"직접 작성",cli:"직접 작성",shared:"받은 메모",evernote:"에버노트",onenote:"OneNote",onenote_local:"PC의 OneNote",files:"파일",sticky:"스티커 메모",samsung:"삼성 노트",redmine:"Redmine"})[m.source] || "메모")}${m.tags?.length ? " · " + m.tags.map((t) => "#" + esc(t)).join(" ") : ""}</div>
       ${(m.warnings || []).map((w) => `<div class="note" style="color:var(--warn)">${esc(w)}</div>`).join("")}
       <details data-picker-detail="${esc(m.key)}" ${expanded.has(m.key) ? "open" : ""}><summary class="status">본문 확인</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:13px">${esc(m.body)}</pre></details>
       </div>`).join("") || '<div class="status">해당하는 메모가 없습니다.</div>';
@@ -2547,18 +2556,20 @@ function paintExportReview() {
     el.innerHTML = '<div class="note">먼저 목록을 확인하고 보낼 메모를 체크하세요. 한 번에 최대 1,000건.</div>';
     $("#expSave").textContent = "파일로 저장";
     $("#expCopy").textContent = "내용 복사";
+    $("#expShare").textContent = "Teams로 파일 공유";
     return;
   }
   memoPicker(el, exportReview, () => {
     $("#expSave").textContent = `선택 ${exportReview.selected.size}건 파일로 저장`;
     $("#expCopy").textContent = `선택 ${exportReview.selected.size}건 복사`;
+    $("#expShare").textContent = `선택 ${exportReview.selected.size}건 Teams로 파일 공유`;
   });
 }
 async function reviewedExportPayload() {
   const payload = exportPayload();
   if (!exportReview || exportReview.signature !== exportSignature(payload)) {
     await doExportPreview();
-    toast("보낼 메모를 확인한 뒤 저장 또는 복사를 눌러주세요");
+    toast("목록에서 보낼 메모를 확인한 뒤 내보내기 버튼을 다시 눌러주세요");
     return null;
   }
   if (!exportReview.selected.size) throw new Error("보낼 메모를 하나 이상 선택하세요.");
@@ -2654,6 +2665,111 @@ async function doExportCopy() {
   } catch (err) { expError(err.message); }
 }
 
+async function shareToTeams(content) {
+  const bridge = window.pywebview?.api;
+  const mode = bridge?.share_to_teams ? await bridge.share_to_teams(content, null) : await openTeamsChatLink(content);
+  if (mode === "draft-copied") return "Teams에서 받는 사람과 본문을 확인하세요. 이전 초안이 보이면 복사된 본문을 붙여넣으세요.";
+  if (mode === "paste") return "긴 본문 전체를 복사했습니다. Teams에서 받는 사람을 고르고 입력란에 붙여넣으세요.";
+  return "Teams에서 받는 사람과 본문을 확인하세요. 본문이 다르면 ‘본문 복사’로 붙여넣으세요.";
+}
+
+function showPreparedAttachment(out, file) {
+  const launch = file.opened ? "" : "Teams 앱을 열 수 없습니다. Teams에 로그인한 뒤 ";
+  const attach = file.copied && file.opened
+    ? "받는 사람을 고르고 메시지 입력란에 Ctrl+V를 누르세요. 첨부가 보이지 않으면 파일 위치를 열어 채팅으로 끌어다 놓으세요."
+    : "파일 위치를 열고 준비된 파일을 Teams 채팅으로 끌어다 놓으세요.";
+  out.innerHTML = `<p>${esc(launch + attach)}</p><div class="row">
+    <button type="button" class="btn" data-reveal-file>파일 위치 열기</button>
+    <span class="meta">${esc(file.name)}</span></div><div data-reveal-error class="note"></div>`;
+  out.querySelector("[data-reveal-file]").onclick = async () => {
+    try { await window.pywebview.api.reveal_teams_file(file.name); }
+    catch { out.querySelector("[data-reveal-error]").textContent = "탐색기에서 이 파일을 확인하세요. " + file.path; }
+  };
+}
+
+function showBrowserAttachment(out, file, stillSelected) {
+  out.innerHTML = `<p>첨부파일을 내려받고 Teams에서 받는 사람을 선택한 뒤, 파일을 채팅으로 끌어다 놓으세요.</p>
+    <div class="row"><button class="btn" type="button" data-download-file>첨부파일 다운로드</button>
+    <a class="btn" href="https://teams.microsoft.com/l/chat/0/0?users=" target="_blank" rel="noopener noreferrer">Teams 새 채팅 열기</a></div>`;
+  out.querySelector("[data-download-file]").onclick = () => {
+    if (!stillSelected()) { out.textContent = "선택이 바뀌었습니다. 다시 공유하세요."; return; }
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(file);
+    link.download = file.name;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 30000);
+  };
+}
+
+async function shareExportFile(out, result, stillSelected) {
+  const file = new File([result.content], result.filename, {type: "application/json"});
+  if (file.size > 50000000) throw new Error("받는 쪽에서 열 수 있는 파일 크기는 50MB까지입니다. 메모를 나눠 선택하세요.");
+  const bridge = window.pywebview?.api;
+  if (bridge?.share_to_teams) {
+    const prepared = await bridge.share_to_teams(result.content, result.filename);
+    if (stillSelected()) showPreparedAttachment(out, prepared);
+    return;
+  }
+  const data = {files: [file]};
+  const windows = /^win/i.test(navigator.userAgentData?.platform || navigator.platform);
+  if (windows || !navigator.canShare?.(data) || !navigator.share) {
+    showBrowserAttachment(out, file, stillSelected);
+    return;
+  }
+  const share = async () => {
+    if (!stillSelected()) { out.textContent = "선택이 바뀌었습니다. 다시 공유하세요."; return; }
+    out.textContent = "파일 공유 창을 여는 중…";
+    try { await navigator.share(data); out.textContent = "공유 창에 내용을 전달했습니다."; }
+    catch (err) {
+      if (err.name === "AbortError") out.textContent = "공유를 취소했습니다.";
+      else showBrowserAttachment(out, file, stillSelected);
+    }
+  };
+  if (navigator.userActivation?.isActive === false) {
+    out.innerHTML = '<button type="button" class="btn" data-open-share>준비된 파일 공유하기</button>';
+    out.querySelector("button").onclick = share;
+  } else { await share(); }
+}
+
+async function openTeamsChatLink(content) {
+  const chat = "https://teams.microsoft.com/l/chat/0/0?users=";
+  const draft = content.length <= 8000 ? chat + "&message=" + encodeURIComponent(content) : "";
+  const prefilled = draft.length > 0 && draft.length <= 8000;
+  const copying = navigator.clipboard?.writeText(content).then(() => true, () => false);
+  if (!prefilled && !copying) throw new Error("긴 본문을 전달하려면 먼저 본문을 복사하세요.");
+  const link = document.createElement("a");
+  link.href = prefilled ? draft : chat;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.click();
+  const copied = await copying;
+  if (prefilled) return copied ? "draft-copied" : "draft";
+  if (!copied) throw new Error("클립보드를 사용할 수 없습니다. 본문을 복사해 Teams에 붙여넣으세요.");
+  return "paste";
+}
+
+async function doExportShare() {
+  const button = $("#expShare"), out = $("#expOut");
+  if (button.disabled) return;
+  button.disabled = true;
+  try {
+    const payload = await reviewedExportPayload();
+    if (!payload) return;
+    const password = exportPassword();
+    if (password === null) return;
+    const review = exportReview;
+    const stillSelected = () => button.isConnected && !out.closest("[hidden]") && review === exportReview &&
+      review.signature === exportSignature(exportPayload()) && $("#expNote").value === payload.note &&
+      $("#expPw").value === password && $("#expPw2").value === password &&
+      review.selected.size === payload.ids.length && payload.ids.every(id => review.selected.has(String(id)));
+    expBusy("선택한 메모를 첨부파일로 준비하는 중…");
+    const result = await api("/api/export/content", { method: "POST", body: { ...payload, password } });
+    if (!stillSelected()) throw new Error("공유할 메모나 옵션이 바뀌었습니다. 선택을 확인하고 다시 눌러주세요.");
+    await shareExportFile(out, result, stillSelected);
+  } catch (err) { out.textContent = err.message; }
+  finally { button.disabled = false; }
+}
+
 function redminePayload() {
   if (!$("#rmUrl")) return {};   // 가져오기 탭이 아닐 때
   return {
@@ -2667,14 +2783,52 @@ function redminePayload() {
   };
 }
 
+async function previewNotebookFile(source, file) {
+  if (!file) return;
+  if (imp.busy) { toast("진행 중인 가져오기가 끝난 뒤 파일을 선택하세요"); return; }
+  const slot = notebookFiles[source], version = ++slot.version;
+  slot.content = slot.name = slot.error = "";
+  delete importReviews[source];
+  delete imp.results[source];
+  document.querySelectorAll(`[data-src-run="${source}"], [data-src-preview="${source}"]`).forEach(b => { b.disabled = true; });
+  $("#impOut-" + source).textContent = "";
+  $("#" + source + "FileStatus").textContent = "파일을 읽는 중…";
+  try {
+    if (!file.size) throw new Error("빈 파일입니다. 내보낸 파일을 다시 선택하세요.");
+    let content;
+    if (source === "onenote") {
+      if (!/\.(pdf|docx)$/i.test(file.name)) throw new Error("OneNote에서 PDF 또는 Word(.docx)로 내보낸 파일을 선택하세요.");
+      if (file.size > 20000000) throw new Error("20MB 이하로 나눠 내보내세요.");
+      content = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(",")[1]);
+        reader.onerror = () => reject(new Error("파일을 읽지 못했습니다. 다시 선택하세요."));
+        reader.readAsDataURL(file);
+      });
+    } else {
+      if (file.size > 50000000) throw new Error("50MB 이하의 ENEX 파일을 선택하세요. Evernote에서 나눠 내보낼 수 있습니다.");
+      content = (await file.text()).replace(/^\uFEFF/, "");
+    }
+    if (version !== slot.version) return;
+    slot.content = content;
+    slot.name = file.name;
+  } catch (err) {
+    if (version !== slot.version) return;
+    slot.error = err.message;
+  }
+  if (state.tab !== "import") return;
+  await render();
+  if (slot.content && version === slot.version && state.tab === "import") await doImport(true, source);
+}
+
 function importSignature(source) {
-  return JSON.stringify([source === "evernote" ? evernoteFile.version : [imp.sharedName, imp.sharedPath, imp.sharedPassword],
+  return JSON.stringify([notebookFiles[source]?.version ?? [imp.sharedName, imp.sharedPath, imp.sharedPassword],
     imp.minChars, imp.update, imp.tags]);
 }
 
 async function doImport(dry, source = "all") {
   if (imp.busy) { toast("진행 중인 가져오기가 끝날 때까지 기다려주세요"); return; }
-  const selectable = ["evernote", "shared"].includes(source);
+  const selectable = reviewSources.includes(source);
   const review = importReviews[source];
   if (!dry && selectable) {
     if (!review || review.signature !== importSignature(source)) {
@@ -2686,11 +2840,11 @@ async function doImport(dry, source = "all") {
   }
   const signature = importSignature(source);
   imp.busy = true;
-  const buttons = [...document.querySelectorAll("[data-src-run], [data-src-preview], #impRunAll, #impPreviewAll, #sharedFile, #sharedQr, #evernoteFile, #impShared, #impSharedPw, #impMin, #impUpdate, #impTagRow button")];
+  const buttons = [...document.querySelectorAll("[data-src-run], [data-src-preview], #impRunAll, #impPreviewAll, #sharedFile, #sharedQr, #evernoteFile, #onenoteFile, #impShared, #impSharedPw, #impMin, #impUpdate, #impTagRow button")];
   const disabledBefore = buttons.map((b) => b.disabled);
   buttons.forEach((b) => { b.disabled = true; });
   const targets = source === "all"
-    ? (imp.section === "share" ? ["shared"] : ["sticky", "samsung", "files", "redmine"])
+    ? (imp.section === "share" ? ["shared"] : ["sticky", "samsung", "onenote_local", "files", "redmine"])
     : [source];
   const completed = new Set();
   const busy = `<div class="status" style="margin-top:8px">${dry ? "확인" : "가져오기"} 중…</div>`;
@@ -2699,7 +2853,8 @@ async function doImport(dry, source = "all") {
   const body = {
     source, path: imp.path || null, shared_path: imp.sharedPath || null, shared_content: imp.sharedContent || null,
     shared_password: imp.sharedPassword || null,
-    evernote_content: evernoteFile.content || null,
+    ...(source === "evernote" ? { evernote_content: notebookFiles.evernote.content } : {}),
+    ...(source === "onenote" ? { onenote_filename: notebookFiles.onenote.name, onenote_content: notebookFiles.onenote.content } : {}),
     review: selectable,
     ...(!dry && selectable ? { selected_keys: [...review.selected], revision: review.revision } : {}),
     min_chars: imp.minChars, update_existing: imp.update, tags: imp.tags,
@@ -3416,6 +3571,8 @@ async function openMemo(id, hit = null) {
   catch (e) { toast("메모를 열지 못했습니다: " + e.message); return; }
   if (request !== memoRequest) return;
   state.memo = m;
+  $("#dShareFeedback").hidden = true;
+  $("#dShare").disabled = false;
   $("#dTitle").textContent = m.title;
   $("#dMeta").textContent = `작성 ${fmt(m.created_at)}` +
     (m.updated_at && m.updated_at !== m.created_at ? ` · 수정 ${fmt(m.updated_at)}` : "");
@@ -3446,6 +3603,31 @@ async function openMemo(id, hit = null) {
 
 $("#dClose").onclick = closeDetail;
 $("#dEdit").onclick = () => setEditing(true, true);
+$("#dShare").onclick = async () => {
+  const button = $("#dShare"), body = $("#dBody").value, request = memoRequest;
+  const message = $("#dShareMessage");
+  $("#dShareFeedback").hidden = false;
+  if (!body.trim()) { message.textContent = "공유할 메모 본문이 비어 있습니다."; return; }
+  message.textContent = "Teams 새 채팅을 여는 중…";
+  button.disabled = true;
+  try {
+    const status = await shareToTeams(body);
+    if (request === memoRequest) message.textContent = status;
+  } catch (err) { if (request === memoRequest) message.textContent = err.message; }
+  finally { if (request === memoRequest) button.disabled = false; }
+};
+$("#dShareCopy").onclick = async () => {
+  const body = $("#dBody").value;
+  if (!body.trim()) { $("#dShareMessage").textContent = "복사할 본문이 비어 있습니다."; return; }
+  try {
+    await navigator.clipboard.writeText(body);
+    $("#dShareMessage").textContent = "본문을 복사했습니다. Teams 입력란에 붙여넣으세요.";
+  } catch {
+    setEditing(true, true);
+    $("#dBody").select();
+    $("#dShareMessage").textContent = "본문을 선택했습니다. Ctrl+C로 복사하세요.";
+  }
+};
 $("#dBody").addEventListener("input", paintDetailTags);
 $("#dTagAdd").onclick = () => { if (addDetailTag()) $("#dTagInput").focus(); };
 $("#dTagInput").addEventListener("keydown", (e) => {

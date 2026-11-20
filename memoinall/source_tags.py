@@ -7,6 +7,8 @@ SOURCE_TAGS = {
     "samsung": "삼성노트",
     "redmine": "Redmine",
     "evernote": "에버노트",
+    "onenote": "OneNote",
+    "onenote_local": "OneNote",
     "files": "텍스트파일",
 }
 

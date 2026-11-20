@@ -228,9 +228,10 @@ def main() -> int:
         one = c.post("/api/import/preview", json={"source": "samsung"}).json()
         check("개별 실행은 한 소스만", [x["source"] for x in one["results"]] == ["samsung"],
               [x["source"] for x in one["results"]])
-        every = c.post("/api/import/preview", json={"source": "all"}).json()
+        with patch("memoinall.importers.onenote_local.LocalOneNoteImporter.available", return_value=False):
+            every = c.post("/api/import/preview", json={"source": "all"}).json()
         check("일괄은 전 소스",
-              {x["source"] for x in every["results"]} == {"sticky", "samsung", "redmine", "files", "shared", "evernote"},
+              {x["source"] for x in every["results"]} == {"sticky", "samsung", "redmine", "files", "shared", "evernote", "onenote", "onenote_local"},
               [x["source"] for x in every["results"]])
         check("결과에 source 키 존재", all("source" in x for x in every["results"]))
         # 회귀: 경로 없는 files 가 400 이면 UI 가 사유를 못 보여준다

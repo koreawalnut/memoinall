@@ -187,11 +187,13 @@ def run_import(
         from ..exchange import ExchangeError
         from .redmine import RedmineError
         from .evernote import EvernoteError
+        from .onenote import OneNoteError
 
-        ours = isinstance(exc, (RedmineError, ExchangeError, EvernoteError))
+        ours = isinstance(exc, (RedmineError, ExchangeError, EvernoteError, OneNoteError))
         result.error = str(exc) if ours else f"{type(exc).__name__}: {exc}"
         return result
 
+    result.warnings.extend(getattr(importer, "warnings", ()))
     result.found = len(notes)
     if review or selected_keys is not None:
         if len(notes) > 1000:
@@ -356,7 +358,14 @@ def build_redmine(**kwargs):
 
 # 가져오기로 만들어진 source 값들. 손으로 쓴 메모('web')·CLI('cli') 는 여기 없다 —
 # 초기화가 그것까지 지우면 안 되기 때문에 삭제 대상은 이 목록으로만 받는다.
-SOURCE_NAMES = ("sticky", "samsung", "redmine", "files", "shared", "evernote")
+SOURCE_NAMES = ("sticky", "samsung", "redmine", "files", "shared", "evernote", "onenote", "onenote_local")
+
+
+def build_onenote(**kwargs):
+    from .onenote import OneNoteImporter
+
+    return OneNoteImporter(path=kwargs.get("onenote_path"), filename=kwargs.get("onenote_filename"),
+                           content=kwargs.get("onenote_content"))
 
 
 def build_evernote(**kwargs):
@@ -377,6 +386,7 @@ def build_shared(**kwargs):
 
 def all_importers(**kwargs) -> list:
     from .files import FilesImporter
+    from .onenote_local import LocalOneNoteImporter
     from .samsung import SamsungNotesImporter
     from .sticky import StickyNotesImporter
 
@@ -385,21 +395,25 @@ def all_importers(**kwargs) -> list:
     return [
         StickyNotesImporter(),
         SamsungNotesImporter(),
+        LocalOneNoteImporter(),
         build_redmine(**kwargs),
         FilesImporter(kwargs.get("files_path") or ""),
         build_shared(**kwargs),
         build_evernote(**kwargs),
+        build_onenote(**kwargs),
     ]
 
 
 def get_importer(name: str, **kwargs):
     from .files import FilesImporter
+    from .onenote_local import LocalOneNoteImporter
     from .samsung import SamsungNotesImporter
     from .sticky import StickyNotesImporter
 
     table = {
         "sticky": StickyNotesImporter,
         "samsung": SamsungNotesImporter,
+        "onenote_local": LocalOneNoteImporter,
     }
     if name == "files":
         # 경로가 없으면 available()=False 로 사유를 돌려준다.
@@ -411,6 +425,8 @@ def get_importer(name: str, **kwargs):
         return build_shared(**kwargs)
     if name == "evernote":
         return build_evernote(**kwargs)
+    if name == "onenote":
+        return build_onenote(**kwargs)
     if name not in table:
         raise ValueError(f"알 수 없는 소스: {name} (사용 가능: {', '.join(SOURCE_NAMES)})")
     return table[name]()

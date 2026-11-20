@@ -5,6 +5,7 @@ import sys
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 TMP = tempfile.TemporaryDirectory(prefix="memoinall-review-ui-", ignore_cleanup_errors=True)
 os.environ["MEMOINALL_HOME"] = TMP.name
@@ -12,6 +13,7 @@ os.environ["MEMOINALL_DISABLE_ST"] = "1"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fastapi.testclient import TestClient
+from document_fixtures import onenote_desktop_records, onenote_docx
 from playwright.sync_api import expect, sync_playwright
 from memoinall import exchange, store
 from memoinall.api import app
@@ -75,6 +77,88 @@ def main():
         assert packet["count"] == 1 and "055" in packet["memos"][0]["body"]
         print("OK search, pagination, empty selection and encrypted export contain exactly the checked memo")
 
+        page.evaluate("""() => {
+            window.teamShares = [];
+            window.pywebview = {api: {
+                share_to_teams: async (content, filename) => {
+                    teamShares.push({content, filename});
+                    return filename ? {name: filename, path: filename, opened: true, copied: true} : 'draft-copied';
+                },
+                reveal_teams_file: async filename => { window.revealedFile = filename; }
+            }};
+        }""")
+        output.unlink()
+        page.locator("#expShare").click()
+        expect(page.locator("#expOut")).to_contain_text("Ctrl+V")
+        shared_file, = page.evaluate("teamShares")
+        assert shared_file["filename"].endswith("-1건.json") and not output.exists()
+        assert exchange.parse(shared_file["content"], "test-pass")["memos"] == packet["memos"]
+        page.get_by_role("button", name="파일 위치 열기").click()
+        assert page.evaluate("revealedFile") == shared_file["filename"]
+        page.locator("#expPw2").fill("different")
+        page.locator("#expShare").click()
+        expect(page.locator("#expOut")).to_contain_text("두 비밀번호가 다릅니다")
+        assert page.evaluate("teamShares.length") == 1
+        page.locator("#expPw2").fill("test-pass")
+        page.evaluate("openMemo(56)")
+        page.locator("#dBody").fill("현재 편집한 한글 본문\n둘째 줄")
+        page.locator("#dShare").click()
+        assert page.evaluate("teamShares[1]") == {"content": "현재 편집한 한글 본문\n둘째 줄", "filename": None}
+        expect(page.locator("#dShareMessage")).to_contain_text("받는 사람과 본문")
+        page.once("dialog", lambda dialog: dialog.accept())
+        page.locator("#dClose").click()
+        print("OK Teams draft contains the visible memo, and attachment contains only checked encrypted memos")
+        page.evaluate("""() => {
+            delete window.pywebview;
+            Object.defineProperty(navigator, 'userAgentData', {configurable: true, value: {platform: 'Windows'}});
+            Object.defineProperty(navigator, 'canShare', {configurable: true, value: () => true});
+            Object.defineProperty(navigator, 'share', {configurable: true, value: async ({files}) => {
+                window.webFile = {name: files[0].name, content: await files[0].text()};
+            }});
+        }""")
+        page.locator("#expShare").click()
+        expect(page.get_by_role("link", name="Teams 새 채팅 열기")).to_have_attribute("href", "https://teams.microsoft.com/l/chat/0/0?users=")
+        with page.expect_download() as download:
+            page.get_by_role("button", name="첨부파일 다운로드").click()
+        assert download.value.suggested_filename.endswith("-1건.json")
+        assert exchange.parse(download.value.path().read_text(encoding="utf-8"), "test-pass")["memos"] == packet["memos"]
+        assert page.evaluate("!window.webFile")
+        page.evaluate("Object.defineProperty(navigator, 'userAgentData', {configurable: true, value: {platform:'Android'}})")
+        page.locator("#expShare").click()
+        page.wait_for_function("window.webFile || document.querySelector('[data-open-share]')")
+        if page.locator("[data-open-share]").count():
+            page.locator("[data-open-share]").click()
+        expect(page.locator("#expOut")).to_contain_text("공유 창에 내용을 전달")
+        web_file = page.evaluate("webFile")
+        assert web_file["name"].endswith("-1건.json")
+        assert exchange.parse(web_file["content"], "test-pass")["memos"] == packet["memos"]
+        page.evaluate("""Object.defineProperty(navigator, 'share', {configurable: true, value: async () => {
+            throw new DOMException('cancelled', 'AbortError');
+        }})""")
+        page.locator("#expShare").click()
+        page.wait_for_function("document.querySelector('#expOut').textContent.includes('취소') || document.querySelector('[data-open-share]')")
+        if page.locator("[data-open-share]").count():
+            page.locator("[data-open-share]").click()
+        expect(page.locator("#expOut")).to_contain_text("공유를 취소")
+        page.evaluate("""() => {
+            HTMLAnchorElement.prototype.click = function () { window.chatLink = this.href };
+            Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {
+                writeText: async text => { window.copiedDraft = text }
+            }});
+        }""")
+        page.evaluate("openMemo(56)")
+        expect(page.locator("#dShareFeedback")).to_be_hidden()
+        page.locator("#dShare").click()
+        expect(page.locator("#dShareMessage")).to_contain_text("받는 사람과 본문")
+        assert page.evaluate("new URL(chatLink).searchParams.get('message') === copiedDraft && copiedDraft === document.querySelector('#dBody').value")
+        page.evaluate("window.pywebview = {api:{share_to_teams:async () => {throw new Error('Teams를 열 수 없습니다.')}}}")
+        page.locator("#dShare").click()
+        expect(page.locator("#dShareMessage")).to_contain_text("Teams를 열 수 없습니다")
+        page.locator("#dShareCopy").click()
+        expect(page.locator("#dShareMessage")).to_contain_text("본문을 복사했습니다")
+        page.locator("#dClose").click()
+        print("OK browser receives the same export as a File and sharing can be cancelled")
+
         page.locator('[data-exchange-tab="import"]').click()
         content = '<en-export><note><title>팀 회의</title><content><![CDATA[<en-note>자료 확인<en-media type="image/png"/></en-note>]]></content><tag>팀 업무</tag></note><note><title>개인 메모</title><content><![CDATA[<en-note>선택하지 않을 내용</en-note>]]></content></note></en-export>'
         page.locator("#evernoteFile").set_input_files({"name": "notes.enex", "mimeType": "application/xml", "buffer": content.encode()})
@@ -112,6 +196,34 @@ def main():
         artifact = Path(__file__).resolve().parents[1] / "artifacts" / "ux-review" / "import-sharing-review.png"
         artifact.parent.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(artifact), full_page=True)
+        page.locator('[data-exchange-tab="import"]').click()
+        page.locator("#onenoteFile").set_input_files({"name": "회의.docx", "mimeType": "application/octet-stream", "buffer": onenote_docx()})
+        picker = page.locator("#impOut-onenote")
+        expect(picker.locator("[data-pick]")).to_have_count(2)
+        picker.locator('[data-pick="0"]').uncheck()
+        page.locator('[data-src-run="onenote"]').click()
+        expect(picker).to_contain_text("가져오기 완료")
+        memo, = store.list_memos(tags=["OneNote"])
+        assert "회신 요청" in memo["body"] and "진행 상황" not in memo["body"]
+        page.locator('[data-src-preview="onenote"]').click()
+        expect(picker.locator('[data-pick="1"]')).to_be_disabled()
+        print("OK OneNote file picker previews each part, saves only checked text, and marks existing pages")
+        with patch("memoinall.importers.onenote_local.LocalOneNoteImporter.available", return_value=True), \
+                patch("memoinall.importers.onenote_local._read_desktop", return_value=onenote_desktop_records()):
+            page.reload()
+            page.locator('[data-tab="import"]').click()
+            page.locator('[data-exchange-tab="import"]').click()
+            card = page.locator("#impOut-onenote_local")
+            page.get_by_role("button", name="가져올 페이지 미리보기").click()
+            expect(card).to_contain_text("주간 회의")
+            expect(card).to_contain_text("잠긴 섹션")
+            assert store.count_by_source("onenote_local")["memos"] == 0
+            page.get_by_role("button", name="전자 필기장 일괄 가져오기").click()
+            expect(card).to_contain_text("가져오기 완료")
+            assert store.count_by_source("onenote_local")["memos"] == 2
+            page.get_by_role("button", name="가져올 페이지 미리보기").click()
+            expect(card).to_contain_text("이미있음 2")
+        print("OK desktop OneNote batch preview, save and duplicate count")
         assert not errors, errors
         browser.close()
 

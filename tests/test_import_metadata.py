@@ -48,6 +48,7 @@ class ImportMetadataTests(unittest.TestCase):
         return importers.run_import(source, background_enrich=False, **kwargs)
 
     def test_preview_matches_saved_tags_and_filters_without_enrichment(self):
+        expected_by_tag = {}
         for source, tag in SOURCE_TAGS.items():
             with self.subTest(source=source):
                 note = Note(source, "원래 내용 #업무", created_at="2025-01-02T14:30:00", tags=["업무", "팀"])
@@ -61,7 +62,8 @@ class ImportMetadataTests(unittest.TestCase):
                 self.assertEqual(saved["body"], preview.items[0]["body"])
                 self.assertEqual(saved["body"].count("#업무"), 1)
                 self.assertEqual(set(saved["facets"]["tag"]), {"업무", "팀", tag})
-                self.assertEqual([m["id"] for m in store.list_memos(tag=tag)], [saved["id"]])
+                expected_by_tag.setdefault(tag, set()).add(saved["id"])
+                self.assertEqual({m["id"] for m in store.list_memos(tag=tag)}, expected_by_tag[tag])
                 self.assertEqual(saved["updated_at"], note.created_at)
                 self.assertIsNone(saved["enriched_at"])
 

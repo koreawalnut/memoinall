@@ -22,6 +22,7 @@ from . import (
     db,
     embed,
     exchange,
+    importers,
     llm,
     organize,
     providers,
@@ -215,8 +216,6 @@ def cmd_clusters(args) -> int:
 
 def _dump_raw(args) -> int:
     """가공 전 원문을 그대로 보여준다 — 저장 형식이 예상과 다를 때 원인 확인용."""
-    from . import importers
-
     imp = importers.get_importer(args.source if args.source != "all" else "sticky",
                                  files_path=args.path)
     if not hasattr(imp, "raw_rows"):
@@ -353,8 +352,6 @@ def _shared_password(path: str | None) -> str | None:
 
 def _reset_source(args) -> int:
     """한 소스에서 가져온 메모를 통째로 지운다. 가져오기와 같이 기본은 미리보기."""
-    from . import importers
-
     if args.source not in importers.SOURCE_NAMES:
         print(
             f"--reset 은 소스를 하나 지정해야 합니다 (가능: {', '.join(importers.SOURCE_NAMES)}).\n"
@@ -381,8 +378,6 @@ def _reset_source(args) -> int:
 
 
 def cmd_import(args) -> int:
-    from . import importers
-
     if args.dump:
         return _dump_raw(args)
     if args.reset:
@@ -398,6 +393,7 @@ def cmd_import(args) -> int:
         "files_path": args.path,
         "shared_path": args.shared_file,
         "evernote_path": args.evernote_file,
+        "onenote_path": args.onenote_file,
         "shared_password": shared_password,
         "redmine_kinds": args.redmine_kinds,
         "redmine_projects": args.redmine_projects,
@@ -461,6 +457,7 @@ def cmd_import(args) -> int:
         extra = f' --path "{args.path}"' if args.path else ""
         extra += f' --shared-file "{args.shared_file}"' if args.shared_file else ""
         extra += f' --evernote-file "{args.evernote_file}"' if args.evernote_file else ""
+        extra += f' --onenote-file "{args.onenote_file}"' if args.onenote_file else ""
         print(f"총 {total}건을 가져올 수 있습니다.  "
               f"실행: python -m memoinall import --source {args.source}{extra} --commit")
         return 0
@@ -602,10 +599,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     i = sub.add_parser("import", help="외부 메모 앱·받은 파일에서 가져오기")
     i.add_argument("--source", default="all",
-                   choices=["all", "sticky", "samsung", "redmine", "files", "shared", "evernote"])
+                   choices=["all", *importers.SOURCE_NAMES])
     i.add_argument("--path", help="files 소스의 폴더 경로")
     i.add_argument("--shared-file", help="shared 소스가 읽을 메모 파일(.json)")
     i.add_argument("--evernote-file", help="Evernote에서 내보낸 메모 파일(.enex), 50MB 이하")
+    i.add_argument("--onenote-file", help="OneNote에서 내보낸 PDF 또는 Word(.docx) 파일, 20MB 이하")
     i.add_argument("--tag", help="가져오는 메모에 붙일 태그, 쉼표 구분")
     i.add_argument("--redmine-kinds", help="issues,wiki,documents,news 중 골라서 (기본은 설정값)")
     i.add_argument("--redmine-projects", help="프로젝트 식별자, 쉼표 구분 (비우면 전체)")

@@ -43,7 +43,7 @@ hiddenimports = [
     "memoinall.providers.anthropic_provider",
     "memoinall.providers.openai_compat",
 ]
-datas = [("memoinall/static", "memoinall/static")]
+datas = [("memoinall/static", "memoinall/static"), ("memoinall/importers/read_onenote.ps1", "memoinall/importers")]
 binaries = []
 
 # pywebview 는 파이썬 코드만으로 돌지 않는다. 창을 띄우는 데 필요한

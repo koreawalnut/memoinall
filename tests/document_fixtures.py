@@ -6,6 +6,35 @@ import zipfile
 import zlib
 
 
+def onenote_desktop_records():
+    page = {"id": "page-a", "title": "<span>주간 회의</span>", "name": "주간 회의",
+            "lines": ["진행 상황 #1234<br/>회신 &amp; 검토"], "path": "업무 / 개발 / 회의",
+            "created": "2025-01-02T03:04:05.000Z", "updated": "2025-02-03T04:05:06.000Z"}
+    return [page, {**page, "id": "page-b", "title": "아이디어", "lines": ["둘째 본문"], "path": "개인 / 아이디어"},
+            {**page, "id": "blank", "title": "", "lines": []}, {"notebooks": 2, "locked": 1, "failed": 1}]
+
+
+def onenote_docx(*, paragraph_break=False):
+    split = ('</w:r></w:p><w:p><w:pPr><w:pageBreakBefore/></w:pPr><w:r>'
+             if paragraph_break else '<w:br w:type="page"/>')
+    xml = ('<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
+           '<w:p><w:r><w:t>주간 회의</w:t></w:r></w:p>'
+           f'<w:p><w:r><w:t>진행 상황 #1234</w:t>{split}<w:t>검토할 항목</w:t></w:r></w:p>'
+           '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>회신 요청</w:t></w:r></w:p></w:tc></w:tr></w:tbl>'
+           '</w:body></w:document>')
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml",
+                         '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+                         '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+                         '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>')
+        archive.writestr("_rels/.rels",
+                         '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                         '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>')
+        archive.writestr("word/document.xml", xml)
+    return out.getvalue()
+
+
 def xlsx_bytes():
     from openpyxl import Workbook
 
