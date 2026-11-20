@@ -30,12 +30,13 @@ function refreshGenDay() {
   }
 }
 
-async function startGenerate(ids, instruction) {
+async function startGenerate(ids, instruction, scope = null) {
   if (gen.busy) { toast("진행 중인 정리가 끝난 뒤 다시 선택하세요"); return; }
   gen.busy = true; setGenBusy(true);
   try { await flushGenDraft(); } catch { toast("수정 내용을 보관하지 못했습니다. 다시 시도해 주세요"); return; }
   finally { gen.busy = false; setGenBusy(false); }
-  Object.assign(gen, { instruction, memoIds: ids, scope: null, queries: null, plan: null, output: null, collection: null,
+  ++gen.finderVersion;
+  Object.assign(gen, { instruction, memoIds: ids, scope, queries: null, plan: null, output: null, collection: null,
     review: null, body: "", savedDraft: "", editing: false, initialized: true, error: "", followup: "", oldVersion: null, periodDay: genToday() });
   await goTab("generate");
 }
@@ -78,13 +79,14 @@ function genScopeLabel() {
   const filters = s ? [...(s.tags || []).map((t) => "#" + t), s.person ? "@" + s.person : "",
     relative ? gen.periods[s.period] : "", !relative && s.since ? s.since + "부터" : "",
     !relative && s.until ? s.until + "까지" : ""].filter(Boolean) : [];
-  return [filters.length ? "찾을 범위: " + filters.join(" · ") : "",
+  return [s?.feed_query != null ? (s.feed_query ? `‘${s.feed_query}’ 검색 결과` : "현재 검색 결과") : "",
+    filters.length ? "찾을 범위: " + filters.join(" · ") : "",
     count !== undefined ? `선택한 메모 ${count}건만 사용` : ""].filter(Boolean).join(" — ") || "전체 메모에서 필요한 내용을 찾습니다";
 }
 
-function changeGenScope(scope) {
+function changeGenScope(scope, ids = null) {
   if (gen.busy) return;
-  gen.scope = scope; gen.memoIds = gen.review = null; gen.periodDay = genToday();
+  gen.scope = scope; gen.memoIds = ids; gen.review = null; gen.periodDay = genToday();
   ++gen.finderVersion;
   invalidatePlan(true); renderPlanPanel(); paintGenTags(); paintGenPeriod(); setGenBusy(false);
   genProgress("범위를 바꿨습니다. 메모 고르기로 대상을 확인하거나 바로 정리할 수 있습니다.");
@@ -135,6 +137,7 @@ async function renderGenerate(version = renderVersion) {
       const r = await api(`/api/generate/history/${history.items[0].id}`);
       if (version !== renderVersion) { gen.initialized = false; return; }
       adoptGenResult(r); gen.instruction = r.instruction; gen.format = r.format; gen.scope = r.scope || null;
+      gen.memoIds = r.scope?.feed_query != null ? r.memo_ids : null;
       gen.collection = r.collection || null;
     }
   }
@@ -163,10 +166,10 @@ async function renderGenerate(version = renderVersion) {
         <div class="note" id="genTagMore"></div>
       </details>
       <div class="row" style="margin:10px 0"><label for="genFormat">형식</label><select id="genFormat">${formats.map((f) => `<option value="${f.key}" ${gen.format === f.key ? "selected" : ""}>${esc(f.label)}</option>`).join("")}</select>
-        <span class="spacer"></span><button class="btn" id="genPlan" ${usingCollection ? "hidden" : ""}>메모 고르기</button><button class="btn primary" id="genRun">${llm_ready ? "정리하기" : "요청문 만들기"}</button></div>
+        <span class="spacer"></span><button class="btn" id="genPlan" ${usingCollection ? "hidden" : ""}>메모 고르기</button><button class="btn primary" id="genRun">${llm_ready ? "문서 만들기" : "요청문 만들기"}</button></div>
       <div class="note" id="genScope">${esc(genScopeLabel())}</div>
       <details class="capture-options" style="margin-top:12px" id="genScopeOptions" ${usingCollection ? "hidden" : ""}><summary>찾을 범위 바꾸기</summary>
-        <div class="row" style="margin:10px 0"><button class="btn" id="genAll">전체 메모에서 찾기</button><button class="btn" id="genFiltered">현재 검색 범위로 찾기</button></div>
+        <div class="row" style="margin:10px 0"><button class="btn" id="genAll">전체 메모에서 찾기</button><button class="btn" id="genFiltered">내 메모의 검색 결과 사용</button></div>
         <div class="row" style="margin:10px 0"><label for="genPeriod">기간</label><select id="genPeriod">${genPeriodOptions()}</select></div>
         <div class="row" id="genDates" style="margin:10px 0"><input type="date" id="genSince" aria-label="정리할 작성 시작일" /><span>~</span><input type="date" id="genUntil" aria-label="정리할 작성 종료일" /></div>
         <label for="genBudget" class="status">읽을 분량</label> <select id="genBudget"><option value="6000">기본</option><option value="12000">넉넉히</option><option value="24000">많이</option></select>
@@ -186,9 +189,7 @@ async function renderGenerate(version = renderVersion) {
   $("#genTagSearch").oninput = paintGenTags;
   $("#genTagClear").onclick = () => changeGenScope({ ...gen.scope, tags: [] });
   $("#genAll").onclick = () => changeGenScope(null);
-  $("#genFiltered").onclick = () => {
-    changeGenScope({ tags: [...state.tags], person: state.person, since: state.since, until: state.until });
-  };
+  $("#genFiltered").onclick = useFeedResults;
   $("#genPlan").onclick = planGenerate; $("#genRun").onclick = runGenerate;
   $("#genNew").onclick = () => startGenerate(null, "");
   document.querySelectorAll("[data-gen-starter]").forEach((b) => {
@@ -213,10 +214,17 @@ async function renderGenerate(version = renderVersion) {
 }
 
 function setGenBusy(busy) {
-  const empty = gen.review && !gen.review.selected.size;
+  const empty = gen.review ? !gen.review.selected.size : gen.memoIds?.length === 0;
   document.querySelectorAll("#genInput, #genFormat, #genBudget, #genPlan, #genRun, #genAll, #genFiltered, #genRun2, #genNew, #genEdit, #genDone, #genMemo, #genRefine, #genFollowup, #genOldSelect, #genRestore, #genBody, #genTagSearch, #genTagClear, [data-gen-tag], [data-gen-remove-tag], [data-gen-quick], [data-gen-history], #genPlanOut input, #genPlanOut button")
     .forEach((el) => { el.disabled = busy || (["genRun", "genRun2"].includes(el.id) && empty); });
   document.querySelectorAll("#workflowBar button, #workflowBar select, #genPeriod, #genSince, #genUntil").forEach((el) => { el.disabled = busy; });
+  const fixed = gen.scope?.feed_query != null;
+  if ($("#genPlan") && fixed && !gen.memoIds?.length) $("#genPlan").disabled = true;
+  if ($("#genTagFilter")) $("#genTagFilter").hidden = fixed || !!gen.collection;
+  for (const id of ["genPeriod", "genSince", "genUntil"]) {
+    if ($("#" + id)) $("#" + id).disabled = busy || fixed;
+  }
+  if ($("#genAddPanel")) $("#genAddPanel").hidden = fixed;
   paintWorkflowBar();
   if (!busy) paintGenPicker();
 }
@@ -336,7 +344,7 @@ function renderPlanPanel() {
       <div class="row" style="margin:10px 0"><input id="genFind" type="search" placeholder="찾을 내용을 입력하세요" aria-label="추가할 메모 찾기" style="flex:1" /></div>
       <div id="genFound"></div><div class="row"><button class="btn" id="genFindPrev">이전</button><button class="btn" id="genFindNext">다음</button></div>
     </details>
-    <div class="row" style="margin-top:12px"><span class="spacer"></span><button class="btn primary" id="genRun2">선택한 메모로 정리</button></div>
+    <div class="row" style="margin-top:12px"><span class="spacer"></span><button class="btn primary" id="genRun2">선택한 메모로 ${esc($("#genRun").textContent)}</button></div>
     <details style="margin-top:10px"><summary class="status">AI에 전달할 내용</summary><div id="genPromptChanged" class="note">현재 선택으로 요청문을 다시 만듭니다.</div><pre id="genPromptText" class="pack">${esc(p?.prompt || "")}</pre><button class="btn" id="copyGenPrompt">요청문 복사</button></details>
     </details>`;
   $("#genReferences").ontoggle = (e) => { if (e.target.isConnected) gen.showSources = e.target.open; };
@@ -614,7 +622,8 @@ async function openGenHistory(id) {
     await flushGenDraft();
     const r = await api(`/api/generate/history/${id}`);
     adoptGenResult(r); gen.instruction = r.instruction; gen.format = r.format;
-    gen.memoIds = null; gen.review = gen.plan = gen.queries = null; gen.scope = r.scope || null; gen.followup = "";
+    gen.memoIds = r.scope?.feed_query != null ? r.memo_ids : null;
+    gen.review = gen.plan = gen.queries = null; gen.scope = r.scope || null; gen.followup = "";
     gen.collection = r.collection || null;
     if (state.tab === "generate") await render();
   } catch (e) { genProgress(e.message); }

@@ -171,7 +171,8 @@ def main():
         if "--screenshots" in sys.argv:
             page.screenshot(path=str(artifacts / "todo-ai-mobile.png"), full_page=True)
         assert not errors, errors
-        assert page.locator("#tabs > button").count() == 4
+        expect(page.locator('[data-tab="generate"]')).to_have_text("메모로 문서 만들기")
+        expect(page.locator("#todoAiRun")).to_have_text("할 일·날짜 제안받기")
         print("OK narrow preview; menu positions unchanged; no browser errors")
         browser.close()
 

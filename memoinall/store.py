@@ -43,6 +43,7 @@ def add_memo(
     updated_at: str | None = None,
     external_id: str | None = None,
     enqueue_enrich: bool = True,
+    clear_draft: str | None = None,
 ) -> dict:
     """메모 저장.
 
@@ -63,6 +64,8 @@ def add_memo(
         )
         memo_id = int(cur.lastrowid)
         _index_body(conn, memo_id, body)
+        if clear_draft:
+            conn.execute("DELETE FROM meta WHERE key=?", (clear_draft,))
         if body != original:
             _remember_import_alias(conn, memo_id, created, original, created, body)
     if enqueue_enrich:
@@ -307,8 +310,9 @@ def list_memos(
     since: str | None = None,
     until: str | None = None,
     archived: bool = False,
+    ids_only: bool = False,
 ) -> list[dict]:
-    sql = ["SELECT m.* FROM memos m"]
+    sql = ["SELECT m.id FROM memos m" if ids_only else "SELECT m.* FROM memos m"]
     params: list = []
     # 태그를 여러 개 주면 전부 달린 메모만 — 조건은 좁히라고 있는 것이다.
     for i, name in enumerate(tag_list(tag, tags)):
@@ -329,6 +333,8 @@ def list_memos(
     params.extend([limit, offset])
 
     rows = db.query(" ".join(sql), params)
+    if ids_only:
+        return [dict(row) for row in rows]
     out = []
     for row in rows:
         memo = dict(row)

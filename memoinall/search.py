@@ -13,12 +13,18 @@ import numpy as np
 from . import config, db, embed, store, textutil
 
 
-def _vector_hits(query: str, k: int) -> list[tuple[int, float, str]]:
+def _vector_scores(query: str):
     matrix, meta = store.vector_index()
     if matrix.shape[0] == 0:
-        return []
+        return np.empty(0), meta
     qvec, _ = embed.encode([query], is_query=True)
-    sims = matrix @ qvec[0]
+    return matrix @ qvec[0], meta
+
+
+def _vector_hits(scores, k: int) -> list[tuple[int, float, str]]:
+    sims, meta = scores
+    if not len(sims):
+        return []
     k = min(k, sims.shape[0])
     idx = np.argpartition(-sims, k - 1)[:k]
     idx = idx[np.argsort(-sims[idx])]
@@ -71,17 +77,22 @@ def search(
     since: str | None = None,
     until: str | None = None,
     pool: int = 120,
+    ids_only: bool = False,
+    offset: int = 0,
+    vector_scores=None,
 ) -> list[dict]:
     query = (query or "").strip()
     if not query:
-        memos = store.list_memos(limit=limit, tag=tag, tags=tags, person=person, since=since, until=until)
+        memos = store.list_memos(limit=limit, offset=offset, tag=tag, tags=tags, person=person, since=since, until=until, ids_only=ids_only)
+        if ids_only:
+            return memos
         for m in memos:
             m["score"] = 0.0
             m["snippet"] = textutil.snippet(m["body"], "")
             m["why"] = "최근순"
         return memos
 
-    vec = _vector_hits(query, pool)
+    vec = _vector_hits(vector_scores if vector_scores is not None else _vector_scores(query), pool)
     fts = _fts_hits(query, pool)
 
     # 같은 메모의 청크가 여러 번 뜨면 가장 좋은 것만 남긴다
@@ -105,6 +116,14 @@ def search(
     for memo_id, score in ranked:
         if memo_id not in allowed:
             continue
+        if offset:
+            offset -= 1
+            continue
+        if ids_only:
+            results.append({"id": memo_id})
+            if len(results) >= limit:
+                break
+            continue
         try:
             memo = store.get_memo(memo_id)
         except KeyError:
@@ -119,6 +138,30 @@ def search(
         if len(results) >= limit:
             break
     return results
+
+
+def feed_page(query: str, offset: int, limit: int, **filters) -> list[dict]:
+    return search(query, limit=limit + 1, offset=offset, pool=max(120, offset + limit + 1), **filters)
+
+
+def feed_result_ids(query: str, **filters) -> list[int]:
+    """Follow the same ranked 40-item pages as the feed, encoding the query only once."""
+    if query.strip():
+        ids = {}
+        scores = _vector_scores(query.strip())
+        offset = 0
+        while len(ids) <= 1000:
+            rows = feed_page(query, offset, 40, ids_only=True, vector_scores=scores, **filters)
+            ids.update(dict.fromkeys(row["id"] for row in rows[:40]))
+            if len(rows) <= 40:
+                break
+            offset += 40
+        result = list(ids)
+    else:
+        result = [row["id"] for row in store.list_memos(limit=1001, ids_only=True, **filters)]
+    if len(result) > 1000:
+        raise ValueError("한 번에 1,000건까지 사용할 수 있습니다. 조건을 좁히거나 메모를 직접 선택하세요.")
+    return result
 
 
 def _why(by_vector: bool, by_keyword: bool) -> str:

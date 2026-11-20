@@ -11,7 +11,8 @@ import re
 import shutil
 import sys
 import tempfile
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from unittest.mock import patch
 from pathlib import Path
 
 TMP = tempfile.mkdtemp(prefix="memoinall-ui-")
@@ -27,6 +28,80 @@ from playwright.sync_api import expect, sync_playwright  # noqa: E402
 from memoinall import exchange, store  # noqa: E402
 from memoinall.api import app  # noqa: E402
 from document_fixtures import pdf_bytes, xlsx_bytes  # noqa: E402
+
+
+def check_feed_search_tools(page, client):
+    page.locator("#q").fill("결제")
+    page.locator('#tags [data-v="업무"]').click()
+    expect(page.locator("#view")).to_contain_text("뜻이 비슷한")
+    page.locator("#nextPage").click()
+    expect(page.locator("#view")).to_contain_text("41–80")
+    page.locator("#documentFromSearch").click()
+    expect(page.locator("#genScope")).to_contain_text("‘결제’ 검색 결과")
+    expect(page.locator("#genScope")).to_contain_text("85건만 사용")
+    page.locator("#genPlan").click()
+    expect(page.locator("#genRefCount")).to_have_text("85건")
+    expect(page.locator("#genAddPanel")).not_to_be_visible()
+    expected = set()
+    for offset in (0, 40, 80):
+        response = client.get("/api/search", params={"q": "결제", "tags": "업무", "limit": 40, "offset": offset})
+        expected.update(m["id"] for m in response.json()["items"])
+    assert set(page.evaluate("genPayload().memo_ids")) == expected
+    page.locator("#genPicker [data-pick]").first.uncheck()
+    page.locator("#genRun").click()
+    page.wait_for_function("!gen.busy && gen.plan?.scope?.feed_query === '결제'")
+    assert len(page.evaluate("gen.plan.memo_ids")) == 84
+    page.locator('[data-tab="feed"]').click()
+    page.locator('#people [data-v="담당A"]').click()
+    page.locator("#toggleFilters").click()
+    page.locator("#filterSince").fill("2026-02-01")
+    page.locator("#filterUntil").fill("2026-02-28")
+    page.locator("#saveSearch").click()
+    page.locator("#presetName").fill("2월 결제 점검")
+    page.locator("#saveSearchForm [type=submit]").click()
+    expect(page.locator("#saveSearchDialog")).not_to_be_visible()
+    page.locator("#saveSearch").click()
+    page.locator("#presetName").fill("이번 주 결제")
+    page.locator("#presetPeriod").select_option("this_week")
+    page.locator("#saveSearchForm [type=submit]").click()
+    expect(page.locator("#saveSearchDialog")).not_to_be_visible()
+    page.reload()
+    page.locator("#savedSearches > summary").click()
+    page.get_by_role("button", name="2월 결제 점검", exact=True).click()
+    expect(page.locator("#q")).to_have_value("결제")
+    for token in ("#업무", "@담당A", "2026-02-01", "2026-02-28"):
+        expect(page.locator("#activeFilters")).to_contain_text(token)
+    page.locator('[data-tab="generate"]').click()
+    page.locator("#genScopeOptions > summary").click()
+    page.locator("#genFiltered").click()
+    expect(page.locator("#genScope")).to_contain_text("14건만 사용")
+    expect(page.locator("#genScope")).to_contain_text("‘결제’")
+    page.locator('[data-tab="feed"]').click()
+    for monday in (date(2026, 2, 2), date(2026, 2, 9)):
+        with patch("memoinall.workflows.today", return_value=monday):
+            page.locator("#savedSearches > summary").click()
+            page.get_by_role("button", name="이번 주 결제", exact=True).click()
+            expect(page.locator("#activeFilters")).to_contain_text(monday.isoformat())
+    page.locator("#savedSearches > summary").click()
+    page.once("dialog", lambda d: d.accept())
+    page.get_by_role("button", name="이번 주 결제 저장된 검색 삭제").click()
+    expect(page.get_by_role("button", name="이번 주 결제", exact=True)).to_have_count(0)
+    assert client.post("/api/saved-searches", json={"name":"2월 결제 점검", "q":"다른 검색"}).status_code == 409
+    assert client.post("/api/generate/plan", json={"instruction":"정리", "feed_query":"결제"}).status_code == 400
+    if not page.locator("#filterSince").is_visible():
+        page.locator("#toggleFilters").click()
+    page.locator("#filterSince").fill("2040-01-01")
+    page.locator("#filterUntil").fill("2040-01-31")
+    expect(page.locator("#view")).to_contain_text("조건에 맞는 메모가 없습니다")
+    page.locator('[data-tab="generate"]').click()
+    page.locator("#genScopeOptions > summary").click()
+    page.locator("#genFiltered").click()
+    expect(page.locator("#genScope")).to_contain_text("0건만 사용")
+    expect(page.locator("#genRun")).to_be_disabled()
+    expect(page.locator("#genProgress")).to_contain_text("메모가 없습니다")
+    page.reload()
+    expect(page.locator(".card[data-id]")).to_have_count(40)
+    print("OK paginated feed results stay fixed through AI selection; named and relative searches survive reload")
 
 
 def main():
@@ -64,7 +139,7 @@ def main():
         expect(page.locator("#capture")).to_be_enabled()
         expect(page.locator(".card[data-id]")).to_have_count(40)
         expect(page.locator("#tabs > button")).to_have_count(5)
-        expect(page.locator("#tabs > button")).to_have_text(["내 메모", "일정", "AI로 정리", "가져오기·공유", "설정"])
+        expect(page.locator("#tabs > button")).to_have_text(["내 메모", "일정", "메모로 문서 만들기", "가져오기·공유", "설정"])
         # 설정은 '더 보기' 안이 아니라 가져오기·공유 바로 옆에 있다. '더 보기'는 맨 오른쪽.
         expect(page.locator('[data-tab="settings"]')).to_be_visible()
         assert page.evaluate("document.querySelector('[data-tab=\"settings\"]').previousElementSibling.dataset.tab") == "import"
@@ -77,6 +152,7 @@ def main():
         expect(page.locator("#captureTags")).to_be_visible()
         expect(page.locator("#captureTags")).not_to_have_attribute("open", "")
         print("OK first screen shows four primary menus with settings next to 가져오기·공유 and hides optional tools")
+        check_feed_search_tools(page, client)
         # 보조 메뉴는 마우스와 키보드로 열 수 있고 실제 화면에 연결돼야 한다.
         page.locator("#moreMenu > summary").focus()
         page.keyboard.press("Enter")

@@ -469,7 +469,7 @@ function paintCollectResult() {
         <span class="spacer"></span>
         ${m.versions.length > 1 ? `<label for="colVersion" class="status">취합 버전</label><select id="colVersion">${m.versions.map((x) => `<option value="${x.version}" ${x.version === v.version ? "selected" : ""}>${x.version}번째 · ${esc(fmt(x.created_at))}${x.version === m.version ? " (최신)" : ""}</option>`).join("")}</select>` : ""}</div>
       <div class="note">${s.files}개 파일 · ${colNum(s.rows)}행${head ? ` · ${esc(head.field)} 합계 ${colNum(head.sum)}` : ""} · ${esc(fmt(s.created_at))} 취합${v.version !== s.current_version ? " · <b>이전 버전입니다</b>" : ""}</div>
-      <div class="row" style="margin-top:12px"><button class="btn primary" id="colAi">이 자료를 AI로 정리</button><button class="btn" id="colExport">엑셀로 저장</button>
+      <div class="row" style="margin-top:12px"><button class="btn primary" id="colAi">이 자료로 문서 만들기</button><button class="btn" id="colExport">엑셀로 저장</button>
         ${s.memo_id ? '<button class="btn ghost" id="colMemo">대표 메모 열기</button>' : ""}</div>
       ${s.issues.length ? `<div class="col-issues"><b>확인 사항</b><ul>${s.issues.map((i) => `<li class="${i.level === "warn" ? "col-warn-text" : ""}">${esc(i.text)}</li>`).join("")}</ul></div>` : ""}
       <div class="row" style="margin:16px 0 8px"><b>${v.excluded ? "취합에서 뺀 행" : "합쳐진 표"}</b>

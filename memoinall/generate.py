@@ -287,6 +287,7 @@ def build_pack(
     full_body: bool = True,
     memo_ids: list[int] | None = None,
     source_revisions: dict[str, str] | None = None,
+    feed_query: str | None = None,
     period: str | None = None,
     collection: dict | None = None,
 ) -> dict:
@@ -299,6 +300,8 @@ def build_pack(
 
         since, until = period_bounds(period, since, until)
     required_tags = store.tag_list(tag, tags)
+    if feed_query is not None and (not isinstance(feed_query, str) or not memo_ids):
+        raise ValueError("검색 결과에서 사용할 메모를 다시 선택하세요.")
     if memo_ids is not None:
         if not memo_ids:
             raise ValueError("근거로 쓸 메모를 하나 이상 선택하세요.")
@@ -313,7 +316,7 @@ def build_pack(
         # 조용히 일부만 보내지 않고, AI 호출 전에 다시 확인하도록 한다.
         for hit in hits:
             facets = hit.get("facets", {})
-            if (not set(required_tags).issubset(facets.get("tag", []))
+            if ((feed_query is not None and hit.get("archived")) or not set(required_tags).issubset(facets.get("tag", []))
                     or (person and person not in facets.get("person", []))
                     or (since and hit["created_at"] < since)
                     or (until and hit["created_at"] > (until + "T23:59:59" if len(until) == 10 else until))):
@@ -371,6 +374,7 @@ def build_pack(
         "topic": derived.get("topic", ""),
         "memo_ids": list(dict.fromkeys(memo_ids)) if memo_ids is not None else None,
         "scope": {"tags": required_tags, "person": person, "since": since, "until": until,
+                  **({"feed_query": feed_query} if feed_query is not None else {}),
                   **({"period": period} if period is not None else {})},
         "budget_tokens": budget_tokens,
         "used_tokens": used,

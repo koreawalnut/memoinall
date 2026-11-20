@@ -169,6 +169,12 @@ CREATE TABLE IF NOT EXISTS workflows (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS saved_searches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    filters_json TEXT NOT NULL
+);
+
 -- 엑셀 폴더 취합. 확정한 표만 보관하고 원본 파일은 복제하지 않는다.
 -- 다시 취합하면 새 버전을 만들고, 이전 AI 결과는 당시 버전을 계속 가리킨다.
 CREATE TABLE IF NOT EXISTS collections (

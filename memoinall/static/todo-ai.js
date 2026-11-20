@@ -4,9 +4,9 @@ const todoAiFields = { title: "할 일", status: "상태", due: "마감일", rev
 
 function todoAiToolbar(info) {
   return `<div class="todo-ai-tools row">
-    <label for="todoAiDays">AI로 정리할 메모</label>
+    <label for="todoAiDays">할 일·날짜를 찾을 기간</label>
     <select id="todoAiDays" ${todoAi.busy ? "disabled" : ""}>${[7, 30, 90].map((days) => `<option value="${days}" ${todoAi.days === days ? "selected" : ""}>최근 ${days}일</option>`).join("")}</select>
-    <button type="button" class="btn primary" id="todoAiRun" ${!info?.ready || todoAi.busy ? "disabled" : ""}>${todoAi.busy ? "처리 중…" : "AI로 정리"}</button>
+    <button type="button" class="btn primary" id="todoAiRun" ${!info?.ready || todoAi.busy ? "disabled" : ""}>${todoAi.busy ? "제안을 찾는 중…" : "할 일·날짜 제안받기"}</button>
     ${!info?.ready ? '<button type="button" class="btn ghost" id="todoAiSettings">AI 설정</button>' : ""}
     <p class="todo-help todo-ai-description">${info?.ready ? `${esc(info.provider)} · ${esc(info.model)}. 버튼을 누르면 선택한 기간의 최신 메모 최대 30건을 보내 정리합니다. 결과를 확인한 뒤 적용할 수 있습니다.` : esc(info?.reason || "AI 설정을 확인해 주세요.")}</p>
   </div>`;

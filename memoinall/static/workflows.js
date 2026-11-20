@@ -72,12 +72,12 @@ async function useWorkflow(id = workflowState.selected) {
   gen.busy = true; setGenBusy(true);
   try {
     const w = await api(`/api/generate/workflows/${id}`);
-    if (gen.collection) {
+    if (gen.collection || gen.scope?.feed_query != null) {
       // 취합 자료로 정리하는 중이면 자료 연결은 그대로 두고 요청문·형식만 바꾼다.
       gen.instruction = w.instruction; gen.format = w.format; gen.budget = w.budget;
       $("#genInput").value = w.instruction; $("#genFormat").value = w.format; $("#genBudget").value = String(w.budget);
       invalidatePlan(true);
-      genProgress(`‘${w.name}’ 요청을 넣었습니다. 취합 자료에는 저장한 태그·기간 조건을 쓰지 않습니다.`);
+      genProgress(`‘${w.name}’ 요청을 넣었습니다. ${gen.collection ? "취합 자료에는 저장한 태그·기간 조건을 쓰지 않습니다." : "선택한 검색 결과를 그대로 사용합니다."}`);
       return;
     }
     await flushGenDraft();
@@ -89,7 +89,7 @@ async function useWorkflow(id = workflowState.selected) {
     await render();
     const missing = w.tags.filter((t) => !gen.tagChoices.some((x) => x.name === t));
     genProgress(missing.length ? `이 PC에 없는 태그: ${missing.map((t) => "#" + t).join(", ")} · 필요한 태그로 바꿔 주세요.` :
-      `‘${w.name}’ 설정을 불러왔습니다. 정리하기를 누르면 실행합니다.`);
+      `‘${w.name}’ 설정을 불러왔습니다. ${$("#genRun").textContent}를 눌러 실행하세요.`);
   } catch (e) { genProgress(e.message); }
   finally { gen.busy = false; setGenBusy(false); }
 }

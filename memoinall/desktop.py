@@ -196,6 +196,10 @@ def run() -> int:
         )
         log.info("create_window OK")
         window.events.closed += closed.set
+        if sys.platform == "win32":
+            from .quick_capture import QuickCapture
+
+            QuickCapture(window).install()
         _install_downloader(window)
         log.info("webview.start() 진입 — 창이 닫힐 때까지 블로킹")
         # GUI 는 메인 스레드에서 바로 시작하고, 서버 확인만 별도 스레드에서 한다.

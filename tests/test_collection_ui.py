@@ -82,7 +82,7 @@ def main():
         page.route("http://127.0.0.1:8787/**", serve)
         page.goto("http://127.0.0.1:8787/")
         expect(page.locator("#capture")).to_be_enabled()
-        expect(page.locator("#tabs > button")).to_have_count(3)
+        expect(page.locator('#tabs > button[data-tab="collect"]')).to_have_count(0)
         page.locator("#moreMenu > summary").click()
         expect(page.locator('.more-items [data-tab="collect"]')).to_have_count(0)
         page.keyboard.press("Escape")
@@ -143,7 +143,7 @@ def main():
         assert saved["취합표"].max_row == 8, saved["취합표"].max_row
         print("OK result downloads as an Excel workbook")
 
-        page.locator("#colAi").click()
+        page.get_by_role("button", name="이 자료로 문서 만들기", exact=True).click()
         expect(page.locator("#genScope")).to_contain_text("사용할 자료: 11월 신청 내역 · 파일 3개 · 7행", timeout=10000)
         expect(page.locator("[data-gen-starter]")).to_have_count(3)
         expect(page.locator("#genTagFilter")).to_be_hidden()
@@ -168,7 +168,7 @@ def main():
         expect(card).to_contain_text("엑셀 취합: 11월 신청 내역")
         card.click()
         expect(page.locator("#dCollection")).to_be_visible()
-        expect(page.locator("#dPack")).to_have_text("이 자료를 AI로 정리")
+        expect(page.locator("#dPack")).to_have_text("이 자료로 문서 만들기")
         page.locator("#dCollection").click()
         expect(page.locator(".col-main tbody tr")).to_have_count(7, timeout=10000)
         print("OK representative memo opens the collection")

@@ -51,7 +51,7 @@ def main():
         page.route("http://127.0.0.1:8787/**", serve)
         page.goto("http://127.0.0.1:8787/")
         expect(page.locator("#capture")).to_be_enabled()
-        expect(page.locator("#tabs > button")).to_have_text(["내 메모", "일정", "AI로 정리", "가져오기·공유"])
+        expect(page.locator("#tabs > button")).to_have_text(["내 메모", "일정", "메모로 문서 만들기", "가져오기·공유", "설정"])
         expect(page.locator('[data-tab="todos"]')).to_be_visible()
         page.locator('[data-tab="todos"]').click()
         expect(page.locator('[data-todo-layout="calendar"]')).to_have_attribute("aria-pressed", "true")

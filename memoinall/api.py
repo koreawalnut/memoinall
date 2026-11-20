@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import sqlite3
 import time
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -15,6 +16,7 @@ from urllib.parse import quote, urlsplit
 from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from . import (
@@ -200,6 +202,61 @@ def remove_memo(memo_id: int):
 # --------------------------------------------------------------------------- 검색/컨텍스트
 
 
+class SavedSearch(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    q: str = ""
+    tags: list[str] = Field(default_factory=list)
+    person: str | None = None
+    period: str = "all"
+    since: str | None = None
+    until: str | None = None
+
+
+@app.get("/api/saved-searches")
+def saved_searches():
+    return {"items": [dict(row) for row in db.query("SELECT id, name FROM saved_searches ORDER BY id")]}
+
+
+@app.post("/api/saved-searches")
+def save_search(preset: SavedSearch):
+    name = preset.name.strip()
+    if not name:
+        raise HTTPException(400, "검색 이름을 입력하세요.")
+    try:
+        since, until = workflows.period_bounds(preset.period, preset.since, preset.until)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    filters = {"q": preset.q.strip(), "tags": store.tag_list(tags=preset.tags),
+               "person": (preset.person or "").strip() or None, "period": preset.period,
+               "since": since if preset.period == "custom" else None,
+               "until": until if preset.period == "custom" else None}
+    if not (filters["q"] or filters["tags"] or filters["person"] or since or until):
+        raise HTTPException(400, "검색어나 태그, 사람, 기간 중 하나를 선택하세요.")
+    try:
+        with db.connect() as conn:
+            row_id = conn.execute("INSERT INTO saved_searches(name, filters_json) VALUES (?, ?)",
+                                  (name, json.dumps(filters, ensure_ascii=False))).lastrowid
+    except sqlite3.IntegrityError:
+        raise HTTPException(409, "같은 이름의 검색이 있습니다. 다른 이름을 입력하세요.")
+    return {"id": row_id, "name": name}
+
+
+@app.get("/api/saved-searches/{search_id}")
+def open_saved_search(search_id: int):
+    row = db.one("SELECT filters_json FROM saved_searches WHERE id=?", (search_id,))
+    if not row:
+        raise HTTPException(404, "저장된 검색을 찾을 수 없습니다.")
+    filters = json.loads(row["filters_json"])
+    filters["since"], filters["until"] = workflows.period_bounds(filters["period"], filters["since"], filters["until"])
+    return filters
+
+
+@app.delete("/api/saved-searches/{search_id}")
+def delete_saved_search(search_id: int):
+    db.execute("DELETE FROM saved_searches WHERE id=?", (search_id,))
+    return {"ok": True}
+
+
 @app.get("/api/search")
 def do_search(
     q: str = Query(""),
@@ -211,12 +268,20 @@ def do_search(
     since: str | None = None,
     until: str | None = None,
 ):
-    end = offset + limit
-    hits = search.search(q, limit=end + 1, pool=max(120, end + 1),
-                         tag=tag, tags=_csv(tag_csv), person=person, since=since, until=until)
-    items = hits[offset:end]
+    hits = search.feed_page(q, offset, limit, tag=tag, tags=_csv(tag_csv), person=person, since=since, until=until)
+    items = hits[:limit]
     return {"query": q, "count": len(items), "items": items,
-            "has_more": len(hits) > end, "next_offset": offset + len(items)}
+            "has_more": len(hits) > limit, "next_offset": offset + len(items)}
+
+
+@app.get("/api/search/result-ids")
+def search_result_ids(q: str = "", tag_csv: str | None = Query(None, alias="tags"),
+                      person: str | None = None, since: str | None = None, until: str | None = None):
+    try:
+        ids = search.feed_result_ids(q, tags=_csv(tag_csv), person=person, since=since, until=until)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"ids": ids}
 
 
 @app.get("/api/context")
@@ -1110,6 +1175,7 @@ def _generate_request(payload: dict, instruction: str, *, run: bool = False):
         until=payload.get("until"),
         memo_ids=_memo_ids(payload.get("memo_ids")),
         source_revisions=payload.get("source_revisions"),
+        feed_query=payload.get("feed_query"),
         period=payload.get("period"),
         collection=payload.get("collection"),
     )

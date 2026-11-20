@@ -121,7 +121,7 @@
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   .feed-tools .row { margin-bottom: 8px; }
   .selection-bar { padding: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
-  .feed-heading { display: flex; align-items: center; gap: 8px; margin: 18px 0 8px; }
+  .feed-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 18px 0 8px; }
   .feed-heading h3 { margin: 0; font-size: 15px; font-weight: 600; }
   .filter-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
   .filter-panel .row:last-child { margin-bottom: 0; }
@@ -417,6 +417,7 @@
       </details>
       <div class="capture-bar">
         <span class="hint" id="captureHint">Ctrl+Enter 저장 · 형식은 신경 쓰지 마세요</span>
+        <button class="btn ghost" type="button" id="quickCapture" hidden>빠른 메모</button>
         <button class="btn" type="button" id="scheduleCapture" aria-haspopup="dialog" disabled>일정으로 등록</button>
         <button class="btn ghost mic" id="mic" type="button" disabled data-state="idle"
           aria-label="음성으로 입력" title="음성으로 입력 — 누르고 말한 뒤 다시 누르세요"></button>
@@ -430,6 +431,7 @@
       <button class="btn ghost" id="clear" hidden>초기화</button>
     </div>
     <div class="feed-tools">
+      <details id="savedSearches" class="capture-options" hidden><summary>저장된 검색</summary><div id="savedSearchList"></div></details>
       <div id="feedFilters" class="filter-panel" hidden>
         <div class="row">
           <label for="filterSince">작성일</label><input id="filterSince" type="date" aria-label="작성 시작일" />
@@ -440,7 +442,9 @@
       </div>
       <div id="activeFilters" class="tagrow" hidden></div>
       <div class="feed-heading"><h3>저장한 메모</h3><span class="spacer"></span>
-        <button class="btn ghost" id="toggleSelection" aria-pressed="false">메모 선택</button>
+        <button class="btn ghost" id="saveSearch" hidden>이 검색 저장</button>
+        <button class="btn" id="documentFromSearch" hidden>이 결과로 문서 만들기</button>
+        <button class="btn ghost" id="toggleSelection" aria-pressed="false">선택해서 정리·공유</button>
       </div>
       <div id="selectionBar"></div>
     </div>
@@ -449,6 +453,19 @@
   </main>
 </div>
 
+<dialog id="saveSearchDialog" aria-labelledby="saveSearchTitle">
+  <form id="saveSearchForm"><div class="dlg-h"><strong id="saveSearchTitle">검색 조건 저장</strong></div>
+    <div class="dlg-b"><p id="presetSummary" class="status"></p>
+      <label class="field">검색 이름<input id="presetName" maxlength="100" required autofocus /></label>
+      <label class="field">다시 열 때 적용할 기간<select id="presetPeriod">
+        <option value="all">전체 기간</option><option value="custom">현재 지정한 날짜</option>
+        <option value="this_week">이번 주</option><option value="last_week">지난주</option>
+        <option value="this_month">이번 달</option><option value="last_30_days">최근 30일</option>
+      </select></label><div id="presetError" role="alert"></div>
+    </div><div class="dlg-f"><button class="btn" id="cancelPreset" type="button">닫기</button>
+      <button class="btn primary" type="submit">검색 저장</button></div>
+  </form>
+</dialog>
 <dialog id="detail">
   <div class="dlg-h">
     <span class="card-title" id="dTitle"></span>
@@ -491,6 +508,7 @@
 <script src="/static/qrshare.js"></script>
 <script src="/static/stt-live.js"></script>
 <script src="/static/generate.js"></script>
+<script src="/static/search-tools.js"></script>
 <script src="/static/workflows.js"></script>
 <script src="/static/collections.js"></script>
 <script src="/static/todos.js"></script>
@@ -1018,9 +1036,7 @@ $("#q").addEventListener("input", (e) => {
   searchTimer = setTimeout(render, 220);
 });
 $("#clear").onclick = () => {
-  state.q = ""; state.tags = []; state.person = null; state.since = state.until = "";
-  $("#q").value = $("#filterSince").value = $("#filterUntil").value = "";
-  resetFeed(); loadSidebar();
+  applyFeedSearch({});
 };
 function resetFeed() {
   clearTimeout(searchTimer);
@@ -1034,7 +1050,7 @@ $("#toggleSelection").onclick = () => {
   paintFeedTools();
 };
 for (const [id, key] of [["filterSince", "since"], ["filterUntil", "until"]]) {
-  $("#" + id).onchange = (e) => { state[key] = e.target.value; resetFeed(); };
+  $("#" + id).onchange = (e) => { state[key] = e.target.value; state.savedPeriod = null; resetFeed(); };
 }
 
 // 검색으로 좁힌 그대로 내보내기. 조건을 주고받기 화면에 옮겨 담고 목록부터 보여준다 —
@@ -1062,7 +1078,7 @@ const TABS = [
     title: "태그별 메모", lead: "설정에서 정한 내 태그마다 메모를 모아 봅니다. 순서·색은 설정의 내 태그를 따릅니다." },
   { id: "rollup", icon: "📅", name: "기간 요약", sub: "일·주·월",
     title: "기간 요약", lead: "고른 기간의 메모에서 결정·할 일·열린 질문을 모아 보여줍니다." },
-  { id: "generate", primary: true, icon: "✨", name: "AI로 정리",
+  { id: "generate", primary: true, icon: "✨", name: "메모로 문서 만들기",
     title: "메모로 문서 만들기", lead: "원하는 내용을 적고, 필요한 메모로 정리해 보세요. 만든 내용은 다시 고쳐 쓸 수 있습니다." },
   { id: "import", primary: true, icon: "📥", name: "가져오기·공유",
     title: "메모 가져오기·공유", lead: "다른 앱에 적은 메모를 가져오거나, 필요한 기록을 동료에게 전달하세요." },
@@ -1323,6 +1339,10 @@ function paintFeedTools() {
   $("#toggleFilters").setAttribute("aria-expanded", String(state.filtersOpen));
   $("#toggleFilters").textContent = "상세 검색" + (filters.length ? ` (${filters.length})` : "");
   $("#clear").hidden = !state.q.trim() && !filters.length;
+  const narrowed = !$("#clear").hidden;
+  $("#saveSearch").hidden = !narrowed && !state.filtersOpen;
+  $("#documentFromSearch").hidden = !narrowed || state.selecting;
+  $("#documentFromSearch").disabled = !state.feedItems.length || gen.busy;
   $("#activeFilters").hidden = !filters.length;
   $("#activeFilters").innerHTML = filters.map((f, i) =>
     `<button class="chip on" data-removefilter="${i}" aria-label="${esc(f.label)} 조건 해제">${esc(f.label)} ×</button>`).join("");
@@ -1333,6 +1353,7 @@ function paintFeedTools() {
       else if (f.key === "person") state.person = null;
       else {
         state[f.key] = "";
+        state.savedPeriod = null;
         $(f.key === "since" ? "#filterSince" : "#filterUntil").value = "";
       }
       resetFeed(); loadSidebar();
@@ -1340,7 +1361,7 @@ function paintFeedTools() {
   });
   const n = state.selected.size;
   $("#selectionBar").hidden = !state.selecting;
-  $("#toggleSelection").textContent = state.selecting ? "선택 마치기" : "메모 선택";
+  $("#toggleSelection").textContent = state.selecting ? "선택 마치기" : "선택해서 정리·공유";
   $("#toggleSelection").disabled = !state.feedItems.length && !state.selecting;
   $("#toggleSelection").setAttribute("aria-pressed", String(state.selecting));
   document.querySelectorAll("[data-select]").forEach((c) => {
@@ -1352,7 +1373,7 @@ function paintFeedTools() {
     <span class="status">${n ? `${n}건 선택 · 다른 페이지의 선택 포함` : "활용할 메모를 체크하세요"}</span>
     <span class="spacer"></span>
     <button class="btn ghost" id="clearSelection" ${n ? "" : "hidden"}>선택 해제</button>
-    <button class="btn" id="generateSelection" ${n ? "" : "hidden"}>AI로 정리</button>
+    <button class="btn" id="generateSelection" ${n ? "" : "hidden"}>선택한 메모로 문서 만들기</button>
     <button class="btn primary" id="exportSelection" ${n ? "" : "hidden"}>공유·인수인계</button>
   </div>`;
   $("#selectPage").onclick = () => {
@@ -1365,7 +1386,8 @@ function paintFeedTools() {
     document.querySelectorAll("[data-select]").forEach((c) => { c.checked = false; });
     paintFeedTools();
   };
-  $("#generateSelection").onclick = () => startGenerate([...state.selected.keys()], "선택한 메모를 바탕으로 업무 내용을 정리해줘");
+  $("#generateSelection").onclick = () => startGenerate([...state.selected.keys()], "선택한 메모를 바탕으로 업무 내용을 정리해줘",
+    narrowed ? feedDocumentScope() : null);
   $("#exportSelection").onclick = () => prepareExport(true);
 }
 
@@ -1432,7 +1454,7 @@ async function renderTagBoard(version = renderVersion) {
         ${g.memos.length ? memoList(g.memos) : '<div class="status">이 태그가 달린 메모가 아직 없습니다.</div>'}
         ${g.count ? `<div class="row" style="margin:8px 0 0;gap:6px">
           <button class="btn ghost" type="button" data-tb-all="${esc(g.name)}">${g.count > g.memos.length ? `${g.count}건 모두 보기` : "목록에서 보기"}</button>
-          <button class="btn ghost" type="button" data-tb-ai="${esc(g.name)}">이 태그로 AI 정리</button></div>` : ""}
+          <button class="btn ghost" type="button" data-tb-ai="${esc(g.name)}">이 태그로 문서 만들기</button></div>` : ""}
       </div>`).join("");
     if (d.untagged.count) {
       html += `<div class="cluster">
@@ -1448,9 +1470,7 @@ async function renderTagBoard(version = renderVersion) {
   });
   $("#view").querySelectorAll("[data-tb-all]").forEach((b) => {
     b.onclick = () => {
-      Object.assign(state, { q: "", tags: [b.dataset.tbAll], person: null, since: "", until: "", offset: 0 });
-      loadSidebar();
-      goTab("feed");
+      applyFeedSearch({ tags: [b.dataset.tbAll] });
     };
   });
   $("#view").querySelectorAll("[data-tb-ai]").forEach((b) => {
@@ -1516,9 +1536,7 @@ async function renderRollup(version = renderVersion) {
   // 이 기간·이 태그의 메모 목록으로
   document.querySelectorAll("[data-rollup-tag]").forEach((b) => {
     b.onclick = () => {
-      Object.assign(state, { q: "", tags: [b.dataset.rollupTag], since: d.start, until: d.end, offset: 0 });
-      loadSidebar();
-      goTab("feed");
+      applyFeedSearch({ tags: [b.dataset.rollupTag], since: d.start, until: d.end });
     };
   });
   if ($("#rollupTagSettings")) $("#rollupTagSettings").onclick = openTagSettings;
@@ -2163,7 +2181,7 @@ function paintDocumentResult() {
   const target = $("#documentResult"), r = docImport.result;
   if (!target || !r) return;
   target.innerHTML = `<div class="status">${r.imported}개 메모를 저장했습니다${r.skipped_duplicate ? ` · 이미 저장된 내용 ${r.skipped_duplicate}개는 건너뛰었습니다` : ""}. 검색과 AI 활용이 가능합니다.</div>
-    <div class="row" style="margin-top:8px"><button class="btn" id="documentGenerate">이 자료를 AI로 정리</button></div>
+    <div class="row" style="margin-top:8px"><button class="btn" id="documentGenerate">이 자료로 문서 만들기</button></div>
     <details><summary class="status">저장한 메모 확인</summary>${r.memos.map((m) =>
       `<button class="btn ghost" data-document-memo="${m.id}" style="display:block;text-align:left;white-space:normal">${esc(m.title)}</button>`).join("")}</details>`;
   $("#documentGenerate").onclick = () => startGenerate(r.memos.map((m) => m.id), "가져온 문서를 바탕으로 핵심 내용과 할 일을 정리해줘");
@@ -3370,7 +3388,7 @@ async function openMemo(id, hit = null) {
   const collection = m.source === "collection" && /^collection:(\d+)$/.exec(m.external_id || "");
   $("#dCollection").hidden = !collection;
   $("#dCollection").dataset.id = collection ? collection[1] : "";
-  $("#dPack").textContent = collection ? "이 자료를 AI로 정리" : "이 메모로 문서 만들기";
+  $("#dPack").textContent = collection ? "이 자료로 문서 만들기" : "이 메모로 문서 만들기";
   if (!$("#detail").open) $("#detail").showModal();
   // 창이 열린 뒤라야 위치를 잴 수 있다 — 닫혀 있으면 높이가 전부 0 이라 안 움직인다.
   paintDoc(m, hit);
@@ -3436,7 +3454,27 @@ window.addEventListener("beforeunload", (e) => {
   }
 });
 
+async function bindQuickCapture() {
+  const bridge = window.pywebview?.api;
+  if (!bridge?.quick_capture_status) return;
+  const button = $("#quickCapture");
+  try {
+    const {shortcut} = await bridge.quick_capture_status();
+    button.textContent = shortcut ? "빠른 메모 · " + shortcut : "빠른 메모";
+    button.title = shortcut ? "다른 앱에서도 " + shortcut + "로 빠른 메모 열기" : "전역 단축키를 등록할 수 없습니다. 여기를 눌러 빠른 메모를 여세요.";
+    button.onclick = () => bridge.open_quick_capture().catch((error) => toast(error.message));
+    button.hidden = false;
+  } catch (error) { toast("빠른 메모를 준비하지 못했습니다"); }
+}
+window.addEventListener("pywebviewready", bindQuickCapture);
+bindQuickCapture();
+window.addEventListener("quick-memo-saved", () => {
+  if (state.tab === "feed") render();
+  loadSidebar(); loadTags();
+});
+
 renderTabs();
+bindSearchTools();
 loadSidebar().catch((e) => toast("상태를 불러오지 못했습니다: " + e.message));
 loadTags();
 render();
