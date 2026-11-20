@@ -12,7 +12,7 @@ import threading
 from datetime import datetime
 
 from . import config, db, embed, extract, settings, textutil, todos
-from .source_tags import SOURCE_TAGS, append_source_tag
+from .source_tags import IMPORT_SOURCES, SOURCE_TAGS, append_source_tag
 
 log = logging.getLogger(__name__)
 
@@ -135,8 +135,9 @@ def _index_body(conn, memo_id: int, body: str) -> None:
     conn.execute("INSERT INTO memo_fts(rowid, grams, raw) VALUES(?,?,?)",
                  (memo_id, textutil.ngram_index_text(body), textutil.normalize(body).lower()))
     conn.execute("DELETE FROM facets WHERE memo_id=? AND kind='tag'", (memo_id,))
+    source = conn.execute("SELECT source FROM memos WHERE id=?", (memo_id,)).fetchone()["source"]
     conn.executemany("INSERT OR IGNORE INTO facets(memo_id,kind,value) VALUES(?,'tag',?)",
-                     [(memo_id, tag) for tag in extract.TAG_RE.findall(body)])
+                     [(memo_id, tag) for tag in extract.tag_names(body, imported=source in IMPORT_SOURCES)])
 
 
 def _remember_import_alias(conn, memo_id, old_created, old_body, created, body) -> None:
@@ -277,6 +278,8 @@ def get_memo(memo_id: int, *, with_facets: bool = True) -> dict:
         raise KeyError(f"메모 {memo_id} 없음")
     memo = dict(row)
     if with_facets:
+        if memo["source"] in IMPORT_SOURCES:
+            memo["tag_reference_pattern"] = extract.IMPORT_REFERENCE.pattern
         memo["facets"] = facets_of(memo_id)
         memo["todos"] = [todos.public(dict(r)) for r in db.query(
             "SELECT * FROM todos WHERE memo_id=? AND active=1 AND status!='dismissed' ORDER BY id", (memo_id,))]
@@ -400,7 +403,7 @@ def enrich(memo_id: int) -> bool:
 
     pieces = textutil.chunk(body, config.CHUNK_TARGET, config.CHUNK_MAX)
     vectors, model_name = embed.encode(pieces)
-    facets = extract.extract(body, created)
+    facets = extract.extract(body, created, imported=row["source"] in IMPORT_SOURCES)
 
     conn = db.connect()
     with conn:  # 예외 시 자동 롤백

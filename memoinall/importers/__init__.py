@@ -19,7 +19,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from .. import store
+from .. import extract, store
 from ..source_tags import append_source_tag
 
 
@@ -239,13 +239,16 @@ def run_import(
         want = list(note.tags) + list(extra_tags or [])
         tagged = body
         if want:
-            existing = {t.lower() for t in re.findall(r"#([0-9A-Za-z가-힣_/-]+)", body)}
-            new_tags: list[str] = []
+            existing = {t.casefold() for t in extract.tag_names(body, imported=True)}
+            new_tags, explicit = [], []
             for t in want:
-                if t.lower() not in existing and t.lower() not in {x.lower() for x in new_tags}:
-                    new_tags.append(t)
+                if t.casefold() not in existing:
+                    (explicit if extract.IMPORT_REFERENCE.fullmatch(t) else new_tags).append("#" + t)
+                    existing.add(t.casefold())
             if new_tags:
-                tagged = body + "\n" + " ".join("#" + t for t in new_tags)
+                tagged += "\n" + " ".join(new_tags)
+            if explicit:
+                tagged += "\n태그: " + " ".join(explicit)
 
         original_tagged = tagged
         tagged = append_source_tag(tagged, importer.name)

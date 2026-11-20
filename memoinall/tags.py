@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 
 from . import db, extract, store
+from .source_tags import IMPORT_SOURCES
 
 # 본문에서 태그를 뽑는 규칙과 같은 글자만 허용한다. 여기서만 넓게 받으면
 # 등록은 되는데 본문에 넣어도 태그로 인식이 안 되는 태그가 생긴다.
@@ -242,21 +243,34 @@ def _tag_pattern(name: str) -> re.Pattern:
 
 
 def _rewrite_bodies(name: str, new_name: str | None) -> int:
-    """본문의 태그를 바꾸거나(new_name) 지운다(None). 바꾼 메모 수를 돌려준다.
-
-    facets 도 여기서 같이 고친다. update_memo 는 재추출을 백그라운드 큐에 맡기는데,
-    그 사이 조회·내보내기가 옛 태그로 걸리기 때문이다 — 워커가 없는 CLI 에서는
-    영영 안 고쳐진다. 뭐가 바뀌었는지 이미 아는 자리라 직접 고치는 게 맞다.
-    """
+    """태그의 이름을 바꾸거나 지우고, 본문과 태그 색인을 함께 갱신한다."""
     pattern = _tag_pattern(name)
     hits = db.query(
-        "SELECT m.id, m.body FROM memos m JOIN facets f ON f.memo_id=m.id "
+        "SELECT m.id, m.body, m.source FROM memos m JOIN facets f ON f.memo_id=m.id "
         "WHERE f.kind='tag' AND f.value=?",
         (name,),
     )
     changed = 0
     for row in hits:
-        body = pattern.sub((r"\1#" + new_name) if new_name else "", row["body"])
+        imported = row["source"] in IMPORT_SOURCES
+        old_reference = imported and extract.IMPORT_REFERENCE.fullmatch(name)
+        new_reference = imported and new_name and extract.IMPORT_REFERENCE.fullmatch(new_name)
+        repl = (r"\1#" + new_name) if new_name else ""
+        if old_reference or new_reference:
+            lines = []
+            for line in row["body"].split("\n"):
+                if extract.TAG_LINE.match(line) and pattern.search(line):
+                    line = pattern.sub(repl, line)
+                    if extract.TAG_LINE.fullmatch(line.strip()):
+                        continue
+                elif not old_reference:
+                    line = pattern.sub("", line)
+                lines.append(line)
+            body = "\n".join(lines)
+        else:
+            body = pattern.sub(repl, row["body"])
+        if new_reference and new_name not in extract.tag_names(body, imported=True):
+            body += "\n태그: #" + new_name
         # 태그만 있던 줄이 빈 줄로 남지 않게 다듬는다
         body = re.sub(r"[ \t]+\n", "\n", body)
         body = re.sub(r"\n{3,}", "\n\n", body).strip()
@@ -264,13 +278,6 @@ def _rewrite_bodies(name: str, new_name: str | None) -> int:
             continue  # 본문이 통째로 사라지는 경우는 건드리지 않는다 — 태그뿐인 메모
         memo_id = int(row["id"])
         store.update_memo(memo_id, body)
-        db.execute("DELETE FROM facets WHERE memo_id=? AND kind='tag' AND value=?", (memo_id, name))
-        if new_name:
-            # 그 메모가 새 이름을 이미 갖고 있을 수 있다 — 그때는 그냥 둔다
-            db.execute(
-                "INSERT OR IGNORE INTO facets(memo_id, kind, value) VALUES(?,'tag',?)",
-                (memo_id, new_name),
-            )
         changed += 1
     return changed
 

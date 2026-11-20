@@ -104,6 +104,36 @@ def check_feed_search_tools(page, client):
     print("OK paginated feed results stay fixed through AI selection; named and relative searches survive reload")
 
 
+def check_sidebar_tag_groups(page):
+    memo = store.add_memo("현장 방문 기록 #업무 #현장방문", enqueue_enrich=False)
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.evaluate("loadSidebar()")
+    mine = page.get_by_role("group", name="내 태그", exact=True)
+    automatic = page.get_by_role("group", name="자동 태그", exact=True)
+    expect(automatic.locator('[data-v="업무"]')).to_be_visible()
+    page.get_by_role("button", name="내 태그 설정", exact=True).click()
+    expect(page.locator("#newTag")).to_be_focused()
+    page.locator("#newTag").fill("사용예정")
+    page.locator("#newTagColor").select_option("blue")
+    page.locator("#addTag").click()
+    expect(mine.locator('.t-blue[data-v="사용예정"] .n')).to_have_text("0")
+    page.locator('#suggestRow [data-adopt="업무"]').click()
+    expect(mine.locator("button")).to_have_count(2)
+    expect(automatic.locator('[data-v="업무"]')).to_have_count(0)
+    page.locator('#tagList [data-tup="1"]').click()
+    expect(mine.locator("button").first).to_have_attribute("data-v", "업무")
+    assert mine.bounding_box()["y"] < automatic.bounding_box()["y"]
+    page.reload()
+    expect(mine.locator("button").first).to_have_attribute("data-v", "업무")
+    mine.locator('[data-v="업무"]').click()
+    automatic.locator('[data-v="현장방문"]').press("Enter")
+    expect(mine.locator('[data-v="업무"]')).to_have_attribute("aria-pressed", "true")
+    expect(automatic.locator('[data-v="현장방문"]')).to_have_attribute("aria-pressed", "true")
+    expect(page.locator(".card[data-id]")).to_have_count(1)
+    expect(page.locator(".card[data-id]")).to_have_attribute("data-id", str(memo["id"]))
+    print("OK sidebar shows registered tags first in saved order; adopting moves the tag and both groups filter together")
+
+
 def main():
     errors = []
     with TestClient(app) as client, sync_playwright() as playwright:
@@ -499,6 +529,24 @@ def main():
             page.screenshot(path=str(artifacts / "mobile.png"))
             page.set_viewport_size({"width": 1280, "height": 900})
             page.screenshot(path=str(artifacts / "desktop.png"))
+        reference = store.add_memo("관련 이슈 #5102 확인 #배포", source="redmine", enqueue_enrich=False)
+        page.evaluate("id => openMemo(id)", reference["id"])
+        expect(page.locator('[data-detail-remove="5102"]')).to_have_count(0)
+        expect(page.locator('[data-detail-remove="배포"]')).to_be_visible()
+        page.locator("#dTagInput").fill("5102")
+        page.locator("#dTagAdd").click()
+        expect(page.locator('[data-detail-remove="5102"]')).to_be_visible()
+        page.locator("#dSave").click()
+        expect(page.locator("#detail")).not_to_be_visible()
+        assert "5102" in store.facets_of(reference["id"])["tag"]
+        page.evaluate("id => openMemo(id)", reference["id"])
+        page.locator('[data-detail-remove="5102"]').click()
+        page.locator("#dSave").click()
+        expect(page.locator("#detail")).not_to_be_visible()
+        saved = store.get_memo(reference["id"])
+        assert saved["body"] == reference["body"] and "5102" not in saved["facets"]["tag"]
+        print("OK imported issue numbers stay in the original text when explicitly tagging and untagging")
+        check_sidebar_tag_groups(page)
         assert not errors, errors
         print("OK narrow layout; no uncaught browser errors")
         browser.close()

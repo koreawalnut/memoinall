@@ -36,6 +36,8 @@
   .brand span { color: var(--accent); }
   .side-h { font-size: 13.5px; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }
   .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  #sidebarAutoGroup { margin-top: 18px; }
+  #tags .chips button { max-width: 100%; overflow-wrap: anywhere; }
   .chip {
     background: var(--panel-2); border: 1px solid var(--line); color: var(--dim);
     border-radius: 999px; padding: 2px 9px; font-size: 13.5px; cursor: pointer;
@@ -394,9 +396,14 @@
   <aside>
     <div class="brand">memo<span>inall</span></div>
 
-    <div>
-      <div class="side-h">태그</div>
-      <div class="chips" id="tags"></div>
+    <div id="tags">
+      <div class="side-h" id="sidebarMyLabel">내 태그</div>
+      <div class="chips" id="sidebarMyTags" role="group" aria-labelledby="sidebarMyLabel"></div>
+      <button type="button" class="btn ghost" id="sidebarTagSetup" hidden>내 태그 설정</button>
+      <div id="sidebarAutoGroup" hidden>
+        <div class="side-h" id="sidebarAutoLabel">자동 태그</div>
+        <div class="chips" id="sidebarAutoTags" role="group" aria-labelledby="sidebarAutoLabel"></div>
+      </div>
     </div>
     <div>
       <div class="side-h">사람</div>
@@ -1199,22 +1206,46 @@ function toggleTagFilter(name) {
 }
 
 // ---------------------------------------------------------------- 사이드바
+function renderSidebarChips(selector, items, key) {
+  const group = $(selector);
+  const html = items.map(item => {
+    const value = item.name ?? item.value;
+    const active = key === "tag" ? state.tags.includes(value) : state.person === value;
+    const style = item.color ? "tagchip t-" + esc(item.color) : "chip";
+    const prefix = key === "tag" ? "#" : "@";
+    return `<button type="button" class="${style}${active ? " on" : ""}" data-k="${key}" data-v="${esc(value)}" aria-pressed="${active}">${prefix}${esc(value)}<span class="n">${item.count}</span></button>`;
+  }).join("") || (key === "person" ? '<span class="status">없음</span>' : "");
+  if (group.innerHTML !== html) {
+    const focused = group.contains(document.activeElement) ? document.activeElement.dataset.v : null;
+    group.innerHTML = html;
+    if (focused) group.querySelector(`[data-v="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
+  }
+}
+
+$("#sidebarTagSetup").onclick = openTagSettings;
+$("#tags").onclick = event => {
+  const chip = event.target.closest('[data-k="tag"]');
+  if (chip) toggleTagFilter(chip.dataset.v);
+};
+$("#people").onclick = event => {
+  const chip = event.target.closest('[data-k="person"]');
+  if (!chip) return;
+  state.person = state.person === chip.dataset.v ? null : chip.dataset.v;
+  loadSidebar(); resetFeed();
+};
+
+let sidebarRequest = 0;
 async function loadSidebar() {
+  const request = ++sidebarRequest;
   const [tags, people, stats] = await Promise.all([
-    api("/api/facets/tag?limit=24"), api("/api/facets/person?limit=16"), api("/api/stats"),
+    api("/api/tags?suggested_limit=24"), api("/api/facets/person?limit=16"), api("/api/stats"),
   ]);
-  // 태그는 여러 개를 겹쳐 고를 수 있다(전부 달린 메모만). 사람은 하나만.
-  const on = (key, v) => (key === "tag" ? state.tags.includes(v) : state[key] === v);
-  const chips = (items, key, prefix) =>
-    items.map((i) => `<span class="chip ${on(key, i.value) ? "on" : ""}" data-k="${key}" data-v="${esc(i.value)}">${prefix}${esc(i.value)}<span class="n">${i.count}</span></span>`).join("") || `<span class="status">없음</span>`;
-  $("#tags").innerHTML = chips(tags.items, "tag", "#");
-  $("#people").innerHTML = chips(people.items, "person", "@");
-  document.querySelectorAll("#tags .chip, #people .chip").forEach((c) => {
-    c.onclick = () => {
-      if (c.dataset.k === "tag") toggleTagFilter(c.dataset.v);
-      else { state.person = state.person === c.dataset.v ? null : c.dataset.v; loadSidebar(); resetFeed(); }
-    };
-  });
+  if (request !== sidebarRequest) return;
+  renderSidebarChips("#sidebarMyTags", tags.items, "tag");
+  renderSidebarChips("#sidebarAutoTags", tags.suggested, "tag");
+  $("#sidebarTagSetup").hidden = tags.items.length > 0;
+  $("#sidebarAutoGroup").hidden = !tags.suggested.length;
+  renderSidebarChips("#people", people.items, "person");
 
   const e = stats.embedder;
   const cls = e.state === "ready" ? "ok" : e.state === "failed" ? "err" : "warn";
@@ -1482,8 +1513,7 @@ async function renderTagBoard(version = renderVersion) {
       try {
         await api("/api/tags/adopt", { method: "POST", body: { names: [b.dataset.tbAdopt] } });
         toast(`#${b.dataset.tbAdopt} 를 내 태그로 등록했습니다`);
-        await loadTags();
-        render();
+        await refreshTags();
       } catch (err) { b.disabled = false; toast(err.message); }
     };
   });
@@ -3197,8 +3227,17 @@ async function renderSettings(version = renderVersion) {
 }
 
 // ---------------------------------------------------------------- 상세
+const explicitTagLine = /^\s*(?:태그|tags?)\s*:/i;
+function detailTagReference() {
+  return state.memo?.tag_reference_pattern ? new RegExp(state.memo.tag_reference_pattern, "i") : null;
+}
+function detailTagNames() {
+  const body = $("#dBody").value, reference = detailTagReference();
+  if (!reference) return bodyTags(body);
+  return body.split("\n").flatMap(line => bodyTags(line).filter(name => !reference.test(name) || explicitTagLine.test(line)));
+}
 function paintDetailTags() {
-  const names = [...new Set(bodyTags($("#dBody").value))];
+  const names = [...new Set(detailTagNames())];
   const choices = [...new Map([...myTags, ...tagSuggestions].map((t) => [t.name, t])).values()];
   $("#dTags").innerHTML = names.length ? names.map((name) => {
     const tag = myTags.find((t) => t.name === name);
@@ -3209,7 +3248,16 @@ function paintDetailTags() {
     button.onclick = () => {
       const name = button.dataset.detailRemove;
       const pattern = new RegExp(`(^|\\s)#${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![${TAG_CHARS}])`, "g");
-      $("#dBody").value = $("#dBody").value.replace(pattern, "$1");
+      const input = $("#dBody");
+      if (detailTagReference()?.test(name)) {
+        input.value = input.value.split("\n").flatMap(line => {
+          if (!explicitTagLine.test(line)) return [line];
+          const updated = line.replace(pattern, "$1");
+          return updated !== line && !updated.replace(explicitTagLine, "").trim() ? [] : [updated];
+        }).join("\n");
+      } else {
+        input.value = input.value.replace(pattern, "$1");
+      }
       setEditing(true);
       $("#dTagMessage").textContent = `#${name} 제거됨 · 저장하면 반영됩니다`;
       paintDetailTags();
@@ -3234,10 +3282,12 @@ function addDetailTag(raw = $("#dTagInput").value) {
     $("#dTagInput").focus();
     return false;
   }
-  const exists = bodyTags($("#dBody").value).some((tag) => tag.toLowerCase() === name.toLowerCase());
+  const exists = detailTagNames().some((tag) => tag.toLowerCase() === name.toLowerCase());
   if (!exists) {
     const body = $("#dBody").value;
-    $("#dBody").value = body + (body && !/\s$/.test(body) ? "\n" : "") + "#" + name;
+    $("#dBody").value = detailTagReference()?.test(name)
+      ? body + "\n태그: #" + name
+      : body + (body && !/\s$/.test(body) ? "\n" : "") + "#" + name;
     setEditing(true);
   }
   if (raw === $("#dTagInput").value) $("#dTagInput").value = "";

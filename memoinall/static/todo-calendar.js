@@ -90,9 +90,9 @@ function todoCalendarISO(value) {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 }
 
-function selectTodoCalendarDay(day, focus = false) {
+function selectTodoCalendarDay(day, focus = false, month = day.slice(0, 7)) {
   todoCalendar.selected = day;
-  todoCalendar.month = day.slice(0, 7);
+  todoCalendar.month = month;
   todoCalendar.focusDay = focus ? day : null;
   todoCalendar.memoOffset = 0;
   todoBoard.offset = 0;
@@ -107,8 +107,36 @@ document.addEventListener("dblclick", (event) => {
 // 그 날짜로 일정 추가 창을 연다. 이미 열려 있으면 다시 열지 않는다.
 function openTodoCalendarEntry(day) {
   if (document.getElementById("todoCreate")?.open) return;
-  if (day !== todoCalendar.selected) selectTodoCalendarDay(day, true);
+  if (day !== todoCalendar.selected || day.slice(0, 7) !== todoCalendar.month) selectTodoCalendarDay(day, true);
   openTodoCreate(day);
+}
+
+const calendarClick = { day: null, time: 0, monthChange: null };
+const calendarDoubleClickMs = 500;
+function clickTodoDay(event) {
+  const day = event.currentTarget.dataset.calendarDay;
+  const pointer = event.detail > 0 || event.pointerType === "touch";
+  clearTimeout(calendarClick.monthChange);
+  // Reading the agenda replaces the button. The second click can arrive with detail=1 again.
+  if (pointer && day === calendarClick.day && (event.detail >= 2 || event.timeStamp - calendarClick.time <= calendarDoubleClickMs)) {
+    calendarClick.day = null;
+    openTodoCalendarEntry(day);
+    return;
+  }
+  calendarClick.day = pointer ? day : null;
+  calendarClick.time = event.timeStamp;
+  const month = todoCalendar.month;
+  if (pointer && day.slice(0, 7) !== month) {
+    // Show the day's agenda now, keeping the neighboring date under the mouse for both clicks.
+    selectTodoCalendarDay(day, true, month);
+    calendarClick.monthChange = setTimeout(() => {
+      if (state.tab === "todos" && todoBoard.layout === "calendar" && todoCalendar.month === month && todoCalendar.selected === day) {
+        selectTodoCalendarDay(day, true);
+      }
+    }, calendarDoubleClickMs);
+  } else if (day !== todoCalendar.selected) {
+    selectTodoCalendarDay(day, true);
+  }
 }
 
 function moveTodoCalendarMonth(delta) {
@@ -134,15 +162,8 @@ function bindTodoCalendar(memos) {
   $("#todoMonthPrev").onclick = () => moveTodoCalendarMonth(-1);
   $("#todoMonthNext").onclick = () => moveTodoCalendarMonth(1);
   $("#todoCalendarToday").onclick = () => selectTodoCalendarDay(todoLocalDate());
-  // 한 번 누르면 날짜만 고르고(오른쪽에 그날 일정·메모), 두 번 누르거나 Enter 면 바로 일정 추가 창을 연다.
-  // 두 번째 클릭은 브라우저가 세는 클릭 수(detail)로 안다. 이미 고른 날짜를 다시 눌러도 다시 그리지 않아야
-  // 두 번째 클릭이 같은 버튼에 닿는다. 혹시 끊기면 아래 문서 전체의 dblclick 이 받는다.
   document.querySelectorAll("[data-calendar-day]").forEach((button) => {
-    button.onclick = (event) => {
-      const day = button.dataset.calendarDay;
-      if (event.detail >= 2) { openTodoCalendarEntry(day); return; }
-      if (day !== todoCalendar.selected) selectTodoCalendarDay(day, true);
-    };
+    button.onclick = clickTodoDay;
     button.onkeydown = (event) => {
       if (event.key === "Enter") {
         event.preventDefault();               // 버튼 기본 동작(클릭 = 선택)을 막고 바로 입력

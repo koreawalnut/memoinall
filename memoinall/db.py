@@ -260,6 +260,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
     conn.execute("UPDATE todos SET status='done', overrides_json='{\"status\":\"done\"}' "
                  "WHERE done=1 AND derived_json='{}' AND overrides_json='{}'")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_todos_active_status ON todos(active, status)")
+    if not conn.execute("SELECT 1 FROM meta WHERE key='import_reference_tags_v1'").fetchone():
+        from . import extract
+        from .source_tags import IMPORT_SOURCES
+
+        marks = ",".join("?" for _ in IMPORT_SOURCES)
+        for row in conn.execute(f"SELECT id,body FROM memos WHERE source IN ({marks}) AND instr(body,'#')>0", IMPORT_SOURCES):
+            references = {name for name in extract.TAG_RE.findall(row["body"]) if extract.IMPORT_REFERENCE.fullmatch(name)}
+            if references:
+                references.difference_update(extract.tag_names(row["body"], imported=True))
+                conn.executemany("DELETE FROM facets WHERE memo_id=? AND kind='tag' AND value=?",
+                                 ((row["id"], name) for name in references))
+        conn.execute("INSERT INTO meta(key,value) VALUES('import_reference_tags_v1','done')")
     conn.commit()
 
 

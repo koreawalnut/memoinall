@@ -125,17 +125,28 @@ def main() -> int:
     section("가져올 때 태그 붙이기")
     folder = Path(TMP) / "notes"
     folder.mkdir()
-    (folder / "a.md").write_text("가져온 문서 하나입니다. 내용이 좀 있습니다.", encoding="utf-8")
+    (folder / "a.md").write_text("이전 작업 #7100 참고. 연도별 자료 #2026", encoding="utf-8")
     from memoinall.importers.files import FilesImporter
 
     r = importers.run_import(FilesImporter(folder), dry_run=False, background_enrich=False,
-                             extra_tags=["결제"])
+                             extra_tags=["결제", "2026"])
     check("가져오기 성공", r.imported == 1, r.imported)
     got = [m for m in store.list_memos(limit=50) if m["source"] == "files"][0]
     store.enrich(got["id"])
     check("태그가 붙음", "#결제" in store.get_memo(got["id"])["body"],
           store.get_memo(got["id"])["body"])
     check("태그로 찾아짐", got["id"] in [m["id"] for m in store.list_memos(tags=["결제"])])
+    check("가져올 때 고른 숫자 태그만 보존", "2026" in store.facets_of(got["id"])["tag"] and not store.list_memos(tags=["7100"]))
+    tags.add("2026")
+    tags.rename("2026", "연도별")
+    check("숫자 태그 이름을 바꿔도 본문의 참조 보존", "연도별 자료 #2026" in store.get_memo(got["id"])["body"])
+    tags.rename("연도별", "7100")
+    store.enrich(got["id"])
+    check("이름을 바꾼 숫자 태그는 재색인 후에도 유지", "7100" in store.facets_of(got["id"])["tag"])
+    tags.remove("7100", purge=True)
+    check("숫자 태그를 지워도 이슈 번호로 원문 검색 가능",
+          "이전 작업 #7100 참고" in store.get_memo(got["id"])["body"]
+          and got["id"] in [m["id"] for m in search.search("7100")] and not store.list_memos(tags=["7100"]))
 
     section("이름 바꾸기")
     edge = add("결제팀 회의 #결제팀 #결제")
@@ -186,6 +197,17 @@ def main() -> int:
     check("본문이 통째로 사라지지 않음", store.get_memo(only["id"])["body"].strip() != "",
           repr(store.get_memo(only["id"])["body"]))
 
+    section("기존 가져오기 태그 정리")
+    original = store.get_memo(got["id"])
+    manual = add("직접 적은 #7100")
+    db.execute("INSERT INTO facets(memo_id,kind,value) VALUES(?,'tag','7100')", (got["id"],))
+    db.execute("DELETE FROM meta WHERE key='import_reference_tags_v1'")
+    db.close()
+    db.init()
+    migrated = store.get_memo(got["id"])
+    check("기존 가져오기 번호 제거, 직접 쓴 숫자 태그 유지",
+          [m["id"] for m in store.list_memos(tags=["7100"])] == [manual["id"]])
+    check("기존 본문·시각과 주제 태그 보존", all(original[k] == migrated[k] for k in ("body", "created_at", "updated_at", "facets")))
     print(f"\n통과 {PASS} · 실패 {FAIL}")
     return 0 if FAIL == 0 else 1
 

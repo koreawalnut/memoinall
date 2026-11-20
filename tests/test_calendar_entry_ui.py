@@ -109,6 +109,20 @@ def main():
         expect(page.locator('[data-calendar-day="2026-11-24"]')).to_be_focused()   # 닫으면 그 날짜로 돌아온다
         assert db.one("SELECT count(*) n FROM todos")["n"] == 1
         print("OK click selects, double-click or Enter on a focused day opens '일정 추가' for that day; arrows only move")
+        # Two physical clicks can straddle the agenda refresh, especially on a neighboring month.
+        for day in ("2026-11-27", "2026-12-01"):
+            cell = page.locator(f'[data-calendar-day="{day}"]')
+            cell.scroll_into_view_if_needed()
+            box = cell.bounding_box()
+            x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+            page.mouse.click(x, y)
+            page.wait_for_timeout(140)
+            page.mouse.click(x, y)
+            expect(page.locator("#todoCreateDate")).to_have_value(day)
+            expect(page.locator("#todoCreateTitle")).to_be_focused()
+            page.locator("#todoCreateCancel").click()
+        page.locator("#todoCalendarToday").click()
+        expect(page.locator("#todoCalendarMonth")).to_have_text("2026년 11월")
 
         page.locator("#todoCalendarImport").click()
         expect(page.locator("#calendarUrlField")).not_to_be_visible()

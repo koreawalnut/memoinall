@@ -13,6 +13,18 @@ from datetime import date, datetime, timedelta
 from . import textutil
 
 TAG_RE = re.compile(r"(?:^|\s)#([0-9A-Za-z가-힣_/\-]{1,40})")
+# A leading number alone is not enough to reject a topic such as #2차회의 or #3D.
+IMPORT_REFERENCE = re.compile(
+    r"^(?:[0-9_/-]+|[0-9]+(?:번(?:째)?|호)?(?:이|가|을|를|은|는|의|와|과|에|에서|로|으로|부터|까지|건|관련|입니다)?"
+    r"|(?:issue|ticket|note)[_-][0-9]+|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$", re.IGNORECASE)
+TAG_LINE = re.compile(r"^\s*(?:태그|tags?)\s*:", re.IGNORECASE)
+
+
+def tag_names(text: str, *, imported: bool = False) -> list[str]:
+    if not imported:
+        return _uniq(TAG_RE.findall(text))
+    return list(dict.fromkeys(name for line in text.splitlines() for name in TAG_RE.findall(line)
+                              if not IMPORT_REFERENCE.fullmatch(name) or TAG_LINE.match(line)))
 PERSON_RE = re.compile(r"(?:^|\s)@([0-9A-Za-z가-힣._\-]{1,40})")
 URL_RE = re.compile(r"https?://[^\s<>\"')\]]+")
 
@@ -105,9 +117,9 @@ def _clean(line: str) -> str:
     return line.strip().strip("-*•").strip()
 
 
-def extract(text: str, created_at: datetime) -> dict:
+def extract(text: str, created_at: datetime, *, imported: bool = False) -> dict:
     """메모 하나에서 파셋과 할일을 뽑는다."""
-    tags = _uniq(TAG_RE.findall(text))
+    tags = tag_names(text, imported=imported)
     people = _uniq(PERSON_RE.findall(text))
     links = _uniq(URL_RE.findall(text))
     dates = extract_dates(text, created_at)

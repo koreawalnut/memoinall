@@ -56,7 +56,8 @@ def section(name):
 
 ISSUES = [
     {"id": 100 + i, "subject": f"이슈 제목 {i}",
-     "description": f"이슈 본문 {i} 입니다. 상세 설명이 여기 들어갑니다.",
+     "description": f"이슈 본문 {i} 입니다. #5102에서 #5103번과 #note-2 확인. "
+                    "#de305d54-75b4-431b-adb2-eb6b9e546014 #배포 #2차회의",
      "project": {"name": "포털 개편"}, "tracker": {"name": "결함"},
      "status": {"name": "진행중"}, "author": {"name": "홍길동"},
      "assigned_to": {"name": "김철수"},
@@ -263,9 +264,13 @@ def main() -> int:
     saved = store.get_memo(result.memo_ids[0])
     check("원본 작성시각 유지", saved["created_at"] == local_time("2026-03-04T05:06:07Z"), saved["created_at"])
     check("source 기록", saved["source"] == "redmine", saved["source"])
+    references = {"5102에서", "5103번과", "note-2", "de305d54-75b4-431b-adb2-eb6b9e546014"}
+    check("저장 즉시 본문 번호를 태그에서 제외", references.isdisjoint(saved["facets"]["tag"]))
+    check("이슈 번호 원문과 주제 태그 보존", "#5102에서" in saved["body"] and {"배포", "2차회의"} <= set(saved["facets"]["tag"]))
     store.enrich(saved["id"])
     tags = {t["value"] for t in store.top_facets("tag")}
     check("태그가 메모에 반영", tags & {"포털개편", "결함"}, tags)
+    check("재색인 후에도 이슈 번호가 태그 목록에 없음", references.isdisjoint(tags), tags)
 
     section("오류가 run_import 를 뚫지 않음")
     broken = importers.run_import(imp(api_key="틀린키", kinds=["issues"]), dry_run=True)

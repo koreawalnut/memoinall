@@ -10,6 +10,8 @@ SOURCE_TAGS = {
     "files": "텍스트파일",
 }
 
+IMPORT_SOURCES = (*SOURCE_TAGS, "shared", "document")
+
 
 def append_source_tag(body: str, source: str) -> str:
     tag = SOURCE_TAGS.get(source)

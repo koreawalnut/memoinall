@@ -343,12 +343,12 @@ def get_facets(kind: str, limit: int = 30):
 
 
 @app.get("/api/tags")
-def get_tags():
+def get_tags(suggested_limit: int = Query(12, ge=1, le=100)):
     """정해 둔 태그 + 아직 등록 안 한 자주 쓰는 태그(권유용)."""
     return {
         "items": tags.all_tags(),
         "colors": tags.COLORS,
-        "suggested": tags.unregistered(),
+        "suggested": tags.unregistered(suggested_limit),
     }
 
 
