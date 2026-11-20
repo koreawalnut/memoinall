@@ -123,6 +123,11 @@ class ScheduleShareTests(unittest.TestCase):
         self.assertEqual(result["count"], 1)
         for secret in ["비밀 메모", "private-TOKEN", "보내지 않을 제목", "외부 비공개", "개인 사무실"]:
             self.assertNotIn(secret, result["content"])
+            self.assertNotIn(secret, result["summary"])
+        # Teams 등에 파일과 함께 보낼 글: 고른 일정만, 날짜·요일·태그와 함께
+        self.assertTrue(result["summary"].startswith("공유 일정 1건\n"))
+        self.assertIn("· 11/20(금) [예정] 공유할 제목 #업무 #팀", result["summary"])
+        self.assertIn(".ics", result["summary"])
         parsed = calendars.parse_calendar(result["content"].encode(), "2026-11-01", "2026-11-30", "Asia/Seoul")["events"]
         self.assertEqual(parsed[0]["tags"], ["업무", "팀"])
         self.assertEqual(parsed[0]["start_day"], "2026-11-20")

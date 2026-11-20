@@ -166,4 +166,32 @@ def export(plan_id: str, selected) -> dict:
     content = cal.to_ical()
     if len(content) > calendar_import.MAX_BYTES:
         raise ValueError("공유 파일이 2MB를 넘습니다. 일정 수를 줄여 주세요.")
-    return {"content": content.decode("utf-8"), "filename": f"일정공유-{plan['options']['start']}-{plan['options']['end']}.ics", "count": len(selected)}
+    return {"content": content.decode("utf-8"), "filename": f"일정공유-{plan['options']['start']}-{plan['options']['end']}.ics",
+            "count": len(selected), "summary": _summary([reviewed[key] for key in selected])}
+
+
+WEEKDAYS = "월화수목금토일"
+
+
+def _summary(items: list[dict]) -> str:
+    """Teams 등에 파일과 함께 보낼 글. 받는 사람이 파일을 열지 않아도 무엇이 왔는지 알 수 있게."""
+    def when(item):
+        day = date.fromisoformat(item["start_day"])
+        text = f"{day.month}/{day.day}({WEEKDAYS[day.weekday()]})"
+        if item["end_day"] != item["start_day"]:
+            end = date.fromisoformat(item["end_day"])
+            text += f"~{end.month}/{end.day}({WEEKDAYS[end.weekday()]})"
+        if not item["all_day"] and item.get("start_time"):
+            text += " " + datetime.fromisoformat(item["start_time"]).strftime("%H:%M")
+        return text
+
+    ordered = sorted(items, key=lambda i: (i["start_day"], i.get("start_time") or ""))
+    lines = [f"공유 일정 {len(items)}건"]
+    for item in ordered[:30]:
+        title = item["title"] if item["external"] else f"[{item['kind']}] {item['title']}"
+        tags = " " + " ".join("#" + t for t in item["tags"]) if item["tags"] else ""
+        lines.append(f"· {when(item)} {title}{tags}")
+    if len(ordered) > 30:
+        lines.append(f"… 외 {len(ordered) - 30}건")
+    lines.append("첨부한 .ics 파일을 열면 내 캘린더에 추가할 수 있습니다.")
+    return "\n".join(lines)

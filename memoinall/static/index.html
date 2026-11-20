@@ -1847,7 +1847,7 @@ async function renderImport(version = renderVersion) {
         <button class="btn" id="expSave">파일로 저장</button>
         <button class="btn primary" id="expShare" aria-describedby="expShareHint">Teams로 파일 공유</button>
       </div>
-      <div id="expShareHint" class="note">${window.pywebview?.api?.share_to_teams ? "Teams 새 채팅이 열리면 받는 사람을 선택하고 Ctrl+V로 파일을 첨부하세요." : "Teams에서 받는 사람과 첨부파일을 확인한 뒤 전송하세요."}</div>
+      <div id="expShareHint" class="note">${expShareHintText()}</div>
       <div id="expReview"></div>
       <div id="expOut" aria-live="polite"></div>
     </div>
@@ -2673,12 +2673,27 @@ async function shareToTeams(content) {
   return "Teams에서 받는 사람과 본문을 확인하세요. 본문이 다르면 ‘본문 복사’로 붙여넣으세요.";
 }
 
+function expShareHintText() {
+  return window.pywebview?.api?.share_to_teams
+    ? "Windows 공유 창에서 Microsoft Teams를 고르면 파일이 첨부된 채로 열립니다. 받는 사람을 고르고 보내세요."
+    : "Teams에서 받는 사람과 첨부파일을 확인한 뒤 전송하세요.";
+}
+// 데스크톱 앱의 연결(window.pywebview.api)은 화면이 뜬 뒤에 붙는다. 붙으면 안내를 데스크톱용으로 바꾼다.
+window.addEventListener("pywebviewready", () => { if ($("#expShareHint")) $("#expShareHint").textContent = expShareHintText(); });
+
+// 파일은 Windows 공유 창으로 넘긴다(method "share"). 공유 창을 못 쓰는 환경이면 클립보드 + 새 채팅(method "clipboard").
 function showPreparedAttachment(out, file) {
-  const launch = file.opened ? "" : "Teams 앱을 열 수 없습니다. Teams에 로그인한 뒤 ";
-  const attach = file.copied && file.opened
-    ? "받는 사람을 고르고 메시지 입력란에 Ctrl+V를 누르세요. 첨부가 보이지 않으면 파일 위치를 열어 채팅으로 끌어다 놓으세요."
-    : "파일 위치를 열고 준비된 파일을 Teams 채팅으로 끌어다 놓으세요.";
-  out.innerHTML = `<p>${esc(launch + attach)}</p><div class="row">
+  let message;
+  if (file.method === "share") {
+    message = "Windows 공유 창에서 Microsoft Teams를 고르세요. 파일이 첨부된 채로 Teams가 열리면 받는 사람을 고르고 보내면 됩니다. "
+      + "공유 창이 보이지 않거나 목록에 Teams가 없으면, 파일 위치를 열어 Teams 채팅으로 끌어다 놓으세요.";
+  } else {
+    const launch = file.opened ? "" : "Teams 앱을 열 수 없습니다. Teams에 로그인한 뒤 ";
+    message = launch + (file.copied && file.opened
+      ? "받는 사람을 고르고 메시지 입력란에 Ctrl+V를 누르세요. 첨부가 보이지 않으면 파일 위치를 열어 채팅으로 끌어다 놓으세요."
+      : "파일 위치를 열고 준비된 파일을 Teams 채팅으로 끌어다 놓으세요.");
+  }
+  out.innerHTML = `<p>${esc(message)}</p><div class="row">
     <button type="button" class="btn" data-reveal-file>파일 위치 열기</button>
     <span class="meta">${esc(file.name)}</span></div><div data-reveal-error class="note"></div>`;
   out.querySelector("[data-reveal-file]").onclick = async () => {
@@ -2701,12 +2716,14 @@ function showBrowserAttachment(out, file, stillSelected) {
   };
 }
 
+// 메모(.json)·일정(.ics) 파일을 Teams로. result = {content, filename, text?}. text 는 파일과 함께 보낼 글.
 async function shareExportFile(out, result, stillSelected) {
-  const file = new File([result.content], result.filename, {type: "application/json"});
+  const type = result.filename.endsWith(".ics") ? "text/calendar" : "application/json";
+  const file = new File([result.content], result.filename, {type});
   if (file.size > 50000000) throw new Error("받는 쪽에서 열 수 있는 파일 크기는 50MB까지입니다. 메모를 나눠 선택하세요.");
   const bridge = window.pywebview?.api;
   if (bridge?.share_to_teams) {
-    const prepared = await bridge.share_to_teams(result.content, result.filename);
+    const prepared = await bridge.share_to_teams(result.content, result.filename, result.text || null);
     if (stillSelected()) showPreparedAttachment(out, prepared);
     return;
   }
@@ -2765,6 +2782,8 @@ async function doExportShare() {
     expBusy("선택한 메모를 첨부파일로 준비하는 중…");
     const result = await api("/api/export/content", { method: "POST", body: { ...payload, password } });
     if (!stillSelected()) throw new Error("공유할 메모나 옵션이 바뀌었습니다. 선택을 확인하고 다시 눌러주세요.");
+    result.text = `memoinall 메모 ${result.count}건을 보냅니다. 받은 파일은 memoinall의 가져오기·공유 → 동료와 주고받기 → 찾아보기로 열 수 있습니다.`
+      + (result.encrypted ? " 비밀번호는 따로 알려드릴게요." : "");
     await shareExportFile(out, result, stillSelected);
   } catch (err) { out.textContent = err.message; }
   finally { button.disabled = false; }

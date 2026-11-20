@@ -1,5 +1,6 @@
 """Primary schedule navigation, tag edits, and file exchange through the UI."""
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -150,6 +151,37 @@ def main():
         page.locator("#scheduleShareSave").click()
         expect(page.locator("#scheduleShareStatus")).to_contain_text("1개 일정을 파일로 저장")
         print("OK desktop save cancellation keeps selections and a later save succeeds")
+
+        # Teams로 공유: 고른 일정의 .ics 를 Windows 공유 창으로, 일정 목록 글과 함께 넘긴다
+        page.evaluate("""() => {
+            window.teamShares = [];
+            window.pywebview.api.share_to_teams = async (content, filename, text) => {
+                teamShares.push({content, filename, text});
+                return {name: filename, path: filename, method: 'share'};
+            };
+            window.pywebview.api.reveal_teams_file = async (name) => { window.revealed = name; };
+        }""")
+        expect(page.locator("#scheduleShareTeams")).to_be_enabled()
+        page.locator("#scheduleShareTeams").click()
+        out = page.locator("#scheduleShareTeamsOut")
+        expect(out).to_contain_text("Windows 공유 창에서 Microsoft Teams를 고르세요")
+        shared, = page.evaluate("teamShares")
+        assert re.fullmatch(r"일정공유-\d{4}-\d{2}-\d{2}-\d{4}-\d{2}-\d{2}\.ics", shared["filename"]), shared["filename"]
+        teams_events = Calendar.from_ical(shared["content"].encode()).walk("VEVENT")
+        assert len(teams_events) == 1 and "교육계획안" in str(teams_events[0]["SUMMARY"])
+        assert "개인 서류" not in shared["content"]
+        assert shared["text"].startswith("공유 일정 1건") and "교육계획안" in shared["text"] and "#업무" in shared["text"], shared["text"]
+        assert ".ics" in shared["text"] and "개인 서류" not in shared["text"]
+        out.get_by_role("button", name="파일 위치 열기").click()
+        assert page.evaluate("window.revealed") == shared["filename"]
+        page.locator("#scheduleShareNone").click()
+        expect(page.locator("#scheduleShareTeams")).to_be_disabled()               # 고른 일정이 없으면 못 보낸다
+        page.locator(".schedule-share-item").filter(has_text="팀 교육계획안").locator("input").check()
+        page.evaluate("() => { window.pywebview.api.share_to_teams = async () => { throw new Error('Teams를 열 수 없습니다.'); }; }")
+        page.locator("#scheduleShareTeams").click()
+        expect(page.locator("#scheduleShareError")).to_contain_text("Teams를 열 수 없습니다")
+        expect(out).to_have_text("")
+        print("OK schedules go to Teams as the selected .ics through the Windows share sheet, with a readable list of events")
 
         artifacts = Path("artifacts/ux-review")
         artifacts.mkdir(parents=True, exist_ok=True)

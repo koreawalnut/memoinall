@@ -104,7 +104,7 @@ function openScheduleShare() {
   const initialTags = todoBoard.registeredTags.some((tag) => tag.name === todoBoard.tag) ? [todoBoard.tag] : [];
   let plan = null;
   dialog.innerHTML = `<div class="dlg-h"><strong>${todoIcon("share")} 일정 공유</strong><button class="btn ghost" type="button" id="scheduleShareClose">닫기</button></div><div class="dlg-b">
-    <div class="schedule-share-intro"><span class="schedule-share-step">1</span><div><strong>보낼 일정만 골라 주세요</strong><p>달력 파일(.ics)을 저장해 메신저나 메일로 전달할 수 있습니다. 서버나 계정 연결 없이 사용할 수 있습니다.</p></div></div>
+    <div class="schedule-share-intro"><span class="schedule-share-step">1</span><div><strong>보낼 일정만 골라 주세요</strong><p>달력 파일(.ics)을 저장해 메신저나 메일로 전달하거나, Teams로 바로 보낼 수 있습니다. 서버나 계정 연결 없이 사용할 수 있습니다.</p></div></div>
     <form id="scheduleShareForm"><div class="calendar-form-dates"><div class="field"><label for="scheduleShareStart">시작일</label><input id="scheduleShareStart" type="date" value="${first}" min="1970-01-01" max="2100-12-31" required></div><div class="field"><label for="scheduleShareEnd">종료일 (최대 1년)</label><input id="scheduleShareEnd" type="date" value="${todoCalendarISO(last)}" min="1970-01-01" max="2100-12-31" required></div></div>
     ${scheduleTagField("scheduleShareTag", initialTags, "공유할 내 태그")}
     <div class="schedule-share-options"><label><input type="checkbox" id="scheduleShareWholePeriod" ${!todoBoard.tag && !todoBoard.registeredTags.length ? "checked" : ""}> 기간 내 전체 일정</label></div>
@@ -118,6 +118,7 @@ function openScheduleShare() {
     const count = selected().length;
     if ($("#scheduleShareCount")) $("#scheduleShareCount").textContent = `${count}개 선택`;
     if ($("#scheduleShareSave")) $("#scheduleShareSave").disabled = calendarEntry.busy || !count;
+    if ($("#scheduleShareTeams")) $("#scheduleShareTeams").disabled = calendarEntry.busy || !count;
   };
   const reset = () => {
     plan = null; calendarEntry.dirty = true;
@@ -168,10 +169,12 @@ function openScheduleShare() {
       $("#scheduleShareStatus").textContent = "공유할 일정을 불러오고 있습니다…";
       plan = await api("/api/schedule/share/preview", { method: "POST", body: options });
       $("#scheduleShareStatus").textContent = `공유 가능한 일정 ${plan.total}개${plan.undated ? ` · 날짜 없는 일 ${plan.undated}개는 제외` : ""}. 완료·제외·확인 필요 항목은 포함하지 않습니다.`;
-      $("#scheduleSharePreview").innerHTML = `<section class="schedule-share-selection"><div class="schedule-share-intro"><span class="schedule-share-step">2</span><div><strong>내용을 확인하고 파일로 저장하세요</strong><p>선택한 항목만 파일에 담깁니다.</p></div></div>
+      $("#scheduleSharePreview").innerHTML = `<section class="schedule-share-selection"><div class="schedule-share-intro"><span class="schedule-share-step">2</span><div><strong>내용을 확인하고 파일로 저장하거나 Teams로 보내세요</strong><p>선택한 항목만 파일에 담깁니다. Teams로 보내면 일정 목록 글이 함께 갑니다.</p></div></div>
         <div class="row"><strong id="scheduleShareCount"></strong><button class="btn ghost" type="button" id="scheduleShareAll">전체 선택</button><button class="btn ghost" type="button" id="scheduleShareNone">선택 해제</button></div>
         <div class="schedule-share-list">${plan.items.map((item) => `<label class="schedule-share-item"><input type="checkbox" data-share-key="${esc(item.key)}" checked><span><strong>${esc(item.title)}</strong><small>${esc(item.kind)} · ${item.start_day}${item.end_day !== item.start_day ? ` ~ ${item.end_day}` : ""}${item.start_time && !item.all_day ? ` · ${esc(new Date(item.start_time).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }))}` : ""}</small><span class="schedule-tags">${scheduleTagPills(item.tags, false)}</span>${item.location ? `<small>장소: ${esc(item.location)}</small>` : ""}${item.description ? `<small class="schedule-share-description">${esc(item.description)}</small>` : ""}</span></label>`).join("") || '<p class="todo-help">조건에 맞는 일정이 없습니다. 기간이나 태그를 바꿔 보세요.</p>'}</div>
-        <button class="btn primary" type="button" id="scheduleShareSave">${todoIcon("share")} 선택한 일정 파일 저장</button></section>`;
+        <div class="row schedule-share-actions"><button class="btn primary" type="button" id="scheduleShareSave">${todoIcon("share")} 선택한 일정 파일 저장</button>
+          <button class="btn" type="button" id="scheduleShareTeams">Teams로 공유</button></div>
+        <div id="scheduleShareTeamsOut" class="todo-help" aria-live="polite"></div></section>`;
       dialog.querySelectorAll("[data-share-key]").forEach((el) => { el.onchange = () => { calendarEntry.dirty = true; updateCount(); }; });
       const checkAll = (value) => { dialog.querySelectorAll("[data-share-key]").forEach((el) => { el.checked = value; }); updateCount(); };
       $("#scheduleShareAll").onclick = () => checkAll(true);
@@ -190,6 +193,20 @@ function openScheduleShare() {
           }
           calendarEntry.dirty = false;
           $("#scheduleShareStatus").textContent = `${file.count}개 일정을 파일로 저장했습니다. 이 파일을 공유할 사람에게 전달해 주세요.`;
+        });
+      };
+      // 고른 일정을 .ics 파일로 만들어 Teams로. 받는 사람이 파일을 안 열어도 알 수 있게 일정 목록 글을 함께 보낸다.
+      $("#scheduleShareTeams").onclick = () => {
+        const keys = selected(), planId = plan.plan_id, out = $("#scheduleShareTeamsOut");
+        const chosen = keys.join("\n");
+        run(async () => {
+          out.textContent = "Teams로 보낼 일정 파일을 준비하는 중…";
+          try {
+            const file = await api(`/api/schedule/share/${planId}/export`, { method: "POST", body: { selected: keys } });
+            const stillSelected = () => out.isConnected && plan?.plan_id === planId && selected().join("\n") === chosen;
+            await shareExportFile(out, { content: file.content, filename: file.filename, text: file.summary }, stillSelected);
+            calendarEntry.dirty = false;
+          } catch (error) { out.textContent = ""; throw error; }
         });
       };
       updateCount();

@@ -24,7 +24,7 @@ BUILD = ROOT / "build"
 
 REQUIRED = ["webview", "onnxruntime", "tokenizers", "fastapi", "uvicorn", "numpy",
             "pypdf", "openpyxl", "xlrd", "olefile", "defusedxml", "icalendar", "recurring_ical_events", "tzdata"]
-OPTIONAL = ["anthropic", "openai", "faster_whisper"]
+OPTIONAL = ["anthropic", "openai", "faster_whisper", "winrt"]
 
 
 def missing_packages() -> list[str]:
