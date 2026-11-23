@@ -140,6 +140,17 @@ CREATE TABLE IF NOT EXISTS memo_import_aliases (
     PRIMARY KEY (memo_id, original_uid)
 );
 
+-- 휴지통. 지운 메모는 memos 에서 빠지고(검색·AI·일정에서 바로 사라짐) 되살릴 정보만 여기 30일 남는다(trash.py).
+CREATE TABLE IF NOT EXISTS memo_trash (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,   -- 지운 순서(같은 초에 여럿 지워도 최근 것이 위로)
+    memo_id    INTEGER NOT NULL UNIQUE,             -- 원래 메모 id. 되살릴 때 그대로 쓴다
+    title      TEXT NOT NULL,
+    body       TEXT NOT NULL,
+    deleted_at TEXT NOT NULL,
+    saved_json TEXT NOT NULL                        -- memos 행·일정 결정·연결 정보
+);
+CREATE INDEX IF NOT EXISTS idx_memo_trash_deleted ON memo_trash(deleted_at);
+
 CREATE TABLE IF NOT EXISTS ai_results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,

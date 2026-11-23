@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 import sqlite3
 import time
 from contextlib import asynccontextmanager, suppress
@@ -43,6 +44,7 @@ from . import (
     stt_live,
     tags,
     todos,
+    trash,
     calendar_import,
     schedule_tags,
     schedule_share,
@@ -59,6 +61,7 @@ def _prepare_search() -> None:
     started = time.monotonic()
     try:
         store.backfill_source_tags()
+        trash.purge_expired()   # 30일 지난 휴지통 메모는 앱을 켤 때 완전히 지운다
         todos.refresh_pending()
         embed.ensure_loaded_async()
         count = store.reindex_pending()
@@ -190,13 +193,51 @@ def edit_memo(memo_id: int, payload: dict = Body(...)):
 
 @app.patch("/api/memos/{memo_id}")
 def flag_memo(memo_id: int, payload: dict = Body(...)):
-    return store.set_flag(memo_id, pinned=payload.get("pinned"), archived=payload.get("archived"))
+    flags = {key: payload.get(key) for key in ("pinned", "archived")}
+    if any(value is not None and not isinstance(value, bool) for value in flags.values()):
+        raise HTTPException(400, "고정·보관 값은 참/거짓이어야 합니다.")
+    try:
+        return store.set_flag(memo_id, **flags)
+    except KeyError:
+        raise HTTPException(404, "메모를 찾을 수 없습니다.")
 
 
 @app.delete("/api/memos/{memo_id}")
 def remove_memo(memo_id: int):
-    store.delete_memo(memo_id)
+    """지우면 휴지통으로 간다. 30일 안에 되살릴 수 있다."""
+    try:
+        return {"ok": True, "trash": trash.move(memo_id)}
+    except KeyError:
+        raise HTTPException(404, "메모를 찾을 수 없습니다.")
+
+
+@app.get("/api/trash")
+def list_trash():
+    return {"items": trash.items(), "keep_days": trash.KEEP_DAYS}
+
+
+@app.post("/api/trash/{memo_id}/restore")
+def restore_memo(memo_id: int):
+    try:
+        return trash.restore(memo_id)
+    except KeyError:
+        raise HTTPException(404, "휴지통에 없는 메모입니다. 이미 되살렸거나 완전히 지웠을 수 있습니다.")
+    except trash.Conflict as exc:
+        raise HTTPException(409, str(exc))
+
+
+@app.delete("/api/trash/{memo_id}")
+def purge_memo(memo_id: int):
+    try:
+        trash.purge(memo_id)
+    except KeyError:
+        raise HTTPException(404, "휴지통에 없는 메모입니다.")
     return {"ok": True}
+
+
+@app.delete("/api/trash")
+def empty_trash():
+    return {"ok": True, "deleted": trash.empty()}
 
 
 # --------------------------------------------------------------------------- 검색/컨텍스트
@@ -304,12 +345,43 @@ def get_context_text(q: str, budget: int = 2000, limit: int = 12, full: bool = F
     return context.build(q, budget_tokens=budget, limit=limit, full_body=full)["prompt"]
 
 
+ASK_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
 @app.post("/api/ask")
 def ask(payload: dict = Body(...)):
-    q = (payload.get("q") or "").strip()
-    if not q:
-        raise HTTPException(400, "q 가 필요합니다.")
-    return llm.answer(q, budget_tokens=int(payload.get("budget", 3000)), limit=int(payload.get("limit", 12)))
+    """내 메모를 근거로 답한다. tags·person·since·until 로 검색창의 조건을 그대로 걸 수 있다.
+
+    AI 가 설정되지 않았으면 원래는 근거를 붙인 프롬프트만 돌려준다(외부 도구·CLI 용).
+    검색창의 'AI에게 묻기'는 require_ai 를 보내 그때는 아예 거절받는다 — 설정했을 때만 쓰는 기능이다.
+    """
+    q = payload.get("q")
+    if not isinstance(q, str) or not q.strip():
+        raise HTTPException(400, "질문을 적어 주세요.")
+    q = q.strip()
+    if len(q) > 2000:
+        raise HTTPException(400, "질문은 2,000자까지 적을 수 있습니다.")
+    if payload.get("require_ai") and not llm.available():
+        raise HTTPException(409, "AI가 연결되지 않았습니다. 설정에서 AI를 연결하면 검색창에서 바로 물을 수 있습니다.")
+    filters: dict = {}
+    raw_tags = payload.get("tags")
+    if raw_tags is not None:
+        if not isinstance(raw_tags, list) or not all(isinstance(t, str) for t in raw_tags) or len(raw_tags) > 20:
+            raise HTTPException(400, "태그 조건이 올바르지 않습니다.")
+        filters["tags"] = [t.strip().lstrip("#").strip() for t in raw_tags if t.strip().lstrip("#").strip()]
+    for key in ("person", "since", "until"):
+        value = payload.get(key)
+        if value in (None, ""):
+            continue
+        if not isinstance(value, str) or (key != "person" and not ASK_DATE.fullmatch(value)):
+            raise HTTPException(400, "검색 조건이 올바르지 않습니다.")
+        filters[key] = value
+    try:
+        budget = min(max(int(payload.get("budget", 3000)), 500), 8000)
+        limit = min(max(int(payload.get("limit", 12)), 1), 30)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "budget·limit 은 숫자여야 합니다.")
+    return llm.answer(q, budget_tokens=budget, limit=limit, **filters)
 
 
 # --------------------------------------------------------------------------- 정리

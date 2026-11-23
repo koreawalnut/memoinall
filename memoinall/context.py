@@ -70,12 +70,13 @@ def build(
     budget_tokens: int = 2000,
     limit: int = 12,
     tag: str | None = None,
+    tags: list[str] | None = None,
     person: str | None = None,
     since: str | None = None,
     until: str | None = None,
     full_body: bool = False,
 ) -> dict:
-    hits = search.search(query, limit=limit, tag=tag, person=person, since=since, until=until)
+    hits = search.search(query, limit=limit, tag=tag, tags=tags, person=person, since=since, until=until)
 
     included: list[dict] = []
     dropped: list[dict] = []

@@ -330,6 +330,40 @@
     padding: 9px 18px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 99;
   }
   .toast.show { opacity: 1; }
+  /* 되돌리기처럼 누를 것이 있는 알림만 눌리게 한다 */
+  .toast.actionable { pointer-events: auto; }
+  .toast-action { margin-left: 12px; background: none; border: 0; padding: 0; color: var(--accent); font-weight: 700; cursor: pointer; }
+  .toast-action:hover, .toast-action:focus-visible { text-decoration: underline; }
+
+  /* 고정 — 카드에서는 눈에 덜 띄게 두었다가 고정하면 또렷하게 */
+  .pin-btn { background: none; border: 0; padding: 0 2px; cursor: pointer; font-size: 15px; line-height: 1;
+    opacity: .3; filter: grayscale(1); align-self: center; }
+  .pin-btn:hover, .pin-btn:focus-visible { opacity: .85; }
+  .pin-btn[aria-pressed="true"] { opacity: 1; filter: none; }
+  .card.pinned { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+  #dPin[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+
+  /* 본문의 링크 — 누르면 브라우저로 연다 */
+  .detail-links { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; }
+  a.badge.link { color: var(--accent); border-color: var(--accent); text-decoration: none;
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  a.badge.link:hover, a.badge.link:focus-visible { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+  /* 검색창에서 AI에게 묻기 — 답은 검색 결과 위에, 근거 메모는 눌러서 연다 */
+  #askAi { white-space: nowrap; }
+  .ask-panel { background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius);
+    padding: 12px 15px; margin: 0 0 12px; }
+  .ask-h { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .ask-q { color: var(--dim); font-size: 14px; overflow-wrap: anywhere; flex: 1; min-width: 0; }
+  .ask-answer { white-space: pre-wrap; word-break: break-word; line-height: 1.75; margin: 10px 0; }
+  .ask-answer a { color: var(--accent); }
+  .ask-foot { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }
+  .ask-foot .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* 휴지통 */
+  .trash-card { cursor: default; }
+  .trash-card:hover { border-color: var(--line); }
+  .trash-card details .doc { min-height: 0; margin-top: 6px; }
 
   /* AI 응답 대기 — 진행률은 알 수 없으므로 움직임과 경과 시간으로 멈추지 않았음을 보여 준다. */
   .ai-wait { position: fixed; right: 16px; bottom: 16px; z-index: 90; width: min(380px, calc(100vw - 32px));
@@ -434,10 +468,13 @@
 
     <div class="searchbar">
       <input id="q" aria-label="메모 검색" placeholder="기억나는 단어나 내용으로 메모 찾기" />
+      <button class="btn" id="askAi" type="button" hidden aria-controls="askPanel" disabled
+        title="검색창에 적은 질문에 AI가 내 메모를 근거로 답합니다 (Ctrl+Enter)">✨ AI에게 묻기</button>
       <button class="btn ghost" id="toggleFilters" aria-expanded="false" aria-controls="feedFilters">상세 검색</button>
       <button class="btn ghost" id="clear" hidden>초기화</button>
     </div>
     <div class="feed-tools">
+      <section id="askPanel" class="ask-panel" aria-live="polite" aria-label="AI 답변" hidden></section>
       <details id="savedSearches" class="capture-options" hidden><summary>저장된 검색</summary><div id="savedSearchList"></div></details>
       <div id="feedFilters" class="filter-panel" hidden>
         <div class="row">
@@ -477,6 +514,7 @@
   <div class="dlg-h">
     <span class="card-title" id="dTitle"></span>
     <span class="meta" id="dMeta"></span>
+    <button type="button" class="btn ghost" id="dPin" aria-pressed="false">📌 고정</button>
   </div>
   <div class="dlg-b">
     <section class="detail-tags" aria-labelledby="dTagLabel">
@@ -496,6 +534,7 @@
     <div class="hitbar" id="dHits" hidden></div>
     <div class="doc" id="dView" hidden></div>
     <textarea id="dBody" aria-label="메모 본문 편집"></textarea>
+    <div class="detail-links" id="dLinks" hidden></div>
     <div class="badges" id="dBadges" style="margin-top:10px"></div>
     <div id="dSimilar" style="margin-top:14px"></div>
   </div>
@@ -510,7 +549,7 @@
     <button class="btn" id="dShare" title="현재 본문으로 Teams 새 채팅 열기">Teams로 본문 공유</button>
     <button class="btn" id="dCollection" hidden>취합표 보기</button>
     <span class="spacer"></span>
-    <button class="btn ghost" id="dDelete" style="color:var(--danger)">삭제</button>
+    <button class="btn ghost" id="dDelete" style="color:var(--danger)" title="휴지통으로 옮깁니다. 30일 안에 되살릴 수 있습니다.">삭제</button>
     <button class="btn ghost" id="dClose">닫기</button>
   </div>
 </dialog>
@@ -574,12 +613,26 @@ function fmt(iso) {
 }
 
 let toastTimer;
-function toast(msg) {
+// action = { label, run } 이면 알림에 버튼을 달고(예: 되돌리기) 조금 더 오래 보여 준다.
+function toast(msg, action = null) {
   const el = $("#toast");
   el.textContent = msg;
+  el.classList.toggle("actionable", !!action);
+  const hide = () => {
+    el.classList.remove("show", "actionable");
+    el.querySelector(".toast-action")?.remove();   // 사라진 뒤에는 Tab 으로도 닿지 않게
+  };
+  if (action) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "toast-action";
+    button.textContent = action.label;
+    button.onclick = () => { clearTimeout(toastTimer); hide(); action.run(); };
+    el.append(button);
+  }
   el.classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove("show"), 1800);
+  toastTimer = setTimeout(hide, action ? 7000 : 1800);
 }
 
 // 카드 미리보기와 상세 본문이 같은 규칙으로 표시돼야 한다 —
@@ -1046,10 +1099,112 @@ $("#q").addEventListener("input", (e) => {
   renderVersion++;
   clearTimeout(searchTimer);
   searchTimer = setTimeout(render, 220);
+  paintAskButton();
 });
+// 검색은 치는 대로 된다. Ctrl+Enter 는 같은 글을 AI에게 묻는다(메모 저장의 Ctrl+Enter 와 같은 손버릇).
+$("#q").addEventListener("keydown", (e) => {
+  if (!e.isComposing && (e.ctrlKey || e.metaKey) && e.key === "Enter" && !$("#askAi").hidden) { e.preventDefault(); askAi(); }
+});
+$("#askAi").onclick = () => askAi();
 $("#clear").onclick = () => {
+  closeAsk();
   applyFeedSearch({});
 };
+
+// ---------------------------------------------------------------- 검색창에서 AI에게 묻기
+// AI가 연결돼 있을 때만 보이고 쓸 수 있다. 지금 검색 조건(태그·사람·작성일) 안의 메모만 근거로 쓴다.
+const ask = { request: 0, q: "", scope: "", busy: false, result: null, error: "", started: 0, timer: null };
+
+function paintAskButton() {
+  const button = $("#askAi");
+  button.hidden = !state.llmReady;
+  button.disabled = !$("#q").value.trim() || ask.busy;
+  $("#q").placeholder = state.llmReady
+    ? "단어로 찾거나, 궁금한 것을 적고 ✨ AI에게 묻기"
+    : "기억나는 단어나 내용으로 메모 찾기";
+}
+
+function askScope() {
+  return [
+    ...state.tags.map((t) => "#" + t),
+    ...(state.person ? ["@" + state.person] : []),
+    ...(state.since ? [state.since + "부터"] : []),
+    ...(state.until ? [state.until + "까지"] : []),
+  ].join(" · ");
+}
+
+async function askAi() {
+  const q = $("#q").value.trim();
+  if (!q || !state.llmReady || ask.busy) return;
+  const request = ++ask.request;
+  Object.assign(ask, { q, scope: askScope(), busy: true, result: null, error: "", started: Date.now() });
+  // 치고 바로 누르면 검색이 아직 기다리는 중이다. 지금 돌려야 답 아래 목록이 같은 질문의 검색 결과가 된다.
+  clearTimeout(searchTimer);
+  render();
+  clearInterval(ask.timer);
+  ask.timer = setInterval(paintAskElapsed, 1000);
+  paintAsk(); paintAskButton();
+  try {
+    const r = await api("/api/ask", { method: "POST", body: {
+      q, require_ai: true, tags: state.tags, person: state.person || null,
+      since: state.since || null, until: state.until || null,
+    } });
+    if (request !== ask.request) return;
+    if (r.answer) ask.result = r;
+    else ask.error = r.reason || "AI가 답을 주지 않았습니다. 잠시 뒤 다시 물어보세요.";
+  } catch (e) {
+    if (request !== ask.request) return;
+    ask.error = e.message;
+    // 그 사이 설정이 풀렸을 수 있다 — 연결 상태를 먼저 맞춰야 버튼과 '설정에서 연결' 안내가 맞게 그려진다.
+    await loadSidebar().catch(() => {});
+    if (request !== ask.request) return;
+  }
+  ask.busy = false;
+  clearInterval(ask.timer);
+  paintAsk(); paintAskButton();
+}
+
+function closeAsk() {
+  ask.request++;                      // 기다리던 답은 와도 버린다
+  Object.assign(ask, { q: "", busy: false, result: null, error: "" });
+  clearInterval(ask.timer);
+  paintAsk(); paintAskButton();
+}
+
+function paintAskElapsed() {
+  const el = $("#askElapsed");
+  if (el) el.textContent = Math.max(0, Math.round((Date.now() - ask.started) / 1000)) + "초";
+}
+
+function paintAsk() {
+  const panel = $("#askPanel");
+  if (!ask.q) { panel.hidden = true; panel.innerHTML = ""; return; }
+  panel.hidden = false;
+  const scope = ask.scope ? `조건: ${esc(ask.scope)}` : "전체 메모에서";
+  let body;
+  if (ask.busy) {
+    body = `<div class="status" style="margin-top:8px">메모에서 근거를 찾아 답을 쓰는 중… <span id="askElapsed">0초</span> · ${scope}</div>`;
+  } else if (ask.error) {
+    body = `<div class="status" role="alert" style="margin-top:8px;color:var(--danger)">${esc(ask.error)}</div>`
+      + (state.llmReady ? "" : `<a href="#" data-go="settings" style="color:var(--accent)">설정에서 AI 연결하기</a>`);
+  } else {
+    const r = ask.result, ids = new Set(r.sources.map((s) => s.id));
+    const text = esc(r.answer).replace(/\[M(\d+)\]/g, (t, id) => ids.has(+id)
+      ? `<a href="#" data-ask-source="${id}" title="근거 메모 열기">${t}</a>` : t);
+    body = `<div class="ask-answer">${text}</div>
+      <div class="ask-foot"><span class="meta">근거 메모 ${r.sources.length}건 · ${scope}</span>
+        ${r.sources.map((s) => `<button type="button" class="chip" data-ask-source="${s.id}" title="${esc(s.title)} 열기">M${s.id} ${esc(s.title)}</button>`).join("")}</div>
+      <div class="status">AI는 위 메모만 보고 답했습니다. 중요한 내용은 근거 메모를 열어 확인하세요.</div>`;
+  }
+  panel.innerHTML = `<div class="ask-h"><strong>✨ AI 답변</strong><span class="ask-q">${esc(ask.q)}</span>
+      <button class="btn ghost" type="button" id="askClose">닫기</button></div>${body}`;
+  $("#askClose").onclick = closeAsk;
+  panel.querySelectorAll("[data-ask-source]").forEach((el) => {
+    el.onclick = (e) => { e.preventDefault(); openMemo(+el.dataset.askSource); };
+  });
+  panel.querySelectorAll("[data-go]").forEach((a) => { a.onclick = (e) => { e.preventDefault(); goTab(a.dataset.go); }; });
+  paintAskElapsed();
+}
 function resetFeed() {
   clearTimeout(searchTimer);
   state.offset = 0; state.selected.clear(); state.selecting = false;
@@ -1090,6 +1245,8 @@ const TABS = [
     title: "태그별 메모", lead: "설정에서 정한 내 태그마다 메모를 모아 봅니다. 순서·색은 설정의 내 태그를 따릅니다." },
   { id: "rollup", icon: "📅", name: "기간 요약", sub: "일·주·월",
     title: "기간 요약", lead: "고른 기간의 메모에서 결정·할 일·열린 질문을 모아 보여줍니다." },
+  { id: "trash", icon: "🗑️", name: "휴지통", sub: "30일 보관",
+    title: "휴지통", lead: "지운 메모는 30일 동안 여기 있다가 완전히 지워집니다. 그 전에는 언제든 되살릴 수 있어요." },
   { id: "generate", primary: true, icon: "✨", name: "메모로 문서 만들기",
     title: "메모로 문서 만들기", lead: "원하는 내용을 적고, 필요한 메모로 정리해 보세요. 만든 내용은 다시 고쳐 쓸 수 있습니다." },
   { id: "import", primary: true, icon: "📥", name: "가져오기·공유",
@@ -1251,6 +1408,9 @@ async function loadSidebar() {
   $("#sidebarTagSetup").hidden = tags.items.length > 0;
   $("#sidebarAutoGroup").hidden = !tags.suggested.length;
   renderSidebarChips("#people", people.items, "person");
+  // AI 연결 여부. 설정을 바꾸면 여기(6초마다·저장 직후)서 'AI에게 묻기'가 나타나거나 사라진다.
+  state.llmReady = !!stats.llm_enabled;
+  paintAskButton();
 
   const e = stats.embedder;
   const cls = e.state === "ready" ? "ok" : e.state === "failed" ? "err" : "warn";
@@ -1305,7 +1465,7 @@ async function render() {
   view.innerHTML = `<div class="empty">불러오는 중…</div>`;
   try {
     const views = {
-      feed: renderFeed, todos: renderTodos, tagboard: renderTagBoard, rollup: renderRollup,
+      feed: renderFeed, todos: renderTodos, tagboard: renderTagBoard, rollup: renderRollup, trash: renderTrash,
       generate: renderGenerate, import: renderImport, settings: renderSettings, collect: renderCollect,
     };
     await (views[state.tab] || renderFeed)(version);
@@ -1334,8 +1494,11 @@ function cardHTML(m) {
     ...(f.person || []).slice(0, 3).map((p) => `<span class="badge person">@${esc(p)}</span>`),
     (m.todos || []).some((t) => ["open", "waiting"].includes(t.status)) ? `<span class="badge">할일 ${m.todos.filter((t) => ["open", "waiting"].includes(t.status)).length}</span>` : "",
   ].filter(Boolean).join("");
-  return `<div class="card" data-id="${m.id}" tabindex="0" role="button" aria-label="${esc(m.title)} 열기">
-    <div class="card-h">${state.tab === "feed" ? `<input type="checkbox" class="memo-select" data-select="${m.id}" aria-label="${esc(m.title)} 선택" ${state.selected.has(m.id) ? "checked" : ""} ${state.selecting ? "" : "hidden"} />` : ""}<span class="card-title">${esc(m.title)}</span><span class="meta">${fmt(m.created_at)}</span></div>
+  const pinLabel = m.pinned ? "고정 해제" : "맨 위에 고정";
+  const pin = `<button type="button" class="pin-btn" data-pin="${m.id}" aria-pressed="${m.pinned ? "true" : "false"}"
+    aria-label="${esc(m.title)} ${pinLabel}" title="${pinLabel}">📌</button>`;
+  return `<div class="card${m.pinned ? " pinned" : ""}" data-id="${m.id}" tabindex="0" role="button" aria-label="${esc(m.title)} 열기">
+    <div class="card-h">${state.tab === "feed" ? `<input type="checkbox" class="memo-select" data-select="${m.id}" aria-label="${esc(m.title)} 선택" ${state.selected.has(m.id) ? "checked" : ""} ${state.selecting ? "" : "hidden"} />` : ""}<span class="card-title">${esc(m.title)}</span><span class="meta">${fmt(m.created_at)}</span>${pin}</div>
     <div class="snip">${highlight(m.snippet || m.body.slice(0, 200), state.q)}</div>
     <div class="badges">${badges}</div>
   </div>`;
@@ -1345,7 +1508,7 @@ function bindCards() {
   // 검색으로 나온 카드는 '어디가 걸렸는지'를 상세로 들고 간다.
   document.querySelectorAll(".card[data-id]").forEach((c) => {
     const open = () => openMemo(+c.dataset.id, state.hits[+c.dataset.id] || null);
-    c.onclick = (e) => { if (!e.target.closest("[data-select]")) open(); };
+    c.onclick = (e) => { if (!e.target.closest("[data-select], [data-pin]")) open(); };
     c.onkeydown = (e) => {
       if (e.target === c && ["Enter", " "].includes(e.key)) { e.preventDefault(); open(); }
     };
@@ -1357,6 +1520,10 @@ function bindCards() {
       else state.selected.delete(id);
       paintFeedTools();
     };
+  });
+  document.querySelectorAll(".card [data-pin]").forEach((b) => {
+    b.onclick = (e) => { e.stopPropagation(); setPinned(+b.dataset.pin, b.getAttribute("aria-pressed") !== "true"); };
+    b.onkeydown = (e) => e.stopPropagation();   // 카드의 Enter·Space(열기)로 번지지 않게
   });
   // 빈 화면 안내의 '다른 앱에서 가져오기' 같은 이동 링크
   document.querySelectorAll("[data-go]").forEach((a) => {
@@ -1372,6 +1539,7 @@ function paintFeedTools() {
     ...(state.until ? [{ label: state.until + "까지", key: "until" }] : []),
   ];
   $("#feedFilters").hidden = !state.filtersOpen;
+  paintAskButton();   // 저장된 검색처럼 검색어가 코드로 바뀌어도 버튼 상태를 맞춘다
   $("#toggleFilters").setAttribute("aria-expanded", String(state.filtersOpen));
   $("#toggleFilters").textContent = "상세 검색" + (filters.length ? ` (${filters.length})` : "");
   $("#clear").hidden = !state.q.trim() && !filters.length;
@@ -1446,7 +1614,7 @@ async function renderFeed(version = renderVersion) {
   }
   const filtered = state.q.trim() || state.tags.length || state.person || state.since || state.until;
   $("#view").innerHTML = items.length
-    ? `<div class="status" style="margin-bottom:10px">${offset + 1}–${offset + items.length}번째 메모${state.q.trim() ? " · 뜻이 비슷한 메모까지 함께 찾았습니다" : " · 최근 작성순"}</div>` + items.map(cardHTML).join("")
+    ? `<div class="status" style="margin-bottom:10px">${offset + 1}–${offset + items.length}번째 메모${state.q.trim() ? " · 뜻이 비슷한 메모까지 함께 찾았습니다" : items.some((m) => m.pinned) ? " · 📌 고정한 메모 먼저, 그다음 최근 작성순" : " · 최근 작성순"}</div>` + items.map(cardHTML).join("")
     : `<div class="empty">${filtered
         ? `조건에 맞는 메모가 없습니다.<br/><span style="font-size:14px">검색어·태그·사람·작성일 조건을 줄여 보세요.</span>`
         : offset ? "이 페이지에 메모가 없습니다. 이전 페이지로 돌아가세요."
@@ -3598,6 +3766,8 @@ async function openMemo(id, hit = null) {
   $("#dMeta").textContent = `작성 ${fmt(m.created_at)}` +
     (m.updated_at && m.updated_at !== m.created_at ? ` · 수정 ${fmt(m.updated_at)}` : "");
   $("#dBody").value = m.body;
+  paintPin();
+  paintLinks();
   $("#dTagInput").value = "";
   $("#dTagMessage").textContent = "";
   $("#dTagPicker").open = false;
@@ -3651,7 +3821,7 @@ $("#dShareCopy").onclick = async () => {
     $("#dShareMessage").textContent = "본문을 선택했습니다. Ctrl+C로 복사하세요.";
   }
 };
-$("#dBody").addEventListener("input", paintDetailTags);
+$("#dBody").addEventListener("input", () => { paintDetailTags(); paintLinks(); });
 $("#dTagAdd").onclick = () => { if (addDetailTag()) $("#dTagInput").focus(); };
 $("#dTagInput").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); addDetailTag(); }
@@ -3673,16 +3843,121 @@ $("#dSave").onclick = async () => {
   } catch (e) { toast("수정 실패: " + e.message); }
   finally { $("#dSave").disabled = $("#dDelete").disabled = $("#dPack").disabled = false; }
 };
+// 지우면 휴지통으로 간다. 바로 되돌릴 수 있고, 30일 동안은 휴지통에서도 되살릴 수 있어 확인 창을 묻지 않는다.
+// 다만 저장하지 않은 수정은 되살릴 수 없으니 그때만 묻는다.
 $("#dDelete").onclick = async () => {
-  if (!confirm("이 메모를 삭제할까요?")) return;
+  const memo = state.memo;
+  if (detailDirty() && !confirm("고친 내용은 저장되지 않습니다. 이 메모를 휴지통으로 옮길까요?")) return;
+  $("#dDelete").disabled = true;
   try {
-    await api(`/api/memos/${state.memo.id}`, { method: "DELETE" });
-    state.selected.delete(state.memo.id);
+    await api(`/api/memos/${memo.id}`, { method: "DELETE" });
+    state.selected.delete(memo.id);
     $("#detail").close();
-    toast("삭제했습니다");
+    toast("휴지통으로 옮겼습니다", { label: "되돌리기", run: () => restoreMemo(memo.id) });
     render(); loadSidebar(); loadTags();
   } catch (e) { toast("삭제 실패: " + e.message); }
+  finally { $("#dDelete").disabled = false; }
 };
+
+// ---------------------------------------------------------------- 고정
+function paintPin() {
+  const pinned = !!state.memo?.pinned, button = $("#dPin");
+  button.setAttribute("aria-pressed", String(pinned));
+  button.textContent = pinned ? "📌 고정됨" : "📌 고정";
+  button.title = pinned ? "고정을 풉니다" : "메모 목록 맨 위에 고정합니다";
+}
+
+async function setPinned(id, pinned) {
+  try {
+    const memo = await api(`/api/memos/${id}`, { method: "PATCH", body: { pinned } });
+    if (state.memo?.id === id) { state.memo.pinned = memo.pinned; paintPin(); }
+    toast(pinned ? "메모 목록 맨 위에 고정했습니다" : "고정을 풀었습니다");
+    render();
+  } catch (e) { toast("고정하지 못했습니다: " + e.message); }
+}
+$("#dPin").onclick = () => state.memo && setPinned(state.memo.id, !state.memo.pinned);
+
+// ---------------------------------------------------------------- 본문 링크
+// 본문의 http(s) 주소를 칩으로 보여 주고 누르면 브라우저로 연다(데스크톱 창도 새 창 링크는 기본 브라우저로 연다).
+// 지금 편집 중인 글 기준이라 고치는 동안에도 바로 맞춰진다.
+function memoLinks(text) {
+  const out = [];
+  for (const raw of String(text || "").match(/https?:\/\/[^\s<>"'`]+/gi) || []) {
+    let url = raw.replace(/[.,;:!?'"」』>…\]}]+$/u, "");
+    // 'https://a.com/x_(y)' 는 살리고 '(https://a.com)' 의 닫는 괄호만 뗀다
+    const count = (s, ch) => s.split(ch).length - 1;
+    while (url.endsWith(")") && count(url, "(") < count(url, ")")) url = url.slice(0, -1).replace(/[.,;:!?]+$/, "");
+    // 'https://example.com에서' — 경로 없는 주소 바로 뒤에 붙은 조사는 뗀다
+    url = url.replace(/^(https?:\/\/[^/?#]*?[A-Za-z0-9])[가-힣]+$/u, "$1");
+    let parsed;
+    try { parsed = new URL(url); } catch { continue; }
+    if (!/^https?:$/.test(parsed.protocol) || !parsed.hostname) continue;
+    if (!out.some((u) => u.href === parsed.href)) out.push(parsed);
+    if (out.length >= 20) break;
+  }
+  return out;
+}
+
+function linkLabel(url) {
+  let path = url.pathname === "/" ? "" : url.pathname;
+  try { path = decodeURIComponent(path); } catch { /* 깨진 인코딩은 그대로 */ }
+  const label = url.hostname.replace(/^www\./, "") + path + (url.search ? "?…" : "");
+  return label.length > 48 ? label.slice(0, 47) + "…" : label;
+}
+
+function paintLinks() {
+  const links = memoLinks($("#dBody").value), box = $("#dLinks");
+  box.hidden = !links.length;
+  box.innerHTML = links.length ? `<span class="meta">링크</span>` + links.map((u) =>
+    `<a class="badge link" href="${esc(u.href)}" target="_blank" rel="noopener noreferrer"
+        title="${esc(u.href)} — 브라우저로 열기">🔗 ${esc(linkLabel(u))}</a>`).join("") : "";
+}
+
+// ---------------------------------------------------------------- 휴지통
+async function restoreMemo(id) {
+  try {
+    const memo = await api(`/api/trash/${id}/restore`, { method: "POST" });
+    toast("메모를 되살렸습니다", { label: "열기", run: () => openMemo(memo.id) });
+    render(); loadSidebar(); loadTags();
+    return memo;
+  } catch (e) { toast("되살리지 못했습니다: " + e.message); return null; }
+}
+
+async function renderTrash(version = renderVersion) {
+  const d = await api("/api/trash");
+  if (version !== renderVersion) return;
+  const view = $("#view");
+  if (!d.items.length) {
+    view.innerHTML = `<div class="empty">휴지통이 비어 있습니다.<br/><span style="font-size:14px">메모를 지우면 ${d.keep_days}일 동안 여기 보관됩니다.</span></div>`;
+    return;
+  }
+  view.innerHTML = `<div class="row"><span class="status">${d.items.length}건 · 지운 날로부터 ${d.keep_days}일이 지나면 완전히 지워집니다.</span>
+      <span class="spacer"></span><button class="btn ghost" type="button" id="emptyTrash" style="color:var(--danger)">휴지통 비우기</button></div>`
+    + d.items.map((m) => `<div class="card trash-card" data-trash="${m.id}">
+      <div class="card-h"><span class="card-title">${esc(m.title)}</span><span class="meta">지운 날 ${fmt(m.deleted_at)}</span></div>
+      <div class="snip">${esc(m.body.length > 200 ? m.body.slice(0, 200) + "…" : m.body)}</div>
+      ${m.body.length > 200 ? `<details><summary class="meta">전체 내용 보기</summary><div class="doc">${esc(m.body)}</div></details>` : ""}
+      <div class="row" style="margin:8px 0 0"><span class="meta">작성 ${fmt(m.created_at)} · ${m.days_left}일 뒤 완전히 삭제</span><span class="spacer"></span>
+        <button class="btn" type="button" data-restore="${m.id}">되살리기</button>
+        <button class="btn ghost" type="button" data-purge="${m.id}" style="color:var(--danger)">완전히 삭제</button></div>
+    </div>`).join("");
+  view.querySelectorAll("[data-restore]").forEach((b) => {
+    b.onclick = async () => { b.disabled = true; if (!await restoreMemo(+b.dataset.restore)) b.disabled = false; };
+  });
+  view.querySelectorAll("[data-purge]").forEach((b) => {
+    b.onclick = async () => {
+      const item = d.items.find((m) => m.id === +b.dataset.purge);
+      if (!confirm(`‘${item.title}’ 메모를 완전히 지울까요? 되돌릴 수 없습니다.`)) return;
+      try { await api(`/api/trash/${item.id}`, { method: "DELETE" }); toast("완전히 지웠습니다"); render(); }
+      catch (e) { toast("지우지 못했습니다: " + e.message); }
+    };
+  });
+  $("#emptyTrash").onclick = async () => {
+    if (!confirm(`휴지통의 메모 ${d.items.length}건을 모두 완전히 지울까요? 되돌릴 수 없습니다.`)) return;
+    try { const r = await api("/api/trash", { method: "DELETE" }); toast(`${r.deleted}건을 완전히 지웠습니다`); render(); }
+    catch (e) { toast("휴지통을 비우지 못했습니다: " + e.message); }
+  };
+}
 $("#dPack").onclick = () => {
   if (gen.busy) { toast("진행 중인 생성이 끝난 뒤 다시 시도하세요"); return; }
   const m = state.memo, collection = $("#dCollection").dataset.id;

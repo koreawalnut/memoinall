@@ -62,6 +62,23 @@ def main() -> int:
         check("백그라운드 보강 완료", wait_idle(c))
 
         check("GET /api/memos", len(c.get("/api/memos").json()["items"]) == 3)
+
+        # --- 검색창에서 AI에게 묻기 ---
+        for bad in ({}, {"q": "  "}, {"q": 3}, {"q": "가" * 2001}, {"q": "결제", "tags": "결제"},
+                    {"q": "결제", "tags": [1]}, {"q": "결제", "since": "어제"}, {"q": "결제", "budget": "많이"}):
+            check(f"POST /api/ask 잘못된 요청 400 {list(bad)}", c.post("/api/ask", json=bad).status_code == 400)
+        refused = c.post("/api/ask", json={"q": "결제 문제가 뭐였지?", "require_ai": True})
+        check("AI 미설정이면 검색창 묻기는 거절", refused.status_code == 409 and "설정" in refused.json()["detail"], refused.text)
+        prompt_only = c.post("/api/ask", json={"q": "결제 문제가 뭐였지?"}).json()
+        check("외부 도구용 /api/ask 는 프롬프트만", prompt_only["answer"] is None and "[M" in prompt_only["prompt"])
+        with patch("memoinall.llm.available", return_value=True), \
+             patch("memoinall.llm.complete", return_value="PG사 지연이 원인입니다 [M3].") as complete:
+            asked = c.post("/api/ask", json={"q": "결제 문제가 뭐였지?", "require_ai": True, "tags": ["#기획"]}).json()
+            check("AI 답변과 근거", asked["answer"] == "PG사 지연이 원인입니다 [M3]." and asked["sources"], asked)
+            check("검색 조건(태그) 안의 메모만 근거", {s["title"][:6] for s in asked["sources"]} == {"온보딩 3단"}
+                  and "#기획" in complete.call_args.args[1], asked["sources"])
+            dated = c.post("/api/ask", json={"q": "결제", "require_ai": True, "since": "2999-01-01"}).json()
+            check("작성일 조건도 반영", dated["sources"] == [], dated["sources"])
         page1 = c.get("/api/memos", params={"limit": 2}).json()
         page2 = c.get("/api/memos", params={"limit": 2, "offset": page1["next_offset"]}).json()
         check("목록 다음 페이지", page1["has_more"] and not page2["has_more"]
@@ -199,8 +216,31 @@ def main() -> int:
         c.delete(f"/api/memos/{editable['id']}")
         c.delete(f"/api/memos/{untouched['id']}")
         check("PATCH pinned", c.patch(f"/api/memos/{mid}", json={"pinned": True}).json()["pinned"] == 1)
+        check("PATCH 고정 값은 참/거짓만", c.patch(f"/api/memos/{mid}", json={"pinned": "yes"}).status_code == 400)
+        check("PATCH 없는 메모 404", c.patch("/api/memos/999999", json={"pinned": True}).status_code == 404)
+        check("고정한 메모가 목록 맨 위", c.get("/api/memos").json()["items"][0]["id"] == mid)
         check("POST /api/reindex", "queued" in c.post("/api/reindex", json={"all": True}).json())
-        check("DELETE", c.delete(f"/api/memos/{mid}").status_code == 200)
+        wait_idle(c)
+        gone = c.delete(f"/api/memos/{mid}")
+        check("DELETE → 휴지통", gone.status_code == 200 and gone.json()["trash"]["id"] == mid, gone.text)
+        check("지운 메모는 열리지 않음", c.get(f"/api/memos/{mid}").status_code == 404)
+        check("지운 메모는 목록·검색에서 빠짐", mid not in {m["id"] for m in c.get("/api/memos").json()["items"]}
+              and mid not in {m["id"] for m in c.get("/api/search", params={"q": "수정됨"}).json()["items"]})
+        trashed = c.get("/api/trash").json()
+        check("GET /api/trash", trashed["keep_days"] == 30 and [i["id"] for i in trashed["items"]][:1] == [mid]
+              and trashed["items"][0]["days_left"] == 30, trashed)
+        check("DELETE 없는 메모 404", c.delete("/api/memos/999999").status_code == 404)
+        back = c.post(f"/api/trash/{mid}/restore")
+        check("되살리기: 같은 번호·고정 유지", back.status_code == 200 and back.json()["id"] == mid
+              and back.json()["pinned"] == 1, back.text)
+        check("되살린 메모는 휴지통에서 빠짐", c.post(f"/api/trash/{mid}/restore").status_code == 404)
+        wait_idle(c)
+        check("되살린 메모는 다시 검색됨", mid in {m["id"] for m in c.get("/api/search", params={"q": "수정됨"}).json()["items"]})
+        c.delete(f"/api/memos/{mid}")
+        check("휴지통에서 완전히 삭제", c.delete(f"/api/trash/{mid}").status_code == 200
+              and c.delete(f"/api/trash/{mid}").status_code == 404
+              and c.post(f"/api/trash/{mid}/restore").status_code == 404)
+        check("휴지통 비우기", c.delete("/api/trash").json()["ok"] and c.get("/api/trash").json()["items"] == [])
 
         # --- 가져오기 ---
         srcs = c.get("/api/import/sources").json()["sources"]
