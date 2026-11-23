@@ -13,6 +13,9 @@ import sys
 def main() -> int:
     # 얼린 실행파일에서 자식 프로세스가 앱을 다시 여는 것을 막는다.
     multiprocessing.freeze_support()
+    if len(sys.argv) == 3 and sys.argv[1] == "--check-release":
+        from memoinall.check_release import check
+        return check(sys.argv[2])
 
     # 패키징된 앱은 임베딩을 onnxruntime 으로 돌린다(torch 를 넣지 않았으므로).
     if getattr(sys, "frozen", False):

@@ -110,6 +110,7 @@ class NewChatSafetyTests(unittest.TestCase):
         focused = SimpleNamespace(Current=SimpleNamespace(AutomationId=focused_id))
         uia = {"AE": SimpleNamespace(FocusedElement=focused)}
         chat = _NewChat(uia, "공유 일정 1건")
+        chat.hwnd = 1234
         chat.compose, chat.compose_id = Mock(), "new-message-1"
         chat.value = Mock(return_value="공유 일정 1건")
         return chat
@@ -119,6 +120,10 @@ class NewChatSafetyTests(unittest.TestCase):
             self.chat().check()
             with self.assertRaises(AttachFailed):
                 self.chat("people-picker-input").check()
+            other = self.chat()
+            other.hwnd = 999
+            with self.assertRaises(AttachFailed):
+                other.check()
         with patch.object(teams_attach, "_teams_foreground", return_value=None), self.assertRaises(AttachFailed):
             self.chat().check()
 
@@ -137,6 +142,53 @@ class NewChatSafetyTests(unittest.TestCase):
             self.chat().replace_message("새 글", Mock())
         self.assertEqual(keys[0], ("ctrl", teams_attach.VK_A))
         self.assertEqual(keys[-1], ("ctrl", teams_attach.VK_V))
+
+    def test_missing_toolbar_button_uses_shortcut_and_only_new_owned_dialog(self):
+        chat = self.chat()
+        chat.u["Invoke"] = SimpleNamespace(Pattern=object())
+        chat._check_chat = Mock()
+        upload, invoke = Mock(), Mock()
+        upload.TryGetCurrentPattern.return_value = (True, invoke)
+        chat._command = Mock(side_effect=[None, upload])
+        with patch.object(teams_attach, "_wait", side_effect=lambda ready, *a: ready()), \
+             patch.object(teams_attach, "_teams_foreground", return_value=chat.hwnd), \
+             patch.object(teams_attach, "_teams_file_dialogs", side_effect=[[3], [3, 4]]) as dialogs, \
+             patch.object(teams_attach, "_keys") as keys:
+            self.assertEqual(chat.open_upload_dialog(), 4)
+        chat.compose.SetFocus.assert_called_once()
+        keys.assert_called_once_with((0x12, False), (0x10, False), (0x4F, False),
+                                     (0x4F, True), (0x10, True), (0x12, True))
+        invoke.Invoke.assert_called_once()
+        self.assertEqual([call.args for call in dialogs.call_args_list], [(chat.hwnd,), (chat.hwnd,)])
+
+    def test_open_menu_can_hide_recipients_but_cannot_switch_windows(self):
+        chat = self.chat()
+        chat.u["AE"].AutomationIdProperty = object()
+        chat._first = Mock(return_value=None)
+        with patch.object(teams_attach, "_teams_foreground", return_value=chat.hwnd):
+            with self.assertRaisesRegex(AttachFailed, "받는 사람"):
+                chat._check_chat()
+            chat._check_chat(menu_open=True)
+        with patch.object(teams_attach, "_teams_foreground", return_value=999), self.assertRaises(AttachFailed):
+            chat._check_chat(menu_open=True)
+
+    def test_file_dialog_uses_its_native_open_button_without_invoke_pattern(self):
+        chat = self.chat()
+        window, value, native = Mock(), Mock(), Mock()
+        path = r"C:\한글 폴더\메모.json"
+        value.SetValue.side_effect = lambda new: setattr(value.Current, "Value", new)
+        edit = window.FindFirst.return_value.FindFirst.return_value
+        edit.TryGetCurrentPattern.return_value = (True, value)
+        chat.u.update(AE=Mock(), IntPtr=int, Scope=Mock(), Property=Mock(), ControlType=Mock(), Value=Mock())
+        chat.u["AE"].FromHandle.return_value = window
+        native.GetDlgItem.return_value = 42
+        native.GetClassNameW.side_effect = lambda hwnd, buf, length: setattr(buf, "value", "Button")
+        with patch.object(teams_attach, "_user32", return_value=native), \
+             patch.object(teams_attach, "_teams_file_dialogs", side_effect=[[9], [9], []]):
+            chat.choose_file(9, path)
+        value.SetValue.assert_called_once_with(path)
+        native.GetDlgItem.assert_called_once_with(9, 1)
+        native.PostMessageW.assert_called_once_with(42, teams_attach.BM_CLICK, 0, 0)
 
 
 @unittest.skipUnless(sys.platform == "win32", "Windows UI Automation")

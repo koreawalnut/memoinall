@@ -65,6 +65,7 @@ class InstallerBuildTests(unittest.TestCase):
 
     def test_app_build_failure_is_not_packaged(self):
         with patch.object(build_installer, "verify_bootstrapper", return_value=True), \
+             patch.object(build_installer, "prepare_build_python", return_value=Path(sys.executable)), \
              patch.object(build_installer.subprocess, "run", return_value=SimpleNamespace(returncode=9)) as run:
             self.assertEqual(build_installer.main(self.options), 9)
             self.assertEqual(run.call_count, 1)
@@ -83,10 +84,19 @@ class InstallerBuildTests(unittest.TestCase):
 
         with patch.object(build_installer, "APP_DIR", folder), \
              patch.object(build_installer, "OUTPUT_DIR", output), \
+             patch.object(build_installer, "verify_runtime") as verify, \
              patch.object(build_installer, "verify_bootstrapper", return_value=True), \
              patch.object(build_installer.subprocess, "run", side_effect=compile_setup) as run:
             self.assertEqual(build_installer.main([*self.options, "--skip-app-build", "--version", "1.2.3"]), 0)
             self.assertEqual(run.call_count, 1)
+            verify.assert_called_once_with(folder)
+
+    def test_unverified_existing_bundle_cannot_be_packaged(self):
+        folder = self.root / "old"
+        make_bundle(folder)
+        with patch.object(build_installer, "APP_DIR", folder), patch.object(build_installer.subprocess, "run") as run:
+            self.assertEqual(build_installer.main(["--iscc", str(self.compiler), "--skip-app-build"]), 1)
+            run.assert_not_called()
 
 
 if __name__ == "__main__":

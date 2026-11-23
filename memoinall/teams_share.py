@@ -36,16 +36,17 @@ def _chat_uri(message):
 
 
 def _fill(fill, *args):
-    """새 채팅 화면에 자동으로 넣기. 안 되면 None — 부르는 쪽이 직접 넣는 안내로 대신한다."""
+    """새 채팅에 넣고, 중단된 경우 사용자에게 표시할 이유를 전달한다."""
     if fill is None:
         return None
     try:
         return fill(*args)
     except AttachFailed as exc:
         log.info("Teams 새 채팅에 자동으로 넣지 못함: %s", exc)
+        return {"message": False, "attached": False, "reason": str(exc)}
     except Exception:  # UI Automation 은 화면이 바뀌면 .NET 예외를 던진다
         log.warning("Teams 새 채팅 자동 입력 중 오류", exc_info=True)
-    return None
+        return {"message": False, "attached": False, "reason": "Teams 화면의 첨부 상태를 읽지 못했습니다."}
 
 
 def _open_text_chat(content, copy_text, fill=None):
@@ -143,6 +144,11 @@ def _share_file(content, filename, text, fill):
     filled = _fill(fill, message, path)
     if filled and filled["attached"]:
         result["method"] = "attached"
+    elif filled and filled.get("reason"):
+        result["reason"] = filled["reason"]
+    elif filled:
+        # The file picker already accepted the path. Don't suggest a second upload.
+        result["method"] = "unconfirmed"
     return result
 
 

@@ -6,6 +6,7 @@ import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlsplit
 
@@ -84,10 +85,13 @@ class TeamsShareTests(unittest.TestCase):
         self.assertEqual(chat_message(launch.call_args.args[0]), "메모 1건을 보냅니다.")
         fill.assert_called_once_with("메모 1건을 보냅니다.", path)
         # 붙은 것을 확인하지 못했거나 자동으로 못 넣으면 '직접 올리기' 안내(manual)
-        for fill in (Mock(return_value={"message": True, "attached": False}),
-                     Mock(side_effect=AttachFailed("파일 선택 창이 뜨지 않았습니다.")),
+        submitted = Mock(return_value={"message": True, "attached": False})
+        self.assertEqual(_share_file("{}", self.filename, None, submitted)["method"], "unconfirmed")
+        for fill in (Mock(side_effect=AttachFailed("파일 선택 창이 뜨지 않았습니다.")),
                      Mock(side_effect=RuntimeError("ElementNotAvailable"))):
-            self.assertEqual(_share_file("{}", self.filename, None, fill)["method"], "manual")
+            result = _share_file("{}", self.filename, None, fill)
+            self.assertEqual(result["method"], "manual")
+            self.assertTrue(result["reason"])
         self.assertEqual(fill.call_args.args[0], "memoinall 메모 파일을 보냅니다.")
 
     @patch("memoinall.teams_share.os.startfile")
@@ -95,14 +99,16 @@ class TeamsShareTests(unittest.TestCase):
         import clr   # 앱에서는 pywebview 가 이미 불러 둔다
         clr.AddReference("System.Windows.Forms")
         from System.Threading import ApartmentState, Thread, ThreadStart
-        from System.Windows.Forms import Clipboard
+        from System.Windows.Forms import DataObject
+        clipboard = DataObject()
 
         window = Mock()
         window.native.Invoke.side_effect = lambda action: action.Invoke()
         teams_share.install(window)
         share, reveal = window.expose.call_args.args
         self.assertEqual(reveal.__name__, "reveal_teams_file")
-        with patch.object(teams_share, "fill_new_chat", return_value={"message": True, "attached": True}) as fill:
+        with patch.dict(sys.modules, {"System.Windows.Forms": SimpleNamespace(Clipboard=clipboard)}), \
+             patch.object(teams_share, "fill_new_chat", return_value={"message": True, "attached": True}) as fill:
             result = share('{"body":"' + "한글 😀" * 10000 + '"}', self.filename, "메모 1건")
             self.assertEqual(result["method"], "attached")
             message, put_text = fill.call_args.args
@@ -113,7 +119,7 @@ class TeamsShareTests(unittest.TestCase):
 
         def on_sta():
             put_text("클립보드 시험 😀")
-            seen.append(Clipboard.GetText())
+            seen.append(clipboard.GetText())
 
         seen = []
         thread = Thread(ThreadStart(on_sta))

@@ -84,7 +84,7 @@ def main():
                     teamShares.push(text === undefined ? {content, filename} : {content, filename, text});
                     if (!filename) return window.teamsMode === 'manual' ? 'draft-copied' : 'filled';
                     return window.teamsMode === 'manual'
-                        ? {name: filename, path: filename, method: 'manual', opened: true}
+                        ? {name: filename, path: filename, method: 'manual', opened: true, reason: '새 채팅의 첨부 메뉴가 보이지 않습니다.'}
                         : {name: filename, path: filename, method: 'attached', opened: true};
                 },
                 reveal_teams_file: async filename => { window.revealedFile = filename; }
@@ -106,6 +106,7 @@ def main():
         page.evaluate("window.teamsMode = 'manual'")
         page.locator("#expShare").click()
         expect(page.locator("#expOut")).to_contain_text("이 디바이스에서 업로드")
+        expect(page.locator("#expOut")).to_contain_text("새 채팅의 첨부 메뉴가 보이지 않습니다.")
         expect(page.locator("#expOut")).not_to_contain_text("Ctrl+V")
         assert page.evaluate("teamShares.length") == 2
         page.locator("#expPw2").fill("different")

@@ -82,12 +82,12 @@ python -m memoinall import --source evernote --evernote-file "C:\notes\archive.e
 
 1. 메시지 입력란에 예전 초안 글이 있으면 지우고 이번 글을 붙여 넣습니다.
 2. 예전 초안에 남은 첨부를 떼어 냅니다. 엉뚱한 파일이 같이 나가지 않게 하기 위해서입니다.
-3. **파일 첨부 → 이 디바이스에서 업로드**로 준비한 파일을 올립니다.
+3. 작성 도구가 나타나면 **파일 첨부 → 이 디바이스에서 업로드**로 준비한 파일을 올립니다. 첨부 단추가 접혀 있으면 작성란에서 Teams 단축키 **Alt+Shift+O**로 같은 메뉴를 엽니다.
 4. 첨부가 보이면 받는 사람 칸으로 커서를 옮깁니다.
 
 몇 초 걸리며, 그동안 마우스와 키보드를 쓰지 마세요. 앱은 앞에 있는 창이 Teams 새 채팅이고 커서가 그 입력란에 있을 때만 키를 보냅니다. 다른 창이 앞으로 오면 거기서 멈춥니다. **보내기는 언제나 직접 누릅니다.**
 
-새 Teams(Microsoft Store 버전) 기준입니다. 자동으로 붙이지 못하면 새 채팅만 열어 두고 안내합니다. 그때는 입력란 아래 📎(**파일 첨부**) → **이 디바이스에서 업로드**에서 파일을 고르거나, memoinall의 **파일 위치 열기**로 파일을 Teams 채팅에 끌어다 놓으세요. 새 Teams는 클립보드의 파일을 **Ctrl+V**로 붙여도 첨부로 받지 않습니다. Teams에서 파일을 첨부하면 그 파일은 보낸 사람의 OneDrive에 올라갑니다.
+새 Teams(Microsoft Store 버전) 기준입니다. 첨부가 중단되면 memoinall에 어느 단계에서 멈췄는지 표시됩니다. 파일을 이미 선택했다는 안내가 나오면 중복으로 올리기 전에 Teams 채팅에서 파일 이름을 확인하세요. 직접 첨부하려면 메시지 입력란에서 **Alt+Shift+O → 이 디바이스에서 업로드**로 파일을 고르거나, memoinall의 **파일 위치 열기**로 파일을 채팅에 끌어다 놓으세요. [Microsoft의 Teams 첨부 단축키 안내](https://support.microsoft.com/en-us/accessibility/teams/use-a-screen-reader-to-chat-in-microsoft-teams)
 
 첨부용 파일은 앱 데이터의 `teams-share` 폴더에 임시로 보관합니다. 만든 지 24시간이 지난 파일은 다음 앱 시작 또는 파일 공유 때 정리합니다. Windows 브라우저에서는 **첨부파일 다운로드**와 **Teams 새 채팅 열기**를 사용하세요. 다른 브라우저에서 JSON 파일 공유를 지원하면 기기의 공유 창이 열립니다. [Microsoft의 Teams 첨부파일 안내](https://support.microsoft.com/en-us/teams/files/share-files-in-microsoft-teams)
 

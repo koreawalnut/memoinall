@@ -1,0 +1,19 @@
+# Windows desktop release. The embedding backend is ONNX.
+pyinstaller>=6,<7
+pywebview>=5
+pythonnet>=3
+onnxruntime
+tokenizers
+fastapi>=0.110
+uvicorn>=0.27
+websockets>=14,<17
+numpy>=1.24
+cryptography>=42
+icalendar>=6.3,<7
+recurring-ical-events>=3.8,<4
+tzdata>=2025.3
+-r requirements-documents.txt
+anthropic>=0.40
+openai>=1.40
+faster-whisper>=1.2,<2
+ctranslate2>=4,<5

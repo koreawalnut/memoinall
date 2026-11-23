@@ -45,6 +45,7 @@ hiddenimports = [
 ]
 datas = [("memoinall/static", "memoinall/static"), ("memoinall/importers/read_onenote.ps1", "memoinall/importers")]
 binaries = []
+datas += [("memoinall/check_release.py", "memoinall")]
 
 # pywebview 는 파이썬 코드만으로 돌지 않는다. 창을 띄우는 데 필요한
 #   webview/lib/*.dll            (Microsoft.Web.WebView2.Core / WinForms)

@@ -9,6 +9,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from memoinall import __version__
@@ -59,6 +60,30 @@ def verify_bootstrapper(path: Path) -> bool:
     return result.returncode == 0
 
 
+def prepare_build_python() -> Path:
+    python = ROOT / ".venv" / "Scripts" / "python.exe"
+    if not python.is_file():
+        environment = ROOT / "build" / "installer-venv"
+        python = environment / "Scripts" / "python.exe"
+        if not python.is_file():
+            subprocess.run([sys.executable, "-m", "venv", str(environment)], check=True)
+    subprocess.run([str(python), "-m", "pip", "install", "-r", str(ROOT / "requirements-installer.txt")],
+                   cwd=ROOT, check=True)
+    return python
+
+
+def verify_runtime(folder: Path) -> None:
+    # Older executables don't recognize the probe option and would start the GUI.
+    if not (folder / "_internal" / "memoinall" / "check_release.py").is_file():
+        raise ValueError("런타임 검증을 지원하지 않는 배포판입니다. --skip-app-build 없이 다시 빌드하세요.")
+    with tempfile.TemporaryDirectory() as temp:
+        report = Path(temp) / "result.txt"
+        result = subprocess.run([str(folder / "memoinall.exe"), "--check-release", str(report)], timeout=120)
+        message = report.read_text(encoding="utf-8") if report.exists() else "런타임 검사 결과가 없습니다."
+        if result.returncode or message != "OK":
+            raise ValueError(message)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="memoinall 설치 파일 생성 (Windows x64)")
     parser.add_argument("--iscc", help="Inno Setup 6.3 이상 ISCC.exe 경로")
@@ -85,12 +110,18 @@ def main(argv: list[str] | None = None) -> int:
         print("설치 파일 제작 준비 완료:", compiler)
         return 0
     if not args.skip_app_build:
-        result = subprocess.run([sys.executable, "-X", "utf8", str(ROOT / "build_exe.py"), "--onedir"], cwd=ROOT)
+        try:
+            python = prepare_build_python()
+        except (OSError, subprocess.CalledProcessError) as exc:
+            print("설치본 빌드 환경 준비 실패:", exc)
+            return 1
+        result = subprocess.run([str(python), "-X", "utf8", str(ROOT / "build_exe.py"), "--onedir"], cwd=ROOT)
         if result.returncode:
             return result.returncode
     try:
         validate_bundle(APP_DIR)
-    except (ValueError, OSError, struct.error) as exc:
+        verify_runtime(APP_DIR)
+    except (ValueError, OSError, struct.error, subprocess.TimeoutExpired) as exc:
         print("배포판 확인 실패:", exc)
         return 1
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

@@ -2856,9 +2856,11 @@ function showPreparedAttachment(out, file) {
   let message;
   if (file.method === "attached") {
     message = "Teams 새 채팅에 파일과 안내 글을 넣었습니다. 받는 사람을 고르고 첨부를 확인한 뒤 보내세요.";
+  } else if (file.method === "unconfirmed") {
+    message = "Teams 파일 선택 창에 파일을 전달했습니다. 채팅에 아래 파일 이름이 표시되는지 먼저 확인하세요.";
   } else if (file.opened) {
-    message = "Teams 새 채팅을 열었지만 파일을 자동으로 붙이지 못했습니다. 메시지 입력란 아래 📎(파일 첨부) → ‘이 디바이스에서 업로드’로 "
-      + "아래 파일을 고르거나, 파일 위치를 열어 채팅으로 끌어다 놓으세요.";
+    message = (file.reason || "Teams 새 채팅에 첨부를 확인하지 못했습니다.") + " 직접 첨부하려면 메시지 입력란에서 Alt+Shift+O를 누르고 "
+      + "‘이 디바이스에서 업로드’를 선택하세요. ‘파일 위치 열기’에서 파일을 채팅으로 끌어다 놓을 수도 있습니다.";
   } else {
     message = "Teams 앱을 열 수 없습니다. Teams에 로그인한 뒤 파일 위치를 열고 준비된 파일을 Teams 채팅으로 끌어다 놓으세요.";
   }
