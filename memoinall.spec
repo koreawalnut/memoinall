@@ -96,14 +96,6 @@ if has("faster_whisper") and has("ctranslate2"):
 if has("cryptography"):
     hiddenimports += ["cryptography.hazmat.primitives.ciphers.aead"]
 
-# Teams 로 파일 보내기 — Windows 공유 창(PyWinRT). 투영 모듈은 실행 중에 import 하고 옆의 _table.pywinrt 를
-# 읽는다. winrt-runtime 의 PyInstaller 훅이 표와 모듈을 모으지만, 쓰는 모듈은 여기서도 이름을 적어 둔다.
-# 없으면 예전처럼 클립보드에 파일을 담고 새 채팅만 연다.
-hiddenimports += ["memoinall.windows_share"]
-if has("winrt"):
-    hiddenimports += ["winrt.runtime", "winrt.runtime.interop", "winrt.windows.applicationmodel.datatransfer",
-                      "winrt.windows.storage", "winrt.windows.foundation", "winrt.windows.foundation.collections"]
-
 # 넣으면 크기만 커지고 쓰지 않는 것들.
 excludes = [
     "torch", "torchvision", "torchaudio",

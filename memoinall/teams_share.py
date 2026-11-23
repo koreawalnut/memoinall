@@ -1,8 +1,9 @@
 """Pass a draft or an export file to Teams on Windows.
 
-본문은 Teams 새 채팅 링크에 글을 미리 채워 연다. 파일(메모 .json·일정 .ics)은 링크로 첨부할 수 없어
-Windows 공유 창으로 넘긴다 — 공유 창에서 Microsoft Teams 를 고르면 파일이 첨부된 채로 열린다(windows_share).
-공유 창을 쓸 수 없으면(관리자 권한 실행, 구성요소 없음) 예전처럼 파일을 클립보드에 담고 새 채팅을 연다.
+Teams 새 채팅 링크로 새 채팅을 열고, 그 화면에 글과 파일(메모 .json·일정 .ics)을 넣는다(teams_attach).
+링크는 글만 미리 채울 수 있고 파일은 붙일 수 없으며, 받는 사람 없는 예전 초안이 남아 있으면 링크의 글도 무시된다.
+자동으로 넣지 못하면 새 채팅만 열어 두고, 사용자가 '파일 첨부'로 직접 올리거나 파일을 끌어다 놓게 안내한다.
+보내기는 언제나 사용자가 한다.
 """
 
 import logging
@@ -15,25 +16,44 @@ from pathlib import Path
 from urllib.parse import quote
 
 from . import config, exchange
+from .teams_attach import AttachFailed, fill_new_chat
 
 log = logging.getLogger(__name__)
 EXPORT_STEM = r"memoinall-[0-9]{8}-[0-9]{4}-[0-9]+건"
 SCHEDULE_STEM = r"일정공유-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}-[0-9]{2}-[0-9]{2}"
 EXPORT_NAME = re.compile(EXPORT_STEM + r"\.json|" + SCHEDULE_STEM + r"\.ics")
 STAGED_NAME = re.compile(EXPORT_STEM + r"(?: \([0-9]+\))?\.json|" + SCHEDULE_STEM + r"(?: \([0-9]+\))?\.ics")
-SHARE_TITLES = {".json": "memoinall 메모 공유", ".ics": "memoinall 일정 공유"}
+# 함께 보낼 글이 없을 때 쓰는 글. 새 채팅을 알아보는 표시도 된다.
+DEFAULT_TEXT = {".json": "memoinall 메모 파일을 보냅니다.", ".ics": "memoinall 일정 파일을 보냅니다."}
 NEW_CHAT = "msteams://teams.microsoft.com/l/chat/0/0?users="
 # Long messages travel intact via the clipboard, without relying on URI length limits.
 MAX_CHAT_URI = 8000
 
 
-def _open_text_chat(content, copy_text):
+def _chat_uri(message):
+    uri = NEW_CHAT + "&message=" + quote(message, safe="")
+    return uri if len(message) <= MAX_CHAT_URI and len(uri) <= MAX_CHAT_URI else ""
+
+
+def _fill(fill, *args):
+    """새 채팅 화면에 자동으로 넣기. 안 되면 None — 부르는 쪽이 직접 넣는 안내로 대신한다."""
+    if fill is None:
+        return None
+    try:
+        return fill(*args)
+    except AttachFailed as exc:
+        log.info("Teams 새 채팅에 자동으로 넣지 못함: %s", exc)
+    except Exception:  # UI Automation 은 화면이 바뀌면 .NET 예외를 던진다
+        log.warning("Teams 새 채팅 자동 입력 중 오류", exc_info=True)
+    return None
+
+
+def _open_text_chat(content, copy_text, fill=None):
+    """본문을 새 채팅에. fill 이 있으면 화면에서 직접 넣고(예전 초안이 남아 링크의 글이 무시돼도) 'filled'."""
     if not isinstance(content, str) or not content.strip():
         raise ValueError("공유할 메모 본문이 비어 있습니다.")
-    uri = ""
-    if len(content) <= MAX_CHAT_URI:
-        uri = NEW_CHAT + "&message=" + quote(content, safe="")
-    prefilled = bool(uri) and len(uri) <= MAX_CHAT_URI
+    uri = _chat_uri(content)
+    prefilled = bool(uri)
     # Teams can retain an unfinished draft when opening a second recipient-less chat.
     try:
         copy_text(content)
@@ -49,6 +69,9 @@ def _open_text_chat(content, copy_text):
         log.warning("Teams 새 채팅 실행 실패 (Windows 오류 %s)", getattr(exc, "winerror", None))
         hint = "본문은 클립보드에 복사했습니다." if copied else "아래 ‘본문 복사’를 사용할 수 있습니다."
         raise RuntimeError("Windows용 Teams를 열 수 없습니다. Teams 설치 상태를 확인하세요. " + hint) from None
+    filled = _fill(fill, content)
+    if filled and filled["message"]:
+        return "filled"
     if not prefilled:
         return "paste"
     return "draft-copied" if copied else "draft"
@@ -101,45 +124,26 @@ def _stage_attachment(content, filename):
     return path.absolute()
 
 
-def _file_drop_list(path):
-    from System.Collections.Specialized import StringCollection
+def _share_file(content, filename, text, fill):
+    """파일을 준비하고 Teams 새 채팅을 열어 글과 파일을 넣는다.
 
-    files = StringCollection()
-    files.Add(str(path))
-    return files
-
-
-def _clipboard_chat(path, copy_file):
-    """공유 창을 못 쓸 때: 파일을 클립보드에 담고 새 채팅을 연다(받는 사람을 고른 뒤 Ctrl+V)."""
-    try:
-        copy_file(path)
-        copied = True
-    except Exception:
-        copied = False
-    try:
-        os.startfile(NEW_CHAT)
-        opened = True
-    except OSError:
-        opened = False
-    return {"path": str(path), "name": path.name, "method": "clipboard", "copied": copied, "opened": opened}
-
-
-def _open_file_chat(content, filename, copy_file):
-    return _clipboard_chat(_stage_attachment(content, filename), copy_file)
-
-
-def _share_file(content, filename, text, share_sheet, copy_file):
-    """파일을 준비해 Windows 공유 창으로 넘긴다. 공유 창을 쓸 수 없으면 클립보드·새 채팅으로 대신한다."""
-    from .windows_share import ShareUnavailable
-
-    path = _stage_attachment(content, filename)
+    method "attached": 새 채팅에 파일이 붙은 것까지 확인했다 — 받는 사람만 고르면 된다.
+    method "manual":   새 채팅만 열었다(또는 Teams 를 못 열었다, opened=False) — 사용자가 직접 올린다.
+    """
     if text is not None and (not isinstance(text, str) or len(text) > 20000):
         raise ValueError("함께 보낼 글이 올바르지 않습니다.")
+    path = _stage_attachment(content, filename)
+    message = text or DEFAULT_TEXT[path.suffix]
+    result = {"path": str(path), "name": path.name, "method": "manual", "opened": True}
     try:
-        share_sheet(path, SHARE_TITLES.get(path.suffix, "memoinall 공유"), text or "")
-    except ShareUnavailable:
-        return _clipboard_chat(path, copy_file)
-    return {"path": str(path), "name": path.name, "method": "share"}
+        os.startfile(_chat_uri(message) or NEW_CHAT)
+    except OSError as exc:
+        log.warning("Teams 새 채팅 실행 실패 (Windows 오류 %s)", getattr(exc, "winerror", None))
+        return {**result, "opened": False}
+    filled = _fill(fill, message, path)
+    if filled and filled["attached"]:
+        result["method"] = "attached"
+    return result
 
 
 def reveal_teams_file(name):
@@ -154,9 +158,6 @@ def reveal_teams_file(name):
 def install(window):
     busy = threading.Lock()
     _expire_attachments(_share_dir())
-    from .windows_share import Sharer
-
-    sharer = Sharer()
 
     def share_to_teams(content, filename=None, text=None):
         if not busy.acquire(blocking=False):
@@ -165,22 +166,17 @@ def install(window):
             from System import Action
             from System.Windows.Forms import Clipboard
 
+            def copy_text(value):
+                window.native.Invoke(Action(lambda: Clipboard.SetText(value)))
+
+            def fill(message, path=None):
+                return fill_new_chat(message, copy_text, file_path=str(path) if path else None)
+
             if filename is None:
-                def copy_text(value):
-                    window.native.Invoke(Action(lambda: Clipboard.SetText(value)))
-
-                return _open_text_chat(content, copy_text)
-
-            def copy_file(path):
-                window.native.Invoke(Action(lambda: Clipboard.SetFileDropList(_file_drop_list(path))))
-
-            def share_sheet(path, title, message):
-                sharer.share(lambda fn: window.native.Invoke(Action(fn)),
-                             lambda: window.native.Handle.ToInt64(), path, title=title, text=message)
-
-            return _share_file(content, filename, text, share_sheet, copy_file)
+                return _open_text_chat(content, copy_text, fill)
+            return _share_file(content, filename, text, fill)
         except ImportError:
-            raise RuntimeError("Windows 공유 구성요소가 필요합니다. 최신 memoinall 데스크톱 버전을 사용하세요.") from None
+            raise RuntimeError("Windows 데스크톱 구성요소가 필요합니다. 최신 memoinall 데스크톱 버전을 사용하세요.") from None
         except OSError:
             log.exception("Teams 첨부파일 준비 실패")
             raise RuntimeError("첨부파일을 준비할 수 없습니다. 저장 공간과 폴더 권한을 확인하세요.") from None

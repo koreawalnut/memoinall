@@ -22,10 +22,3 @@ openai>=1.40
 # 선택: 음성 입력(로컬 Whisper). 없으면 설정에서 Gemini 음성 인식만 쓸 수 있습니다.
 # 모델(small 약 0.5GB)은 처음 쓸 때 받습니다.
 faster-whisper>=1.2,<2
-
-# 선택(Windows): Teams 로 파일 보내기 — Windows 공유 창을 연다. 없으면 클립보드에 파일을 담고 새 채팅만 연다.
-winrt-runtime>=4.2,<5; sys_platform == "win32"
-winrt-Windows.ApplicationModel.DataTransfer; sys_platform == "win32"
-winrt-Windows.Storage; sys_platform == "win32"
-winrt-Windows.Foundation; sys_platform == "win32"
-winrt-Windows.Foundation.Collections; sys_platform == "win32"

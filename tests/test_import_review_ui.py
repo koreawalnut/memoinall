@@ -82,10 +82,10 @@ def main():
             window.pywebview = {api: {
                 share_to_teams: async (content, filename, text) => {
                     teamShares.push(text === undefined ? {content, filename} : {content, filename, text});
-                    if (!filename) return 'draft-copied';
-                    return window.teamsMode === 'clipboard'
-                        ? {name: filename, path: filename, method: 'clipboard', opened: true, copied: true}
-                        : {name: filename, path: filename, method: 'share'};
+                    if (!filename) return window.teamsMode === 'manual' ? 'draft-copied' : 'filled';
+                    return window.teamsMode === 'manual'
+                        ? {name: filename, path: filename, method: 'manual', opened: true}
+                        : {name: filename, path: filename, method: 'attached', opened: true};
                 },
                 reveal_teams_file: async filename => { window.revealedFile = filename; }
             }};
@@ -93,19 +93,20 @@ def main():
         }""")
         output.unlink()
         page.locator("#expShare").click()
-        # 파일은 Windows 공유 창으로 — 고르면 Teams 에 첨부된 채로 열린다. 함께 보낼 글도 넘긴다.
-        expect(page.locator("#expOut")).to_contain_text("Windows 공유 창에서 Microsoft Teams를 고르세요")
-        expect(page.locator("#expShareHint")).to_contain_text("파일이 첨부된 채로 열립니다")
+        # 데스크톱 앱이 Teams 새 채팅에 파일과 함께 보낼 글을 직접 넣는다
+        expect(page.locator("#expOut")).to_contain_text("Teams 새 채팅에 파일과 안내 글을 넣었습니다")
+        expect(page.locator("#expShareHint")).to_contain_text("파일과 안내 글이 자동으로 들어갑니다")
         shared_file, = page.evaluate("teamShares")
         assert shared_file["filename"].endswith("-1건.json") and not output.exists()
         assert exchange.parse(shared_file["content"], "test-pass")["memos"] == packet["memos"]
         assert "memoinall 메모 1건" in shared_file["text"] and "비밀번호는 따로" in shared_file["text"], shared_file["text"]
         page.get_by_role("button", name="파일 위치 열기").click()
         assert page.evaluate("revealedFile") == shared_file["filename"]
-        # 공유 창을 쓸 수 없는 환경이면 예전처럼 클립보드 + 새 채팅 안내
-        page.evaluate("window.teamsMode = 'clipboard'")
+        # 자동으로 붙이지 못하면 새 채팅만 열고 '파일 첨부 → 이 디바이스에서 업로드'로 직접 올리게 안내
+        page.evaluate("window.teamsMode = 'manual'")
         page.locator("#expShare").click()
-        expect(page.locator("#expOut")).to_contain_text("Ctrl+V")
+        expect(page.locator("#expOut")).to_contain_text("이 디바이스에서 업로드")
+        expect(page.locator("#expOut")).not_to_contain_text("Ctrl+V")
         assert page.evaluate("teamShares.length") == 2
         page.locator("#expPw2").fill("different")
         page.locator("#expShare").click()
@@ -117,9 +118,13 @@ def main():
         page.locator("#dShare").click()
         assert page.evaluate("teamShares[2]") == {"content": "현재 편집한 한글 본문\n둘째 줄", "filename": None}
         expect(page.locator("#dShareMessage")).to_contain_text("받는 사람과 본문")
+        page.evaluate("window.teamsMode = 'filled'")         # 앱이 새 채팅에 본문을 직접 넣은 경우
+        page.locator("#dShare").click()
+        expect(page.locator("#dShareMessage")).to_contain_text("Teams 새 채팅에 본문을 넣었습니다")
+        assert page.evaluate("teamShares.length") == 4
         page.once("dialog", lambda dialog: dialog.accept())
         page.locator("#dClose").click()
-        print("OK Teams draft contains the visible memo; the attachment (only checked encrypted memos) goes to the Windows share sheet with a note, clipboard as fallback")
+        print("OK Teams draft contains the visible memo; the attachment (only checked encrypted memos) is put into the new chat with a note, manual upload as fallback")
         page.evaluate("""() => {
             delete window.pywebview;
             Object.defineProperty(navigator, 'userAgentData', {configurable: true, value: {platform: 'Windows'}});

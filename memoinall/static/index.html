@@ -507,7 +507,7 @@
     <button class="btn" id="dEdit">고치기</button>
     <button class="btn primary" id="dSave" hidden>저장</button>
     <button class="btn ghost" id="dPack">이 메모로 문서 만들기</button>
-    <button class="btn" id="dShare" title="현재 본문을 복사하고 Teams 새 채팅 열기">Teams로 본문 공유</button>
+    <button class="btn" id="dShare" title="현재 본문으로 Teams 새 채팅 열기">Teams로 본문 공유</button>
     <button class="btn" id="dCollection" hidden>취합표 보기</button>
     <span class="spacer"></span>
     <button class="btn ghost" id="dDelete" style="color:var(--danger)">삭제</button>
@@ -2668,6 +2668,7 @@ async function doExportCopy() {
 async function shareToTeams(content) {
   const bridge = window.pywebview?.api;
   const mode = bridge?.share_to_teams ? await bridge.share_to_teams(content, null) : await openTeamsChatLink(content);
+  if (mode === "filled") return "Teams 새 채팅에 본문을 넣었습니다. 받는 사람을 고르고 보내세요.";
   if (mode === "draft-copied") return "Teams에서 받는 사람과 본문을 확인하세요. 이전 초안이 보이면 복사된 본문을 붙여넣으세요.";
   if (mode === "paste") return "긴 본문 전체를 복사했습니다. Teams에서 받는 사람을 고르고 입력란에 붙여넣으세요.";
   return "Teams에서 받는 사람과 본문을 확인하세요. 본문이 다르면 ‘본문 복사’로 붙여넣으세요.";
@@ -2675,23 +2676,23 @@ async function shareToTeams(content) {
 
 function expShareHintText() {
   return window.pywebview?.api?.share_to_teams
-    ? "Windows 공유 창에서 Microsoft Teams를 고르면 파일이 첨부된 채로 열립니다. 받는 사람을 고르고 보내세요."
+    ? "Teams 새 채팅이 열리고 파일과 안내 글이 자동으로 들어갑니다. 받는 사람만 고르고 보내세요."
     : "Teams에서 받는 사람과 첨부파일을 확인한 뒤 전송하세요.";
 }
 // 데스크톱 앱의 연결(window.pywebview.api)은 화면이 뜬 뒤에 붙는다. 붙으면 안내를 데스크톱용으로 바꾼다.
 window.addEventListener("pywebviewready", () => { if ($("#expShareHint")) $("#expShareHint").textContent = expShareHintText(); });
 
-// 파일은 Windows 공유 창으로 넘긴다(method "share"). 공유 창을 못 쓰는 환경이면 클립보드 + 새 채팅(method "clipboard").
+// 데스크톱 앱은 Teams 새 채팅을 열고 그 화면에 파일을 직접 붙인다(method "attached").
+// 붙이지 못하면(method "manual") 새 채팅만 열려 있으니, 사용자가 '파일 첨부'로 올리거나 끌어다 놓는다.
 function showPreparedAttachment(out, file) {
   let message;
-  if (file.method === "share") {
-    message = "Windows 공유 창에서 Microsoft Teams를 고르세요. 파일이 첨부된 채로 Teams가 열리면 받는 사람을 고르고 보내면 됩니다. "
-      + "공유 창이 보이지 않거나 목록에 Teams가 없으면, 파일 위치를 열어 Teams 채팅으로 끌어다 놓으세요.";
+  if (file.method === "attached") {
+    message = "Teams 새 채팅에 파일과 안내 글을 넣었습니다. 받는 사람을 고르고 첨부를 확인한 뒤 보내세요.";
+  } else if (file.opened) {
+    message = "Teams 새 채팅을 열었지만 파일을 자동으로 붙이지 못했습니다. 메시지 입력란 아래 📎(파일 첨부) → ‘이 디바이스에서 업로드’로 "
+      + "아래 파일을 고르거나, 파일 위치를 열어 채팅으로 끌어다 놓으세요.";
   } else {
-    const launch = file.opened ? "" : "Teams 앱을 열 수 없습니다. Teams에 로그인한 뒤 ";
-    message = launch + (file.copied && file.opened
-      ? "받는 사람을 고르고 메시지 입력란에 Ctrl+V를 누르세요. 첨부가 보이지 않으면 파일 위치를 열어 채팅으로 끌어다 놓으세요."
-      : "파일 위치를 열고 준비된 파일을 Teams 채팅으로 끌어다 놓으세요.");
+    message = "Teams 앱을 열 수 없습니다. Teams에 로그인한 뒤 파일 위치를 열고 준비된 파일을 Teams 채팅으로 끌어다 놓으세요.";
   }
   out.innerHTML = `<p>${esc(message)}</p><div class="row">
     <button type="button" class="btn" data-reveal-file>파일 위치 열기</button>
@@ -2723,6 +2724,7 @@ async function shareExportFile(out, result, stillSelected) {
   if (file.size > 50000000) throw new Error("받는 쪽에서 열 수 있는 파일 크기는 50MB까지입니다. 메모를 나눠 선택하세요.");
   const bridge = window.pywebview?.api;
   if (bridge?.share_to_teams) {
+    out.textContent = "Teams 새 채팅에 파일을 넣는 중… 몇 초 동안 마우스와 키보드를 쓰지 말고 기다려 주세요.";
     const prepared = await bridge.share_to_teams(result.content, result.filename, result.text || null);
     if (stillSelected()) showPreparedAttachment(out, prepared);
     return;
@@ -3627,7 +3629,9 @@ $("#dShare").onclick = async () => {
   const message = $("#dShareMessage");
   $("#dShareFeedback").hidden = false;
   if (!body.trim()) { message.textContent = "공유할 메모 본문이 비어 있습니다."; return; }
-  message.textContent = "Teams 새 채팅을 여는 중…";
+  message.textContent = window.pywebview?.api?.share_to_teams
+    ? "Teams 새 채팅에 본문을 넣는 중… 몇 초 동안 마우스와 키보드를 쓰지 말고 기다려 주세요."
+    : "Teams 새 채팅을 여는 중…";
   button.disabled = true;
   try {
     const status = await shareToTeams(body);

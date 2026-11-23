@@ -152,19 +152,19 @@ def main():
         expect(page.locator("#scheduleShareStatus")).to_contain_text("1개 일정을 파일로 저장")
         print("OK desktop save cancellation keeps selections and a later save succeeds")
 
-        # Teams로 공유: 고른 일정의 .ics 를 Windows 공유 창으로, 일정 목록 글과 함께 넘긴다
+        # Teams로 공유: 고른 일정의 .ics 를 Teams 새 채팅에 일정 목록 글과 함께 넣는다
         page.evaluate("""() => {
             window.teamShares = [];
             window.pywebview.api.share_to_teams = async (content, filename, text) => {
                 teamShares.push({content, filename, text});
-                return {name: filename, path: filename, method: 'share'};
+                return {name: filename, path: filename, method: 'attached', opened: true};
             };
             window.pywebview.api.reveal_teams_file = async (name) => { window.revealed = name; };
         }""")
         expect(page.locator("#scheduleShareTeams")).to_be_enabled()
         page.locator("#scheduleShareTeams").click()
         out = page.locator("#scheduleShareTeamsOut")
-        expect(out).to_contain_text("Windows 공유 창에서 Microsoft Teams를 고르세요")
+        expect(out).to_contain_text("Teams 새 채팅에 파일과 안내 글을 넣었습니다")
         shared, = page.evaluate("teamShares")
         assert re.fullmatch(r"일정공유-\d{4}-\d{2}-\d{2}-\d{4}-\d{2}-\d{2}\.ics", shared["filename"]), shared["filename"]
         teams_events = Calendar.from_ical(shared["content"].encode()).walk("VEVENT")
@@ -181,7 +181,7 @@ def main():
         page.locator("#scheduleShareTeams").click()
         expect(page.locator("#scheduleShareError")).to_contain_text("Teams를 열 수 없습니다")
         expect(out).to_have_text("")
-        print("OK schedules go to Teams as the selected .ics through the Windows share sheet, with a readable list of events")
+        print("OK schedules go to a Teams new chat as the selected .ics, with a readable list of events")
 
         artifacts = Path("artifacts/ux-review")
         artifacts.mkdir(parents=True, exist_ok=True)
