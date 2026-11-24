@@ -32,6 +32,10 @@ CREATE TABLE IF NOT EXISTS memos (
     external_id TEXT            -- 외부 앱에서 가져온 메모의 원본 식별자
 );
 CREATE INDEX IF NOT EXISTS idx_memos_created ON memos(created_at DESC);
+CREATE TABLE IF NOT EXISTS memo_windows (
+    memo_id INTEGER PRIMARY KEY REFERENCES memos(id) ON DELETE CASCADE,
+    x INTEGER, y INTEGER, width INTEGER, height INTEGER
+);
 -- external_id 인덱스는 _migrate() 에서 만든다. 이 스크립트는 컬럼이 없는
 -- 구버전 DB 에도 실행되므로, 여기서 참조하면 열리지도 않는다.
 
@@ -230,7 +234,10 @@ def connect() -> sqlite3.Connection:
         config.ensure_home()
         conn = sqlite3.connect(config.DB_PATH, timeout=30.0)
         conn.row_factory = sqlite3.Row
+        new_profile = not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memos'").fetchone()
         conn.executescript(SCHEMA)
+        if new_profile:
+            conn.execute("INSERT OR IGNORE INTO meta(key,value) VALUES('starter_visible','1')")
         _migrate(conn)
         _local.conn = conn
     return conn

@@ -80,7 +80,11 @@ def find_by_external(source: str, external_id: str) -> int | None:
     return int(row["id"]) if row else None
 
 
-def update_memo(memo_id: int, body: str, *, enqueue_enrich: bool = True) -> dict:
+class MemoEditConflict(ValueError):
+    """The saved body changed since the editor opened it."""
+
+
+def update_memo(memo_id: int, body: str, *, expected_body: str | None = None, enqueue_enrich: bool = True) -> dict:
     body = (body or "").strip()
     if not body:
         raise ValueError("빈 메모는 저장할 수 없습니다.")
@@ -88,16 +92,25 @@ def update_memo(memo_id: int, body: str, *, enqueue_enrich: bool = True) -> dict
     # 시간이 걸리는 임베딩과 나머지 추출만 뒤의 보강 작업에 맡긴다.
     conn = db.connect()
     with conn:
-        cur = conn.execute(
-            "UPDATE memos SET body=?, title=?, updated_at=?, enriched_at=NULL WHERE id=?",
-            (body, textutil.title_from(body), now_iso(), memo_id),
-        )
+        sql = "UPDATE memos SET body=?, title=?, updated_at=?, enriched_at=NULL WHERE id=?"
+        params = (body, textutil.title_from(body), now_iso(), memo_id)
+        if expected_body is not None:
+            sql += " AND body=?"
+            params += (expected_body,)
+        cur = conn.execute(sql, params)
         if not cur.rowcount:
+            if expected_body is not None:
+                current = conn.execute("SELECT body FROM memos WHERE id=?", (memo_id,)).fetchone()
+                if current is not None:
+                    if current["body"] == body:
+                        return get_memo(memo_id)
+                    raise MemoEditConflict("다른 창에서 이 메모를 수정했습니다.")
             raise KeyError(f"메모 {memo_id} 없음")
         _index_body(conn, memo_id, body)
+        saved = get_memo(memo_id)
     if enqueue_enrich:
         enqueue(memo_id)
-    return get_memo(memo_id)
+    return saved
 
 
 def delete_memo(memo_id: int) -> None:

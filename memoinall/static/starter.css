@@ -1,0 +1,35 @@
+html:has(#starterTour[open]) { overflow: hidden; }
+.tour-work-area { max-height: max(100px, min(58dvh, calc(100dvh - 250px))); overflow-y: auto; }
+#starterTour {
+  position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none;
+  margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; overflow: hidden;
+  z-index: 1000; pointer-events: none;
+}
+#starterTour::backdrop { background: transparent; }
+.tour-shade {
+  pointer-events: auto;
+  position: absolute; inset: 0; background: rgb(12 17 26 / 57%);
+  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+  clip-path: polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%, 0 0,
+    var(--left) var(--top), var(--left) var(--bottom), var(--right) var(--bottom),
+    var(--right) var(--top), var(--left) var(--top), 0 0);
+}
+#tourTarget {
+  position: absolute; inset: var(--top) auto auto var(--left);
+  width: calc(var(--right) - var(--left)); height: calc(var(--bottom) - var(--top));
+  padding: 0; background: transparent; border: 2px solid var(--accent); border-radius: 6px;
+}
+#tourTip {
+  pointer-events: auto;
+  position: absolute; width: min(340px, calc(100% - 24px)); max-height: calc(100% - 24px);
+  overflow: auto; padding: 15px 17px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--panel); color: var(--fg); box-shadow: 0 8px 36px rgb(0 0 0 / 27%);
+}
+.tour-top, .tour-actions { display: flex; align-items: center; gap: 8px; }
+.tour-top { justify-content: space-between; font-size: 13px; color: var(--dim); }
+#tourClose { background: none; border: 0; color: inherit; cursor: pointer; }
+#tourTitle { margin: 7px 0 4px; font-size: 18px; }
+#tourTitle:focus { outline: none; }
+#tourText { margin: 0 0 14px; line-height: 1.55; }
+.tour-actions { flex-wrap: wrap; }
+#tourImportSwitch { margin-right: auto; }

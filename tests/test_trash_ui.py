@@ -46,6 +46,7 @@ def main():
             route.fulfill(status=response.status_code, headers=headers, body=response.content)
 
         page.route("http://127.0.0.1:8787/**", serve)
+        client.put("/api/starter", json={"visible": False})
         page.goto("http://127.0.0.1:8787/")
         cards = page.locator("#view .card[data-id]")
         expect(cards.first).to_have_attribute("data-id", str(links["id"]))

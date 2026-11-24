@@ -35,6 +35,7 @@ def main():
             route.fulfill(status=response.status_code, headers=headers, body=response.content)
 
         page.route("http://127.0.0.1:8787/**", serve)
+        client.put("/api/starter", json={"visible": False})
         page.goto("http://127.0.0.1:8787/")
 
         # 메모 입력칸: 내 태그가 없으면 접힌 상태에서도 '내 태그 정하기' 링크가 보이고, 누르면 새 태그 입력으로 간다

@@ -286,6 +286,7 @@
   dialog::backdrop { background: rgba(0,0,0,.55); }
   .dlg-h { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
   .dlg-h .card-title { font-size: 15px; }
+  #detail .dlg-h { flex-wrap: wrap; }
   .dlg-b { padding: 16px 18px; max-height: 68vh; overflow: auto; }
   .dlg-b textarea {
     width: 100%; min-height: 220px; background: var(--panel-2); border: 1px solid var(--line);
@@ -424,6 +425,7 @@
   @media (max-width: 600px) { .col-sheet { margin-left: 0; } .col-steps { gap: 12px; font-size: 13px; } }
 </style>
 <link rel="stylesheet" href="/static/todo-planner.css">
+<link rel="stylesheet" href="/static/starter.css">
 </head>
 <body>
 <div class="app">
@@ -515,6 +517,7 @@
     <span class="card-title" id="dTitle"></span>
     <span class="meta" id="dMeta"></span>
     <button type="button" class="btn ghost" id="dPin" aria-pressed="false">📌 고정</button>
+    <button type="button" class="btn" id="dMemoWindow" hidden title="작은 창에서 메모를 편집하고 Ctrl+S로 저장합니다.">항상 위에 띄우기</button>
   </div>
   <div class="dlg-b">
     <section class="detail-tags" aria-labelledby="dTagLabel">
@@ -554,8 +557,23 @@
   </div>
 </dialog>
 
+<dialog id="starterTour" aria-labelledby="tourTitle" aria-describedby="tourText">
+  <div class="tour-shade" aria-hidden="true"></div>
+  <div id="tourTarget" aria-hidden="true"></div>
+  <div id="tourTip">
+    <div class="tour-top"><span id="tourProgress" aria-live="polite"></span><button type="button" id="tourClose" aria-label="튜토리얼 닫기">닫기</button></div>
+    <h3 id="tourTitle" tabindex="-1"></h3>
+    <p id="tourText"></p>
+    <div class="tour-actions">
+      <button class="btn" type="button" id="tourImportSwitch">스티커 메모 보기</button>
+      <button class="btn ghost" type="button" id="tourBack">이전</button>
+      <button class="btn primary" type="button" id="tourNext">다음</button>
+    </div>
+  </div>
+</dialog>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+<script src="/static/starter.js"></script>
 <script src="/static/qrshare.js"></script>
 <script src="/static/stt-live.js"></script>
 <script src="/static/generate.js"></script>
@@ -594,7 +612,7 @@ const api = async (path, opts = {}) => {
       if (typeof d === "string") msg = d;
       else if (Array.isArray(d) && d[0]?.msg) msg = d.map((e) => e.msg).join(" · ");
     } catch { /* JSON 이 아니면 원문 그대로 */ }
-    throw new Error(msg);
+    throw Object.assign(new Error(msg), {status: res.status});
   }
   return res.headers.get("content-type")?.includes("json") ? res.json() : res.text();
 };
@@ -1286,6 +1304,7 @@ function goTab(id) {
   return render();   // 화면이 다 그려진 뒤에 이어서 할 일이 있는 호출자를 위해
 }
 
+
 // ---------------------------------------------------------------- 내 태그
 // 태그의 원본은 언제나 메모 본문의 `#태그` 다. 칩은 그 본문을 고치는 손잡이일 뿐이라
 // 사용자는 저장 전에 무엇이 들어갈지 글로 직접 확인할 수 있다.
@@ -1471,6 +1490,8 @@ async function render() {
     await (views[state.tab] || renderFeed)(version);
   } catch (e) {
     if (version === renderVersion) view.innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`;
+  } finally {
+    if (version === renderVersion) starterTour.refresh();
   }
 }
 
@@ -1801,7 +1822,7 @@ function sourceActions(x) {
 }
 
 function sourceCard(x, extra = "") {
-  return `<div class="src" style="align-items:stretch">
+  return `<div class="src" ${x.name === "sticky" ? 'id="stickySource" tabindex="-1" role="group" aria-label="스티커 메모 가져오기"' : ""} style="align-items:stretch">
     <div class="src-body">
       <div><b>${esc(x.label)}</b>
         <span class="${x.available ? "ok" : "no"}">${x.available ? "● 사용 가능" : notebookFiles[x.name] ? "파일 선택 전" : "○ 없음"}</span>
@@ -2304,7 +2325,7 @@ async function previewDocument(file) {
     docImport.preview = p;
     docImport.selected = new Set(p.parts.map((part) => part.key));
   } catch (e) { docImport.error = e.message; }
-  finally { docImport.busy = false; paintDocumentPreview(); }
+  finally { docImport.busy = false; paintDocumentPreview(); starterTour.refresh(); }
 }
 
 function documentParts() {
@@ -2367,6 +2388,7 @@ function paintDocumentPreview() {
   $("#documentSave").onclick = saveDocument;
   updateDocumentSave();
   if (docImport.result) paintDocumentResult();
+  if (!docImport.busy) starterTour.refresh();
 }
 
 async function saveDocument() {
@@ -3262,7 +3284,7 @@ async function renderSettings(version = renderVersion) {
         태그는 메모 본문의 <code>#태그</code> 로 저장되니, 내보낸 파일을 받은 쪽에서도 그대로 살아납니다.
       </div>
       <div id="tagList" style="margin:12px 0"></div>
-      <div class="field" style="grid-template-columns:80px 1fr">
+      <div class="field" id="tourTagField" style="grid-template-columns:80px 1fr">
         <label>새 태그</label>
         <div class="row" style="gap:8px">
           <input id="newTag" placeholder="예) 결제  (# 없이 · 한글·영문·숫자·_ - /)" style="flex:1" />
@@ -3289,7 +3311,7 @@ async function renderSettings(version = renderVersion) {
         원하는 LLM 에 붙여 넣으면 됩니다. 키는 이 PC 의 <code>${esc(cfg.db_path)}</code> 에
         <b>평문으로</b> 저장되니 공용 PC 라면 환경변수 쪽을 쓰세요.
       </div>
-      <div class="tabs" style="margin-bottom:14px">${tabs}</div>
+      <div class="tabs" id="tourProviders" style="margin-bottom:14px">${tabs}</div>
       <div class="desc" style="margin-bottom:14px">${esc(p.note)}</div>
 
       ${p.needs_key ? `
@@ -3412,7 +3434,9 @@ async function renderSettings(version = renderVersion) {
       <div class="row" style="margin:0"><span class="spacer"></span>
         <button class="btn" id="reindexBtn">전체 재색인</button>
       </div>
-    </div>`;
+    </div>
+    <button class="btn ghost" type="button" id="reopenStarter">튜토리얼 다시 보기</button>`;
+  $("#reopenStarter").onclick = () => starterTour.open();
 
   const save = async (values, msg) => {
     await api("/api/settings", { method: "PUT", body: { values } });
@@ -3643,7 +3667,7 @@ function addDetailTag(raw = $("#dTagInput").value) {
 }
 
 function detailDirty() {
-  return $("#detail").open && state.memo && ($("#dBody").value !== state.memo.body || $("#dTagInput").value.trim());
+  return $("#detail").open && state.memo && ($("#dBody").value !== state.memo.body.replace(/\r\n?/g, "\n") || $("#dTagInput").value.trim());
 }
 function closeDetail() {
   if (detailDirty() && !confirm("수정한 내용이 아직 저장되지 않았습니다. 변경 내용을 버리고 닫을까요?")) return false;
@@ -3754,13 +3778,20 @@ function setEditing(on, focus = false) {
 }
 
 let memoRequest = 0;
-async function openMemo(id, hit = null) {
+let memoRefresh = 0, detailHit = null;
+async function openMemo(id, hit = null, refreshOnly = false) {
   if (detailDirty() && !confirm("현재 수정한 내용을 버리고 다른 메모를 열까요?")) return;
-  const request = ++memoRequest;
+  const request = refreshOnly ? memoRequest : ++memoRequest;
+  const refresh = ++memoRefresh;
   let m;
   try { m = await api(`/api/memos/${id}`); }
   catch (e) { toast("메모를 열지 못했습니다: " + e.message); return; }
   if (request !== memoRequest) return;
+  if (refreshOnly && (refresh !== memoRefresh || !$("#detail").open || state.memo?.id !== id || detailDirty())) return;
+  if (!refreshOnly) detailHit = hit;
+  const displayHit = refreshOnly && !$("#dBody").hidden ? null : detailHit;
+  const caret = refreshOnly && document.activeElement === $("#dBody")
+    ? [$("#dBody").selectionStart, $("#dBody").selectionEnd] : null;
   state.memo = m;
   $("#dShareFeedback").hidden = true;
   $("#dShare").disabled = false;
@@ -3791,10 +3822,21 @@ async function openMemo(id, hit = null) {
   $("#dPack").textContent = collection ? "이 자료로 문서 만들기" : "이 메모로 문서 만들기";
   if (!$("#detail").open) $("#detail").showModal();
   // 창이 열린 뒤라야 위치를 잴 수 있다 — 닫혀 있으면 높이가 전부 0 이라 안 움직인다.
-  paintDoc(m, hit);
+  paintDoc(m, displayHit);
+  if (caret) $("#dBody").setSelectionRange(...caret);
 }
 
 $("#dClose").onclick = closeDetail;
+function bindMemoWindow() {
+  $("#dMemoWindow").hidden = !window.pywebview?.api?.open_memo_window;
+}
+bindMemoWindow();
+window.addEventListener("pywebviewready", bindMemoWindow);
+$("#dMemoWindow").onclick = async () => {
+  if (!state.memo) return;
+  try { await window.pywebview.api.open_memo_window(state.memo.id); }
+  catch { toast("메모 창을 열지 못했습니다. 메모가 있는지 확인하고 다시 시도하세요."); }
+};
 $("#dEdit").onclick = () => setEditing(true, true);
 $("#dShare").onclick = async () => {
   const button = $("#dShare"), body = $("#dBody").value, request = memoRequest;
@@ -3832,15 +3874,24 @@ $("#detail").addEventListener("cancel", (e) => { e.preventDefault(); closeDetail
 $("#dSave").onclick = async () => {
   if ($("#dSave").disabled) return;
   if ($("#dTagInput").value.trim() && !addDetailTag()) return;
-  const id = state.memo.id, body = $("#dBody").value;
+  const id = state.memo.id, body = $("#dBody").value, expected = state.memo.body;
   $("#dSave").disabled = $("#dDelete").disabled = $("#dPack").disabled = true;
   try {
-    const memo = await api(`/api/memos/${id}`, { method: "PUT", body: { body } });
+    let memo, copied = false;
+    try {
+      memo = await api(`/api/memos/${id}`, { method: "PUT", body: { body, expected_body: expected } });
+    } catch (error) {
+      if (error.status !== 409 && error.status !== 404) throw error;
+      if (state.memo?.id !== id || !$("#detail").open ||
+          !confirm(error.message + " 지금 편집한 내용을 새 메모로 저장할까요?")) return;
+      memo = await api("/api/memos", {method: "POST", body: {body}});
+      copied = true;
+    }
     if (state.memo.id === id) {
       state.memo = memo;
       if ($("#dBody").value === body && !$("#dTagInput").value.trim()) $("#detail").close();
     }
-    toast("수정했습니다");
+    toast(copied ? "편집한 내용을 새 메모로 저장했습니다" : "수정했습니다");
     render(); loadSidebar(); loadTags();
   } catch (e) { toast("수정 실패: " + e.message); }
   finally { $("#dSave").disabled = $("#dDelete").disabled = $("#dPack").disabled = false; }
@@ -4000,7 +4051,10 @@ async function bindQuickCapture() {
 }
 window.addEventListener("pywebviewready", bindQuickCapture);
 bindQuickCapture();
-window.addEventListener("quick-memo-saved", () => {
+window.addEventListener("quick-memo-saved", (event) => {
+  if (event.detail === state.memo?.id && $("#detail").open && !detailDirty()) {
+    openMemo(event.detail, null, true);
+  }
   if (state.tab === "feed") render();
   if (state.tab === "todos" && todoBoard.layout === "calendar") refreshTodoBoard();
   loadSidebar(); loadTags();
@@ -4008,6 +4062,8 @@ window.addEventListener("quick-memo-saved", () => {
 
 renderTabs();
 bindSearchTools();
+const starterTour = setupStarterTour();
+starterTour.firstRun();
 loadSidebar().catch((e) => toast("상태를 불러오지 못했습니다: " + e.message));
 loadTags();
 render();

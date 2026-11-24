@@ -72,8 +72,10 @@ class QuickCaptureTests(unittest.TestCase):
                     listen()
 
                 capture._listen = listen_here
-                # Occupy only this private desktop's primary combination.
-                self.assertTrue(user.RegisterHotKey(None, 22, MOD_CONTROL | MOD_ALT, ord("M")))
+                # The running desktop app may already own the primary shortcut.
+                claimed = user.RegisterHotKey(None, 22, MOD_CONTROL | MOD_ALT, ord("M"))
+                if not claimed:
+                    self.assertEqual(ctypes.get_last_error(), 1409)  # ERROR_HOTKEY_ALREADY_REGISTERED
                 try:
                     capture.start()
                     self.assertTrue(capture.ready.wait(3))
@@ -121,7 +123,8 @@ class QuickCaptureTests(unittest.TestCase):
                 finally:
                     capture.stop()
                     pump_until(lambda: capture.thread_id is None)
-                    user.UnregisterHotKey(None, 22)
+                    if claimed:
+                        user.UnregisterHotKey(None, 22)
                     parent.Close()
                     db.close()
             except BaseException as error:

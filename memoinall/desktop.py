@@ -81,7 +81,7 @@ p {{ color:#aeb9c8; white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.
 </style><main><h1>memoinall</h1><p role="status">{escape(message)}</p></main></html>"""
 
 
-def _open_when_ready(window, port: int, closed, failed) -> None:
+def _open_when_ready(window, port: int, closed, failed, memo_windows=None) -> None:
     from . import config
 
     started = time.monotonic()
@@ -95,6 +95,8 @@ def _open_when_ready(window, port: int, closed, failed) -> None:
             threading.Thread(target=_allow_local_media, args=(window, port), daemon=True,
                              name="media-permission").start()
             window.load_url(f"http://127.0.0.1:{port}/")
+            if memo_windows is not None:
+                memo_windows.restore()
         else:
             log.error("서버가 뜨지 않았습니다.")
             window.load_html(_startup_html(
@@ -196,16 +198,20 @@ def run() -> int:
         )
         log.info("create_window OK")
         window.events.closed += closed.set
+        memo_windows = None
         if sys.platform == "win32":
             from .quick_capture import QuickCapture
+            from .memo_windows import MemoWindows
             from . import teams_share
 
             QuickCapture(window).install()
+            memo_windows = MemoWindows(window)
+            window.expose(memo_windows.open_memo_window)
             teams_share.install(window)
         _install_downloader(window)
         log.info("webview.start() 진입 — 창이 닫힐 때까지 블로킹")
         # GUI 는 메인 스레드에서 바로 시작하고, 서버 확인만 별도 스레드에서 한다.
-        webview.start(_open_when_ready, (window, port, closed, failed))
+        webview.start(_open_when_ready, (window, port, closed, failed, memo_windows))
         log.info("webview.start() 반환")
     except Exception:
         log.exception("창을 띄우지 못했습니다")

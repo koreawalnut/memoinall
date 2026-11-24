@@ -50,6 +50,7 @@ def main():
             route.fulfill(status=response.status_code, headers=headers, body=response.content)
 
         page.route("http://127.0.0.1:8787/**", serve)
+        client.put("/api/starter", json={"visible": False})
         page.goto("http://127.0.0.1:8787/")
         expect(page.locator("#capture")).to_be_enabled()
         expect(page.locator("#tabs > button")).to_have_text(["내 메모", "일정", "메모로 문서 만들기", "가져오기·공유", "설정"])

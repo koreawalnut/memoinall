@@ -22,6 +22,7 @@ with TestClient(t.app) as client, sync_playwright() as pw:
         resp = client.request(r.method, path, content=r.post_data_buffer, headers=sent)
         route.fulfill(status=resp.status_code, headers={k: v for k, v in resp.headers.items() if k not in {"content-length", "content-encoding"}}, body=resp.content)
     page.route("http://127.0.0.1:8787/**", serve)
+    client.put("/api/starter", json={"visible": False})
     page.goto("http://127.0.0.1:8787/"); page.locator('[data-tab="import"]').click(); page.locator("#openCollect").click()
     page.locator("#colFiles").set_input_files([{"name": n, "mimeType": t.XLSX, "buffer": b} for n, b in files])
     expect(page.locator(".col-groups")).to_be_visible(timeout=20000)

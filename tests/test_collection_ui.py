@@ -80,6 +80,7 @@ def main():
                 route.fulfill(status=response.status_code, headers=headers, body=response.content)
 
         page.route("http://127.0.0.1:8787/**", serve)
+        client.put("/api/starter", json={"visible": False})
         page.goto("http://127.0.0.1:8787/")
         expect(page.locator("#capture")).to_be_enabled()
         expect(page.locator('#tabs > button[data-tab="collect"]')).to_have_count(0)

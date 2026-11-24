@@ -87,6 +87,7 @@ def main():
             route.fulfill(status=response.status_code, headers=headers, body=response.content)
 
         page.route("http://127.0.0.1:8787/**", answer)
+        client.put("/api/starter", json={"visible": False})
         page.goto("http://127.0.0.1:8787/")
         capture, mic, hint = page.locator("#capture"), page.locator("#mic"), page.locator("#captureHint")
         expect(capture).to_be_enabled()

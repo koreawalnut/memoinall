@@ -52,6 +52,7 @@ from . import (
     todo_ai,
     workflows,
 )
+from .source_tags import IMPORT_SOURCES
 
 log = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
@@ -112,6 +113,25 @@ def health():
 
 
 # --------------------------------------------------------------------------- 메모
+
+
+@app.get("/api/starter")
+def starter_status():
+    if db.get_meta("starter_visible") != "1":
+        return {"visible": False}
+    marks = ",".join("?" for _ in IMPORT_SOURCES)
+    return {
+        "visible": True,
+        "imported": bool(db.one(f"SELECT 1 FROM memos WHERE source IN ({marks}) LIMIT 1", IMPORT_SOURCES)),
+        "tagged": bool(db.one("SELECT 1 FROM tag_defs LIMIT 1")),
+        "ai_configured": settings.provider_ready(),
+    }
+
+
+@app.put("/api/starter")
+def set_starter_visibility(visible: bool = Body(..., embed=True)):
+    db.set_meta("starter_visible", "1" if visible else "0")
+    return {"visible": visible}
 
 
 @app.post("/api/memos")
@@ -185,9 +205,16 @@ def read_memo(memo_id: int):
 
 @app.put("/api/memos/{memo_id}")
 def edit_memo(memo_id: int, payload: dict = Body(...)):
+    expected = payload.get("expected_body")
+    if expected is not None and not isinstance(expected, str):
+        raise HTTPException(400, "편집을 시작한 본문은 문자열이어야 합니다.")
     try:
-        return store.update_memo(memo_id, payload.get("body", ""))
-    except (KeyError, ValueError) as exc:
+        return store.update_memo(memo_id, payload.get("body", ""), expected_body=expected)
+    except store.MemoEditConflict as exc:
+        raise HTTPException(409, str(exc))
+    except KeyError:
+        raise HTTPException(404 if expected is not None else 400, "원본 메모가 삭제되었습니다.")
+    except ValueError as exc:
         raise HTTPException(400, str(exc))
 
 

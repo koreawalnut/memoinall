@@ -46,6 +46,7 @@ def main():
             answer(route)
 
         page.route("http://127.0.0.1:8787/**", serve)
+        client.put("/api/starter", json={"visible": False})
         page.goto("http://127.0.0.1:8787/")
         page.locator('[data-tab="generate"]').click()
         page.locator("#genInput").fill("이번 주 업무를 정리해줘")

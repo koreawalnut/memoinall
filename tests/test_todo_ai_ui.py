@@ -77,6 +77,7 @@ def main():
             expect(page.locator("#todoAiRun")).to_be_visible()
 
         page.route("http://127.0.0.1:8787/**", serve)
+        client.put("/api/starter", json={"visible": False})
         page.goto("http://127.0.0.1:8787/")
         expect(page.locator("#capture")).to_be_enabled()
         open_todos()

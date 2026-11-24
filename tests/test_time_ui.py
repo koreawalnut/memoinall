@@ -36,6 +36,7 @@ def main():
                 route.fulfill(status=response.status_code, headers=headers, body=response.content)
 
             page.route("http://127.0.0.1:8787/**", serve)
+            client.put("/api/starter", json={"visible": False})
             page.goto("http://127.0.0.1:8787/")
             cases = {
                 "2026-11-09T14:30:00": "2026-11-09 14:30",

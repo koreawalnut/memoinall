@@ -137,10 +137,12 @@ class StartupTests(unittest.TestCase):
                  patch.object(desktop, "_single_instance_lock", return_value=MagicMock()), \
                  patch.object(desktop, "_log_webview_assets"), \
                  patch.object(desktop, "_install_downloader"), \
+                 patch("memoinall.memo_windows.MemoWindows.restore") as restore_windows, \
                  patch.object(desktop, "_wait_until_up", side_effect=wait), \
                  patch.object(desktop.threading, "Thread"), \
                  patch.object(desktop.logging, "basicConfig"):
                 self.assertEqual(desktop.run(), 0)
+                self.assertEqual(restore_windows.call_count, int(sys.platform == "win32"))
         finally:
             sys.excepthook, threading.excepthook = old_hook, old_thread_hook
         self.assertEqual(order, ["gui", "health"])
