@@ -15,7 +15,7 @@ from pathlib import Path
 from urllib.parse import quote, urlsplit
 
 from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, PlainTextResponse, Response
+from fastapi.responses import PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
@@ -1128,6 +1128,8 @@ def write_settings(payload: dict = Body(...)):
         raise HTTPException(400, f"알 수 없는 음성 인식 모델: {values['stt.local.model']}")
     if values.get("mobile.url"):
         values["mobile.url"] = _mobile_url(values["mobile.url"])
+    if "ui.theme" in values and values["ui.theme"] not in ("", None, *settings.THEMES):
+        raise HTTPException(400, "화면 테마는 화이트(light) 또는 다크(dark) 중에서 고르세요.")
     settings.set_many(values)
     llm.reset()  # 캐시된 어댑터를 버려야 새 설정이 즉시 반영된다
     return settings.public_view()
@@ -1465,4 +1467,11 @@ if STATIC_DIR.exists():
 
     @app.get("/")
     def index():
-        return FileResponse(STATIC_DIR / "index.html")
+        # 고른 테마를 첫 줄에 박아 보낸다. 스크립트가 돌기 전 첫 화면부터 그 색으로 그려져 깜빡이지 않는다.
+        # 고르지 않았으면 그대로 보내고, 페이지 첫머리 스크립트가 Windows 설정을 따라 정한다.
+        page = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+        chosen = settings.theme()
+        if chosen:
+            page = page.replace('<html lang="ko">',
+                                f'<html lang="ko" data-theme-choice="{chosen}" data-theme="{chosen}">', 1)
+        return Response(page, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-cache"})

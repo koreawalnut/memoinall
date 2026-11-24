@@ -4,18 +4,28 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>memoinall</title>
+<script>
+  // 화면 테마. 서버가 고른 값(data-theme-choice)을 첫 줄에 박아 보낸다. 고르지 않았으면 Windows 설정을 따르고,
+  // Windows 설정이 바뀌면 같이 바뀐다. 그리기 전에 정해야 다른 색이 번쩍이지 않아 <head> 맨 앞에서 돈다.
+  (() => {
+    const root = document.documentElement, system = matchMedia("(prefers-color-scheme: light)");
+    window.applyTheme = () => { root.dataset.theme = root.dataset.themeChoice || (system.matches ? "light" : "dark"); };
+    applyTheme();
+    system.addEventListener("change", applyTheme);
+  })();
+</script>
 <style>
   :root {
     --bg: #0f1115; --panel: #161a21; --panel-2: #1c212a; --line: #262c37;
     --fg: #e6e9ef; --dim: #8b95a7; --accent: #7aa2f7; --accent-2: #9ece6a;
     --warn: #e0af68; --danger: #f7768e; --radius: 10px;
+    color-scheme: dark;
   }
-  @media (prefers-color-scheme: light) {
-    :root {
-      --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --line: #e0e3e9;
-      --fg: #1a1d23; --dim: #6b7280; --accent: #3b6fd4; --accent-2: #3f8f45;
-      --warn: #a36b16; --danger: #c0384f;
-    }
+  :root[data-theme="light"] {
+    --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --line: #e0e3e9;
+    --fg: #1a1d23; --dim: #6b7280; --accent: #3b6fd4; --accent-2: #3f8f45;
+    --warn: #a36b16; --danger: #c0384f;
+    color-scheme: light;
   }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
@@ -361,6 +371,27 @@
   .ask-foot { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }
   .ask-foot .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+  /* 화면 테마 고르기 — 처음 시작할 때와 설정 맨 아래. 미리보기 그림은 테마와 상관없이 그 테마의 실제 색으로 그린다. */
+  #themeChooser { width: min(520px, calc(100vw - 32px)); }
+  .theme-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 12px 0 4px; max-width: 480px; }
+  .theme-option { display: grid; gap: 3px; justify-items: start; text-align: left; padding: 10px; cursor: pointer;
+    border: 2px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--fg); }
+  .theme-option:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+  .theme-option[aria-checked="true"] { border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+  .theme-name { font-weight: 700; margin-top: 4px; }
+  .theme-preview { display: grid; grid-template-columns: 26% 1fr; grid-template-rows: 18% 1fr; gap: 5px;
+    width: 100%; aspect-ratio: 16 / 9; padding: 7px; border-radius: 8px; border: 1px solid; }
+  .theme-preview i { border-radius: 4px; }
+  .theme-preview i:first-child { grid-row: 1 / 3; }
+  .theme-preview.light { background: #f6f7f9; border-color: #e0e3e9; }
+  .theme-preview.light i { background: #ffffff; box-shadow: 0 0 0 1px #e0e3e9; }
+  .theme-preview.light i:nth-child(2) { background: #3b6fd4; box-shadow: none; }
+  .theme-preview.dark { background: #0f1115; border-color: #262c37; }
+  .theme-preview.dark i { background: #1c212a; }
+  .theme-preview.dark i:nth-child(2) { background: #7aa2f7; }
+  @media (max-width: 420px) { .theme-options { gap: 8px; } .theme-option { padding: 8px; } }
+
   /* 휴지통 */
   .trash-card { cursor: default; }
   .trash-card:hover { border-color: var(--line); }
@@ -555,6 +586,15 @@
     <button class="btn ghost" id="dDelete" style="color:var(--danger)" title="휴지통으로 옮깁니다. 30일 안에 되살릴 수 있습니다.">삭제</button>
     <button class="btn ghost" id="dClose">닫기</button>
   </div>
+</dialog>
+
+<dialog id="themeChooser" aria-labelledby="themeChooserTitle" aria-describedby="themeChooserDesc">
+  <div class="dlg-h"><strong id="themeChooserTitle">화면 테마를 골라 주세요</strong></div>
+  <div class="dlg-b">
+    <p class="status" id="themeChooserDesc" style="margin-top:0">눌러 보면 바로 바뀌어 미리 볼 수 있어요. 나중에 설정 맨 아래 ‘화면 테마’에서 언제든 바꿀 수 있습니다.</p>
+    <div id="themeChooserOptions"></div>
+  </div>
+  <div class="dlg-f"><span class="spacer"></span><button class="btn primary" type="button" id="themeChooserDone">이 테마로 시작</button></div>
 </dialog>
 
 <dialog id="starterTour" aria-labelledby="tourTitle" aria-describedby="tourText">
@@ -3442,8 +3482,29 @@ async function renderSettings(version = renderVersion) {
         <button class="btn" id="reindexBtn">전체 재색인</button>
       </div>
     </div>
-    <button class="btn ghost" type="button" id="reopenStarter">튜토리얼 다시 보기</button>`;
+    <button class="btn ghost" type="button" id="reopenStarter">튜토리얼 다시 보기</button>
+
+    <div class="panel" id="themePanel" style="margin-top:16px">
+      <h3>화면 테마</h3>
+      <div class="desc">화이트와 다크 중에서 고르세요. 누르면 바로 바뀌고, 다음에 켤 때도 그대로입니다.</div>
+      <div id="themeSettingOptions">${themeOptionsHTML()}</div>
+      <div class="note" id="themeNote" aria-live="polite"></div>
+    </div>`;
   $("#reopenStarter").onclick = () => starterTour.open();
+  const themeHost = $("#themeSettingOptions");
+  const paintThemeNote = () => {
+    $("#themeNote").textContent = themeChoice() ? ""
+      : `아직 고르지 않아 Windows 설정을 따르고 있습니다(지금은 ${THEME_LABELS[currentTheme()]}).`;
+  };
+  markThemeOptions(themeHost, themeChoice());
+  paintThemeNote();
+  bindThemeOptions(themeHost, async (theme) => {
+    if (theme === themeChoice()) return;
+    markThemeOptions(themeHost, theme);
+    if (await saveTheme(theme)) toast(`${THEME_LABELS[theme]} 테마로 바꿨습니다`);
+    markThemeOptions(themeHost, themeChoice());
+    paintThemeNote();
+  });
 
   const save = async (values, msg) => {
     await api("/api/settings", { method: "PUT", body: { values } });
@@ -3944,6 +4005,95 @@ $("#dDelete").onclick = async () => {
   finally { $("#dDelete").disabled = false; }
 };
 
+// ---------------------------------------------------------------- 화면 테마
+// <html data-theme-choice> 는 사용자가 고른 값(없으면 Windows 설정을 따름), data-theme 은 실제로 쓰는 색이다.
+const THEME_LABELS = { light: "화이트", dark: "다크" };
+const themeChoice = () => document.documentElement.dataset.themeChoice || "";
+const currentTheme = () => document.documentElement.dataset.theme || "dark";
+
+function previewTheme(theme) {
+  if (theme) document.documentElement.dataset.themeChoice = theme;
+  else delete document.documentElement.dataset.themeChoice;
+  applyTheme();
+}
+
+// 바로 바꾸고 저장한다. 저장에 실패하면 원래 테마로 되돌린다.
+async function saveTheme(theme) {
+  const before = themeChoice();
+  previewTheme(theme);
+  try {
+    await api("/api/settings", { method: "PUT", body: { values: { "ui.theme": theme } } });
+    return true;
+  } catch (e) {
+    previewTheme(before);
+    toast("테마를 저장하지 못했습니다: " + e.message);
+    return false;
+  }
+}
+
+function themeOptionsHTML() {
+  return `<div class="theme-options" role="radiogroup" aria-label="화면 테마">${Object.entries(THEME_LABELS).map(([theme, label]) => `
+    <button type="button" class="theme-option" role="radio" aria-checked="false" data-theme-option="${theme}">
+      <span class="theme-preview ${theme}" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class="theme-name">${label}</span><span class="meta">${theme === "light" ? "밝은 배경" : "어두운 배경"}</span>
+    </button>`).join("")}</div>`;
+}
+
+// 라디오 묶음: 고른 것만 Tab 으로 닿고, 화살표로 옮겨 고른다. 아무것도 안 골랐으면 첫 칸에 닿는다.
+function markThemeOptions(host, selected) {
+  const options = [...host.querySelectorAll("[data-theme-option]")];
+  options.forEach((b) => {
+    b.setAttribute("aria-checked", String(b.dataset.themeOption === selected));
+    b.tabIndex = b.dataset.themeOption === selected ? 0 : -1;
+  });
+  if (!options.some((b) => b.tabIndex === 0) && options[0]) options[0].tabIndex = 0;
+}
+
+function bindThemeOptions(host, onPick) {
+  const options = [...host.querySelectorAll("[data-theme-option]")];
+  options.forEach((b, i) => {
+    b.onclick = () => onPick(b.dataset.themeOption);
+    b.onkeydown = (e) => {
+      const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+      if (!step) return;
+      e.preventDefault();
+      const next = options[(i + step + options.length) % options.length];
+      next.focus();
+      onPick(next.dataset.themeOption);
+    };
+  });
+}
+
+// 처음 시작할 때(새 프로필 · 시작 안내가 켜진 상태) 아직 테마를 안 골랐으면 고르게 한다.
+async function firstRunTheme() {
+  if (themeChoice()) return;
+  try {
+    const s = await api("/api/starter");
+    if (s.visible && !document.querySelector("dialog[open]")) await chooseThemeFirst();
+  } catch { /* 고르지 않아도 Windows 설정을 따라 그대로 쓴다 */ }
+}
+
+function chooseThemeFirst() {
+  return new Promise((resolve) => {
+    const dialog = $("#themeChooser"), host = $("#themeChooserOptions");
+    let picked = currentTheme();      // 처음엔 지금 보이는 색(Windows 설정)이 골라져 있다
+    host.innerHTML = themeOptionsHTML();
+    const pick = (theme) => { picked = theme; previewTheme(theme); markThemeOptions(host, theme); };
+    bindThemeOptions(host, pick);
+    pick(picked);
+    const finish = async () => {
+      if (!dialog.open) return;
+      dialog.close();
+      await saveTheme(picked);
+      resolve();
+    };
+    $("#themeChooserDone").onclick = finish;
+    dialog.oncancel = (e) => { e.preventDefault(); finish(); };   // Esc: 지금 보이는 테마로 시작
+    dialog.showModal();
+    host.querySelector('[aria-checked="true"]')?.focus();
+  });
+}
+
 // ---------------------------------------------------------------- 고정
 function paintPin() {
   const pinned = !!state.memo?.pinned, button = $("#dPin");
@@ -4095,7 +4245,8 @@ window.addEventListener("quick-memo-saved", (event) => {
 renderTabs();
 bindSearchTools();
 const starterTour = setupStarterTour();
-starterTour.firstRun();
+// 처음 시작하면 화면 테마부터 고르고, 그다음 튜토리얼을 연다.
+firstRunTheme().then(() => starterTour.firstRun());
 const firstSidebar = loadSidebar().catch((e) => toast("상태를 불러오지 못했습니다: " + e.message));
 loadTags();
 const firstRender = render();

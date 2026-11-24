@@ -167,6 +167,9 @@ def main():
 
         page.route("http://127.0.0.1:8787/**", serve)
         page.goto("http://127.0.0.1:8787/")
+        # 새 프로필은 화면 테마부터 고른 뒤 튜토리얼이 열린다(tests/test_theme_ui.py 가 자세히 본다).
+        expect(page.locator("#themeChooser")).to_be_visible()
+        page.locator("#themeChooserDone").click()
         tour = page.locator("#starterTour")
         expect(tour).to_be_visible()
         expect(page.locator("#tourTitle")).to_have_text("기존 메모 가져오기")

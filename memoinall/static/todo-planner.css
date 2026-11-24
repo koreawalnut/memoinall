@@ -5,13 +5,12 @@ main.is-todos, #todoCreate, #todoEditor, #calendarImport {
   --planner-shadow: 0 3px 16px rgb(0 0 0 / 8%);
 }
 main.is-todos { max-width: 1480px; }
-@media (prefers-color-scheme: light) {
-  main.is-todos, #todoCreate, #todoEditor, #calendarImport {
-    --accent: #4268d9;
-    --planner-purple: #8053b6;
-    --planner-primary-text: #fff;
-    --planner-shadow: 0 3px 16px rgb(31 45 80 / 3%);
-  }
+/* 화이트 테마 — 테마는 index.html 이 <html data-theme> 로 정한다(고른 값, 없으면 Windows 설정). */
+:root[data-theme="light"] :is(main.is-todos, #todoCreate, #todoEditor, #calendarImport) {
+  --accent: #4268d9;
+  --planner-purple: #8053b6;
+  --planner-primary-text: #fff;
+  --planner-shadow: 0 3px 16px rgb(31 45 80 / 3%);
 }
 .todo-icon { width: 18px; height: 18px; flex: 0 0 auto; vertical-align: middle; }
 .is-todos #lead { margin: 22px 0 20px; }
@@ -237,9 +236,12 @@ button.schedule-tag { cursor: pointer; }
 .schedule-tag.registered-tag { --tag-color: var(--tc); }
 button.schedule-tag:hover { background: color-mix(in srgb, var(--tag-color) 18%, var(--panel)); }
 .tag-0 { --tag-color: #34765b; } .tag-1 { --tag-color: #5368a2; } .tag-2 { --tag-color: #8b609e; } .tag-3 { --tag-color: #9a6d2b; } .tag-4 { --tag-color: #a35c69; }
-@media (prefers-color-scheme: dark) {
-  .tag-0 { --tag-color: #8bc6ad; } .tag-1 { --tag-color: #a4b5ef; } .tag-2 { --tag-color: #d6a8ec; } .tag-3 { --tag-color: #dfbb85; } .tag-4 { --tag-color: #e5a6b2; }
-}
+/* 다크 테마의 일정 태그 색 */
+:root:not([data-theme="light"]) .tag-0 { --tag-color: #8bc6ad; }
+:root:not([data-theme="light"]) .tag-1 { --tag-color: #a4b5ef; }
+:root:not([data-theme="light"]) .tag-2 { --tag-color: #d6a8ec; }
+:root:not([data-theme="light"]) .tag-3 { --tag-color: #dfbb85; }
+:root:not([data-theme="light"]) .tag-4 { --tag-color: #e5a6b2; }
 .schedule-tag-edit { display: inline-flex; align-items: center; gap: 4px; background: transparent; border: 1px dashed var(--line); color: var(--dim); padding: 3px 7px; border-radius: 7px; cursor: pointer; font-size: 11px; }
 .schedule-tag-edit .todo-icon { width: 12px; height: 12px; }
 .schedule-tag-edit:hover { color: var(--accent); border-color: var(--accent); }

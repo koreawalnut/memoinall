@@ -69,15 +69,38 @@ def _wait_until_up(port: int, timeout: float = 30.0, *, closed=None, failed=None
     return False
 
 
-def _startup_html(message: str = "메모장을 여는 중…") -> str:
+# 시작 화면도 고른 테마로 — 화이트를 고른 사람에게 검은 화면이 먼저 번쩍이지 않게. run() 에서 한 번 읽어 둔다.
+_startup_theme = ""
+
+
+def _saved_theme() -> str:
+    try:
+        from . import db, settings
+
+        try:
+            return settings.theme()
+        finally:
+            db.close()   # 이 스레드(메인)는 곧 창을 띄우는 데만 쓴다
+    except Exception:
+        log.debug("저장된 테마를 읽지 못함 — Windows 설정을 따릅니다", exc_info=True)
+        return ""
+
+
+def _startup_html(message: str = "메모장을 여는 중…", theme: str | None = None) -> str:
     from html import escape
 
-    return f"""<!doctype html><html lang="ko"><meta charset="utf-8">
+    theme = _startup_theme if theme is None else theme
+    attr = f' data-theme="{theme}"' if theme in ("light", "dark") else ""
+    light = "--bg:#f6f7f9; --fg:#1a1d23; --dim:#5b6474; color-scheme:light;"
+    return f"""<!doctype html><html lang="ko"{attr}><meta charset="utf-8">
 <title>memoinall</title><style>
-body {{ margin:0; background:#10151d; color:#e6eaf0; font:16px 'Segoe UI',sans-serif;
+:root {{ --bg:#10151d; --fg:#e6eaf0; --dim:#aeb9c8; color-scheme:dark; }}
+:root[data-theme="light"] {{ {light} }}
+@media (prefers-color-scheme: light) {{ :root:not([data-theme]) {{ {light} }} }}
+body {{ margin:0; background:var(--bg); color:var(--fg); font:16px 'Segoe UI',sans-serif;
 display:grid; place-items:center; height:100vh; }}
 main {{ max-width:640px; padding:32px; }} h1 {{ font-size:26px; }}
-p {{ color:#aeb9c8; white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.7; }}
+p {{ color:var(--dim); white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.7; }}
 </style><main><h1>memoinall</h1><p role="status">{escape(message)}</p></main></html>"""
 
 
@@ -187,6 +210,8 @@ def run() -> int:
         import webview
 
         _log_webview_assets(webview)
+        global _startup_theme
+        _startup_theme = _saved_theme()
         log.info("create_window…")
         window = webview.create_window(
             TITLE,

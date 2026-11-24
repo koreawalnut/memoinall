@@ -40,6 +40,9 @@ def _build_schema() -> dict[str, Entry]:
         "stt.local.model": ("MEMOINALL_STT_MODEL", "small", False),
         "stt.gemini.model": (None, "gemini-2.5-flash", False),
         "stt.gemini.transport": (None, "", False),
+        # 화면 테마. light(화이트)·dark(다크). 비어 있으면 Windows 설정을 따른다.
+        # 데스크톱 앱은 실행마다 포트가 바뀌어 브라우저 저장소로는 기억할 수 없어 여기에 둔다.
+        "ui.theme": ("MEMOINALL_THEME", "", False),
         # 휴대폰 앱(PWA)을 올린 주소. PC 의 '휴대폰 앱 설치' QR 에 이 주소만 담는다.
         "mobile.url": ("MEMOINALL_MOBILE_URL", "https://kbiwalnut.github.io/mobile/", False),
         # Redmine 가져오기 — 주소/키는 매번 입력하지 않도록 저장한다.
@@ -127,6 +130,15 @@ def set_many(values: dict[str, str]) -> None:
             continue
         # 빈 문자열은 '해제'로 본다 — 환경변수/기본값으로 되돌아간다.
         db.set_meta(PREFIX + key, "" if value is None else str(value))
+
+
+THEMES = ("light", "dark")
+
+
+def theme() -> str:
+    """고른 화면 테마. 고르지 않았거나 알 수 없는 값이면 ''(Windows 설정을 따름)."""
+    value = get("ui.theme")
+    return value if value in THEMES else ""
 
 
 def get_int(key: str, fallback: int) -> int:

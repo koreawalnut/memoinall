@@ -47,8 +47,17 @@ class StartupTests(unittest.TestCase):
 
     def cleanup_temporary(self):
         # 종료된 TestClient 워커의 sqlite 커넥션은 GC 때 파일 핸들을 해제한다.
-        gc.collect()
-        self.temporary.cleanup()
+        # 다만 쉬고 있는 서버 작업 스레드가 아직 살아 있으면 잠깐 더 쥐고 있어(Windows 파일 잠금),
+        # 가끔 지우기가 실패했다. 잠깐씩 기다리며 다시 시도한다.
+        for attempt in range(30):
+            gc.collect()
+            try:
+                self.temporary.cleanup()
+                return
+            except PermissionError:
+                if attempt == 29:
+                    raise
+                time.sleep(0.2)
 
     def test_loading_and_failure_preserve_existing_semantic_vectors(self):
         saved = store.add_memo("기존 결제 메모", enqueue_enrich=False)["id"]
@@ -165,6 +174,17 @@ class StartupTests(unittest.TestCase):
         failed.set()
         desktop._open_when_ready(window, 1, threading.Event(), failed)
         self.assertIn("메모장을 열지 못했습니다", window.load_html.call_args.args[0])
+
+    def test_startup_screen_follows_saved_theme(self):
+        """시작 화면도 고른 테마로 — 화이트를 고른 사람에게 검은 화면이 먼저 번쩍이지 않게."""
+        self.assertIn('<html lang="ko" data-theme="light">', desktop._startup_html(theme="light"))
+        self.assertIn('<html lang="ko" data-theme="dark">', desktop._startup_html("실패", theme="dark"))
+        auto = desktop._startup_html(theme="")            # 고르지 않았으면 Windows 설정
+        self.assertIn('<html lang="ko">', auto)
+        self.assertIn("prefers-color-scheme: light", auto)
+        self.assertIn('<html lang="ko">', desktop._startup_html(theme="<script>"))   # 모르는 값은 넣지 않는다
+        with patch.object(desktop, "_startup_theme", "light"):
+            self.assertIn('data-theme="light"', desktop._startup_html("메모장을 열지 못했습니다."))
 
     def test_real_desktop_server_responds_and_saves(self):
         port = desktop.free_port()

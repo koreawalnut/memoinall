@@ -243,6 +243,22 @@ def main() -> int:
         check("휴지통 비우기", c.delete("/api/trash").json()["ok"] and c.get("/api/trash").json()["items"] == [])
         check("GET /api/memo-windows (항상 위 최대 10개)", c.get("/api/memo-windows").json() == {"ids": [], "max": 10})
 
+        # --- 화면 테마 ---
+        page = c.get("/")
+        check("테마를 안 골랐으면 페이지에 박지 않음(Windows 설정을 따름)",
+              '<html lang="ko">' in page.text and "data-theme-choice" not in page.text.split(">", 2)[1])
+        check("잘못된 테마 거부", c.put("/api/settings", json={"values": {"ui.theme": "blue"}}).status_code == 400)
+        saved = c.put("/api/settings", json={"values": {"ui.theme": "light"}})
+        check("화이트 테마 저장", saved.status_code == 200 and saved.json()["settings"]["ui.theme"]["value"] == "light")
+        page = c.get("/")
+        check("고른 테마를 첫 줄에 박아 보냄(깜빡임 없음)",
+              '<html lang="ko" data-theme-choice="light" data-theme="light">' in page.text
+              and page.headers["cache-control"] == "no-cache", page.text[:120])
+        c.put("/api/settings", json={"values": {"ui.theme": "dark"}})
+        check("다크로 바꾸면 페이지도 다크", 'data-theme="dark"' in c.get("/").text[:200])
+        c.put("/api/settings", json={"values": {"ui.theme": ""}})
+        check("테마 해제 → 다시 Windows 설정", "data-theme-choice" not in c.get("/").text[:200])
+
         # --- 가져오기 ---
         srcs = c.get("/api/import/sources").json()["sources"]
         check("GET /api/import/sources", {s["name"] for s in srcs} >= {"sticky", "samsung"},
