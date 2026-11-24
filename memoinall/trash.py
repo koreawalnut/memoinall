@@ -7,6 +7,7 @@
   - 일정에서 직접 정한 것 — todos 행(완료·날짜·태그 등). 같은 id 로 되돌리면 다시 분석할 때 그대로 이어진다.
   - 받은 파일의 중복 판단 기록(memo_import_aliases)
   - 이 메모를 가리키던 취합표·AI 결과 연결(지우면 NULL 이 된다)
+  - 항상 위에 띄워 두었던 창의 위치(memo_windows). 10개가 차 있으면 창만 빼고 되살린다.
 청크·임베딩·추출 결과는 되살린 뒤 다시 만든다.
 """
 
@@ -16,6 +17,7 @@ import json
 from datetime import datetime, timedelta
 
 from . import db, store
+from .memo_windows import MAX_WINDOWS
 
 KEEP_DAYS = 30
 
@@ -59,6 +61,8 @@ def move(memo_id: int) -> dict:
             "collections": [r["id"] for r in conn.execute("SELECT id FROM collections WHERE memo_id=?", (memo_id,))],
             "ai_versions": [[r["result_id"], r["version"]] for r in conn.execute(
                 "SELECT result_id,version FROM ai_versions WHERE memo_id=?", (memo_id,))],
+            # 항상 위에 띄워 두었던 메모면 그 창 위치까지(되살리면 다음에 앱을 켤 때 다시 뜬다)
+            "memo_window": next(iter(_rows(conn, "SELECT * FROM memo_windows WHERE memo_id=?", (memo_id,))), None),
         }
         deleted_at = _now().isoformat()
         conn.execute("INSERT OR REPLACE INTO memo_trash(memo_id,title,body,deleted_at,saved_json) VALUES(?,?,?,?,?)",
@@ -98,6 +102,10 @@ def restore(memo_id: int) -> dict:
         for result_id, version in saved.get("ai_versions", []):
             conn.execute("UPDATE ai_versions SET memo_id=? WHERE result_id=? AND version=? AND memo_id IS NULL",
                          (memo_id, result_id, version))
+        window = saved.get("memo_window")
+        # 그 사이 다른 메모로 10개가 찼으면 창은 되살리지 않는다(메모는 되살린다).
+        if window and conn.execute("SELECT COUNT(*) FROM memo_windows").fetchone()[0] < MAX_WINDOWS:
+            _insert(conn, "memo_windows", window)
         conn.execute("DELETE FROM memo_trash WHERE memo_id=?", (memo_id,))
     store.invalidate_cache()
     store.enqueue(memo_id)

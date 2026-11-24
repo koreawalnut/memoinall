@@ -38,6 +38,13 @@ Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
+; PyInstaller 묶음(_internal)은 빌드마다 들어 있는 파일이 다르다. 덮어쓰기만 하면 예전 버전에만 있던 파일
+; (예: 다른 빌드 환경의 httptools·pythonnet·pydantic)이 남아 새 버전과 섞이고, 내부 서버가 연결을 받자마자 끊어
+; 앱이 '메모장을 여는 중…'에서 멈춘다(2026-11-24 실제 발생). 그래서 새 파일을 넣기 전에 예전 묶음을 통째로 지운다.
+; 메모·설정·모델은 사용자 폴더(.memoinall)에 있어 영향이 없다.
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\_internal"
+
 [Files]
 #ifdef WebViewBootstrapper
 Source: "{#WebViewBootstrapper}"; DestName: "MicrosoftEdgeWebview2Setup.exe"; Flags: dontcopy

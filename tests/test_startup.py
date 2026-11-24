@@ -142,7 +142,12 @@ class StartupTests(unittest.TestCase):
                  patch.object(desktop.threading, "Thread"), \
                  patch.object(desktop.logging, "basicConfig"):
                 self.assertEqual(desktop.run(), 0)
-                self.assertEqual(restore_windows.call_count, int(sys.platform == "win32"))
+                # 항상 위 메모 창은 시작 중에 열지 않는다. 메인 화면이 다 그려진 뒤 화면이 restore_memo_windows 를 부른다.
+                restore_windows.assert_not_called()
+                if sys.platform == "win32":
+                    exposed = [f.__name__ for call in window.expose.call_args_list for f in call.args]
+                    self.assertIn("restore_memo_windows", exposed)
+                    self.assertIn("open_memo_window", exposed)
         finally:
             sys.excepthook, threading.excepthook = old_hook, old_thread_hook
         self.assertEqual(order, ["gui", "health"])

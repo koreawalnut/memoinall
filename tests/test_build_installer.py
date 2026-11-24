@@ -35,6 +35,23 @@ class InstallerBuildTests(unittest.TestCase):
         self.bootstrapper.touch()
         self.options = ["--iscc", str(self.compiler), "--webview-bootstrapper", str(self.bootstrapper)]
 
+    def test_upgrade_replaces_old_bundle_but_never_user_data(self):
+        """덮어쓰기 설치에서 예전 빌드의 _internal 이 남아 새 빌드와 섞이면 앱이 켜지지 않는다(2026-11-24).
+        새 파일을 넣기 전에 앱 폴더의 _internal 만 지우고, 사용자 폴더(.memoinall)는 어떤 경우에도 지우지 않는다."""
+        script = (Path(__file__).resolve().parent.parent / "installer" / "memoinall.iss").read_text(encoding="utf-8")
+        sections, current = {}, None
+        for raw in script.splitlines():
+            line = raw.strip()
+            if line.startswith("[") and line.endswith("]"):
+                current = line
+                sections.setdefault(current, [])
+            elif current and line and not line.startswith(";"):
+                sections[current].append(line)
+        self.assertEqual(sections.get("[InstallDelete]"), ['Type: filesandordirs; Name: "{app}\\_internal"'])
+        self.assertNotIn("[UninstallDelete]", sections)
+        self.assertNotIn(".memoinall", " ".join(sections["[InstallDelete]"]))
+        self.assertLess(script.index("[InstallDelete]"), script.index("[Files]"))
+
     def test_explicit_missing_compiler_does_not_fall_back(self):
         self.assertIsNone(build_installer.find_compiler(str(self.root / "missing.exe")))
 

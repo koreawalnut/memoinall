@@ -241,6 +241,7 @@ def main() -> int:
               and c.delete(f"/api/trash/{mid}").status_code == 404
               and c.post(f"/api/trash/{mid}/restore").status_code == 404)
         check("휴지통 비우기", c.delete("/api/trash").json()["ok"] and c.get("/api/trash").json()["items"] == [])
+        check("GET /api/memo-windows (항상 위 최대 10개)", c.get("/api/memo-windows").json() == {"ids": [], "max": 10})
 
         # --- 가져오기 ---
         srcs = c.get("/api/import/sources").json()["sources"]

@@ -81,7 +81,7 @@ p {{ color:#aeb9c8; white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.
 </style><main><h1>memoinall</h1><p role="status">{escape(message)}</p></main></html>"""
 
 
-def _open_when_ready(window, port: int, closed, failed, memo_windows=None) -> None:
+def _open_when_ready(window, port: int, closed, failed) -> None:
     from . import config
 
     started = time.monotonic()
@@ -94,9 +94,9 @@ def _open_when_ready(window, port: int, closed, failed, memo_windows=None) -> No
             # 화면 연결을 늦추지 않게 따로 돈다. 사용자가 🎤·QR 찍기를 누르기 훨씬 전에 끝난다.
             threading.Thread(target=_allow_local_media, args=(window, port), daemon=True,
                              name="media-permission").start()
+            # 항상 위에 띄워 둔 메모 창은 여기서 열지 않는다. 메인 화면이 다 그려진 뒤 화면이
+            # restore_memo_windows 를 불러 하나씩 연다 — 시작을 늦추거나 첫 입력을 가로채지 않게.
             window.load_url(f"http://127.0.0.1:{port}/")
-            if memo_windows is not None:
-                memo_windows.restore()
         else:
             log.error("서버가 뜨지 않았습니다.")
             window.load_html(_startup_html(
@@ -198,7 +198,6 @@ def run() -> int:
         )
         log.info("create_window OK")
         window.events.closed += closed.set
-        memo_windows = None
         if sys.platform == "win32":
             from .quick_capture import QuickCapture
             from .memo_windows import MemoWindows
@@ -206,12 +205,12 @@ def run() -> int:
 
             QuickCapture(window).install()
             memo_windows = MemoWindows(window)
-            window.expose(memo_windows.open_memo_window)
+            window.expose(memo_windows.open_memo_window, memo_windows.restore_memo_windows)
             teams_share.install(window)
         _install_downloader(window)
         log.info("webview.start() 진입 — 창이 닫힐 때까지 블로킹")
         # GUI 는 메인 스레드에서 바로 시작하고, 서버 확인만 별도 스레드에서 한다.
-        webview.start(_open_when_ready, (window, port, closed, failed, memo_windows))
+        webview.start(_open_when_ready, (window, port, closed, failed))
         log.info("webview.start() 반환")
     except Exception:
         log.exception("창을 띄우지 못했습니다")

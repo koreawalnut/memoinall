@@ -11,6 +11,49 @@ log = logging.getLogger(__name__)
 PINNED = """SELECT w.*, m.title, m.body FROM memo_windows w
             JOIN memos m ON m.id=w.memo_id"""
 
+# 항상 위에 띄울 수 있는 메모 수. 창마다 네이티브 편집기와 2초 갱신 확인이 붙고,
+# 그보다 많으면 화면을 덮어 오히려 메모를 못 본다.
+MAX_WINDOWS = 10
+LIMIT_MESSAGE = (f"항상 위에 띄우기는 {MAX_WINDOWS}개까지 할 수 있습니다. "
+                 "띄워 둔 메모 창 하나를 닫은 뒤 다시 시도하세요.")
+# 앱을 켤 때: 메인 화면이 다 그려졌다고 화면이 알려 온 뒤 이만큼 쉬었다가, 창을 하나씩 사이를 두고 연다.
+RESTORE_DELAY_MS = 1200
+RESTORE_GAP_MS = 150
+
+
+class LimitReached(ValueError):
+    """이미 MAX_WINDOWS 개를 띄워 두었다."""
+
+
+def pin(memo_id: int) -> bool:
+    """메모를 항상 위에 띄울 대상으로 정한다. 새로 정했으면 True, 이미 정해져 있으면 False.
+
+    10개 제한은 한 트랜잭션에서 세고 넣는다 — 버튼을 빠르게 두 번 눌러도 11개가 되지 않게.
+    """
+    conn = db.connect()
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if conn.execute("SELECT 1 FROM memo_windows WHERE memo_id=?", (memo_id,)).fetchone():
+            return False
+        if not conn.execute("SELECT 1 FROM memos WHERE id=?", (memo_id,)).fetchone():
+            raise ValueError("메모를 찾을 수 없습니다.")
+        if conn.execute("SELECT COUNT(*) FROM memo_windows").fetchone()[0] >= MAX_WINDOWS:
+            raise LimitReached(LIMIT_MESSAGE)
+        conn.execute("INSERT INTO memo_windows(memo_id) VALUES(?)", (memo_id,))
+    return True
+
+
+def status() -> dict:
+    """화면의 '항상 위에 띄우기 · 3/10' 표시용."""
+    return {"ids": [r[0] for r in db.query("SELECT memo_id FROM memo_windows ORDER BY memo_id")],
+            "max": MAX_WINDOWS}
+
+
+def _saved_ids() -> list[int]:
+    # 예전 버전에서 10개 넘게 정해 둔 경우에도 앱을 켤 때는 10개까지만 연다.
+    return [r[0] for r in db.query("SELECT w.memo_id FROM memo_windows w JOIN memos m ON m.id=w.memo_id "
+                                   "ORDER BY w.memo_id LIMIT ?", (MAX_WINDOWS,))]
+
 
 class MemoWindows:
     def __init__(self, window):
@@ -19,22 +62,97 @@ class MemoWindows:
         self.timer = None
         self.version = None
         self.stopping = False
+        self.restore_started = False
+        self.restore_timer = None
 
     def restore(self):
+        """저장해 둔 창(최대 10개)을 지금 한꺼번에 연다. 앱을 켤 때는 restore_memo_windows 를 쓴다."""
         try:
             from System import Action
 
             def reopen():
-                for row in db.query(PINNED + " ORDER BY w.memo_id"):
-                    self._show(row)
+                for memo_id in _saved_ids():
+                    row = db.one(PINNED + " WHERE w.memo_id=?", (memo_id,))
+                    if row is not None:
+                        self._show(row)
 
             self.window.native.Invoke(Action(reopen))
         except Exception:
             log.exception("메모 창 복원 실패")
 
+    def restore_memo_windows(self):
+        """메인 화면이 다 그려졌다고 화면이 알려 오면 부른다(앱을 켤 때 한 번만).
+
+        앱 시작을 붙잡지 않도록 바로 돌아오고, 잠시 쉰 뒤 UI 스레드 타이머로 창을 하나씩 연다.
+        창을 열 때마다 원래 쓰던 창으로 포커스를 돌려줘 입력 중인 글이 끊기지 않게 한다.
+        """
+        if self.restore_started:
+            return False
+        self.restore_started = True
+        try:
+            from System import Action
+
+            self.window.native.BeginInvoke(Action(self._begin_restore))
+            return True
+        except Exception:
+            log.exception("메모 창 복원 예약 실패")
+            return False
+
+    def _begin_restore(self):
+        from System.Windows.Forms import Timer
+
+        try:
+            queue = _saved_ids()
+        except sqlite3.Error:
+            log.exception("메모 창 복원 목록 읽기 실패")
+            return
+        if not queue or self.stopping:
+            return
+        timer = self.restore_timer = Timer()
+        timer.Interval = RESTORE_DELAY_MS
+
+        def tick(*_):
+            # 창 하나를 다 띄운 뒤에 다음 간격을 잰다 — 첫 창이 오래 걸려도 두 개가 한꺼번에 뜨지 않게.
+            timer.Stop()
+            try:
+                while queue and not self.stopping:
+                    memo_id = queue.pop(0)
+                    row = db.one(PINNED + " WHERE w.memo_id=?", (memo_id,))   # 그 사이 지워졌을 수 있다
+                    if row is not None and memo_id not in self.forms:
+                        self._show_quietly(row)
+                        break
+            except Exception:
+                log.exception("메모 창 복원 실패")
+                queue.clear()
+            if queue and not self.stopping:
+                timer.Interval = RESTORE_GAP_MS
+                timer.Start()
+            else:
+                timer.Dispose()
+                self.restore_timer = None
+
+        timer.Tick += tick
+        timer.Start()
+
+    def _show_quietly(self, row):
+        """창을 띄우되, 사용자가 쓰고 있던 창(메인 창 등)의 포커스는 그대로 둔다."""
+        active = _active_form()
+        self._show(row)
+        if active is not None and not active.IsDisposed:
+            active.Activate()
+
     def open_memo_window(self, memo_id):
         from System import Action
         from System.Windows.Forms import FormWindowState
+
+        if type(memo_id) is not int:
+            raise ValueError("메모 번호가 올바르지 않습니다.")
+        # 10개 제한은 창을 만들기 전에 이 호출 스레드에서 본다 — 안내 문구가 화면에 그대로 간다.
+        try:
+            pin(memo_id)
+        finally:
+            if threading.current_thread() is not threading.main_thread():
+                db.close()   # pywebview 는 호출마다 새 스레드를 쓴다. 연결을 남기지 않는다.
 
         def open_one():
             if self.stopping:
@@ -45,12 +163,8 @@ class MemoWindows:
                     form.WindowState = FormWindowState.Normal
                 form.Activate()
                 return
-            conn = db.connect()
-            with conn:
-                conn.execute("INSERT OR IGNORE INTO memo_windows(memo_id) SELECT id FROM memos WHERE id=?", (memo_id,))
-                row = conn.execute(PINNED + " WHERE w.memo_id=?", (memo_id,)).fetchone()
-                if row is None:
-                    raise ValueError("메모를 찾을 수 없습니다.")
+            row = db.one(PINNED + " WHERE w.memo_id=?", (memo_id,))
+            if row is not None:
                 self._show(row)
 
         self.window.native.Invoke(Action(open_one))
@@ -166,6 +280,12 @@ class MemoWindows:
         self.stopping = True
         for editor in list(self.forms.values()):
             editor.form.Close()
+
+
+def _active_form():
+    """지금 키보드 입력을 받는 이 앱의 창(없으면 None — 다른 앱을 쓰는 중)."""
+    from System.Windows.Forms import Form
+    return Form.ActiveForm
 
 
 def _ask(form, message):

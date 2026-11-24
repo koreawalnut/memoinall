@@ -35,6 +35,7 @@ from . import (
     generate,
     importers,
     llm,
+    memo_windows,
     organize,
     providers,
     search,
@@ -236,6 +237,12 @@ def remove_memo(memo_id: int):
         return {"ok": True, "trash": trash.move(memo_id)}
     except KeyError:
         raise HTTPException(404, "메모를 찾을 수 없습니다.")
+
+
+@app.get("/api/memo-windows")
+def list_memo_windows():
+    """항상 위에 띄워 둔 메모(최대 10개). 창을 여닫는 일은 데스크톱 연결(open_memo_window)이 한다."""
+    return memo_windows.status()
 
 
 @app.get("/api/trash")

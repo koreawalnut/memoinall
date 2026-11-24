@@ -650,7 +650,8 @@ function toast(msg, action = null) {
   }
   el.classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(hide, action ? 7000 : 1800);
+  // 긴 안내(예: 10개 제한)는 읽을 시간만큼 더 보여 준다.
+  toastTimer = setTimeout(hide, action ? 7000 : Math.min(6000, Math.max(1800, msg.length * 55)));
 }
 
 // 카드 미리보기와 상세 본문이 같은 규칙으로 표시돼야 한다 —
@@ -1460,7 +1461,13 @@ async function loadSidebar() {
 }
 
 // ---------------------------------------------------------------- 렌더
+let rendersInFlight = 0;   // 앱이 '다 켜졌는지'(그리는 중인 화면이 없는지) 볼 때 쓴다
 async function render() {
+  rendersInFlight++;
+  try { return await renderView(); } finally { rendersInFlight--; }
+}
+
+async function renderView() {
   const version = ++renderVersion;
   const view = $("#view");
   // 메모 입력창과 검색창은 '메모' 화면 전용이다. 다른 화면에서는 검색어가 아예
@@ -3801,6 +3808,7 @@ async function openMemo(id, hit = null, refreshOnly = false) {
   $("#dBody").value = m.body;
   paintPin();
   paintLinks();
+  paintMemoWindowButton();
   $("#dTagInput").value = "";
   $("#dTagMessage").textContent = "";
   $("#dTagPicker").open = false;
@@ -3829,13 +3837,37 @@ async function openMemo(id, hit = null, refreshOnly = false) {
 $("#dClose").onclick = closeDetail;
 function bindMemoWindow() {
   $("#dMemoWindow").hidden = !window.pywebview?.api?.open_memo_window;
+  if ($("#detail").open) paintMemoWindowButton();
 }
 bindMemoWindow();
 window.addEventListener("pywebviewready", bindMemoWindow);
+
+// '항상 위에 띄우기 · 3/10' — 몇 개까지 띄울 수 있는지 누르기 전에 보이게. 이미 띄운 메모면 '띄운 창 보기'.
+let memoWindowRequest = 0;
+async function paintMemoWindowButton() {
+  const button = $("#dMemoWindow");
+  if (button.hidden || !state.memo) return;
+  const request = ++memoWindowRequest, id = state.memo.id;
+  try {
+    const s = await api("/api/memo-windows");
+    if (request !== memoWindowRequest || state.memo?.id !== id) return;
+    const open = s.ids.includes(id), full = s.ids.length >= s.max;
+    button.textContent = open ? "띄운 창 보기" : `항상 위에 띄우기 · ${s.ids.length}/${s.max}`;
+    button.title = open ? "이 메모의 항상 위 창을 앞으로 가져옵니다."
+      : full ? `항상 위에 띄우기는 ${s.max}개까지입니다. 띄워 둔 창 하나를 닫으면 띄울 수 있습니다.`
+      : "작은 창에서 메모를 편집하고 Ctrl+S로 저장합니다. 앱을 다시 켜면 자동으로 다시 뜹니다.";
+  } catch { /* 개수 표시만 못 할 뿐 버튼은 그대로 쓴다 */ }
+}
+
 $("#dMemoWindow").onclick = async () => {
   if (!state.memo) return;
   try { await window.pywebview.api.open_memo_window(state.memo.id); }
-  catch { toast("메모 창을 열지 못했습니다. 메모가 있는지 확인하고 다시 시도하세요."); }
+  catch (e) {
+    // 10개 제한 같은 안내는 그대로, 그 밖의 오류는 쉬운 말로
+    toast(["LimitReached", "ValueError"].includes(e?.name) ? e.message
+      : "메모 창을 열지 못했습니다. 메모가 있는지 확인하고 다시 시도하세요.");
+  }
+  paintMemoWindowButton();
 };
 $("#dEdit").onclick = () => setEditing(true, true);
 $("#dShare").onclick = async () => {
@@ -4064,11 +4096,29 @@ renderTabs();
 bindSearchTools();
 const starterTour = setupStarterTour();
 starterTour.firstRun();
-loadSidebar().catch((e) => toast("상태를 불러오지 못했습니다: " + e.message));
+const firstSidebar = loadSidebar().catch((e) => toast("상태를 불러오지 못했습니다: " + e.message));
 loadTags();
-render();
+const firstRender = render();
 restoreDraft();
 setInterval(() => loadSidebar().catch(() => {}), 6000);
+
+// 항상 위에 띄워 둔 메모 창(데스크톱 앱)은 메인 화면이 다 그려진 뒤에 다시 연다.
+// 앱이 그리고 있는 동안 창이 먼저 튀어나와 시작을 늦추거나 첫 입력을 가로채지 않게 한다.
+// 실제로 여는 일(잠시 쉬었다가 하나씩, 포커스는 그대로)은 데스크톱 쪽이 한다. 한 번만 부른다.
+const firstPaint = Promise.allSettled([firstSidebar, firstRender]);
+let memoWindowsRestoring = false;
+async function restoreMemoWindows() {
+  if (memoWindowsRestoring || !window.pywebview?.api?.restore_memo_windows) return;
+  memoWindowsRestoring = true;
+  await firstPaint;
+  // 처음 그리는 도중 다른 화면 그리기가 이어졌으면(시작 안내 등) 그것까지 끝난 뒤. 10초 넘게 걸리면 더 기다리지 않는다.
+  for (let waited = 0; rendersInFlight && waited < 10000; waited += 100) await new Promise((r) => setTimeout(r, 100));
+  await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));   // 그린 화면이 실제로 표시된 뒤
+  try { await window.pywebview.api.restore_memo_windows(); }
+  catch { /* 창을 못 열어도 메인 화면은 그대로 쓴다 */ }
+}
+window.addEventListener("pywebviewready", restoreMemoWindows);
+restoreMemoWindows();
 </script>
 </body>
 </html>
