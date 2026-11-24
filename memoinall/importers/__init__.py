@@ -187,9 +187,10 @@ def run_import(
         from ..exchange import ExchangeError
         from .redmine import RedmineError
         from .evernote import EvernoteError
+        from .notion import NotionError
         from .onenote import OneNoteError
 
-        ours = isinstance(exc, (RedmineError, ExchangeError, EvernoteError, OneNoteError))
+        ours = isinstance(exc, (RedmineError, ExchangeError, EvernoteError, OneNoteError, NotionError))
         result.error = str(exc) if ours else f"{type(exc).__name__}: {exc}"
         return result
 
@@ -356,9 +357,23 @@ def build_redmine(**kwargs):
     )
 
 
+def build_notion(**kwargs):
+    """설정에 저장된 토큰을 기본으로, 호출 인자로 덮어쓴다(저장하기 전 입력값으로도 시험할 수 있게)."""
+    from .. import settings
+    from .notion import NotionImporter
+
+    return NotionImporter(
+        token=kwargs.get("notion_token") or settings.get("import.notion.token"),
+        limit=int(kwargs.get("notion_limit") or settings.get_int("import.notion.limit", 300)),
+        since=kwargs.get("notion_since") if kwargs.get("notion_since") is not None
+        else settings.get("import.notion.since"),
+        reuse_preview=bool(kwargs.get("notion_reuse_preview")),
+    )
+
+
 # 가져오기로 만들어진 source 값들. 손으로 쓴 메모('web')·CLI('cli') 는 여기 없다 —
 # 초기화가 그것까지 지우면 안 되기 때문에 삭제 대상은 이 목록으로만 받는다.
-SOURCE_NAMES = ("sticky", "samsung", "redmine", "files", "shared", "evernote", "onenote", "onenote_local")
+SOURCE_NAMES = ("sticky", "samsung", "redmine", "notion", "files", "shared", "evernote", "onenote", "onenote_local")
 
 
 def build_onenote(**kwargs):
@@ -397,6 +412,7 @@ def all_importers(**kwargs) -> list:
         SamsungNotesImporter(),
         LocalOneNoteImporter(),
         build_redmine(**kwargs),
+        build_notion(**kwargs),
         FilesImporter(kwargs.get("files_path") or ""),
         build_shared(**kwargs),
         build_evernote(**kwargs),
@@ -421,6 +437,8 @@ def get_importer(name: str, **kwargs):
         return FilesImporter(kwargs.get("files_path") or "")
     if name == "redmine":
         return build_redmine(**kwargs)
+    if name == "notion":
+        return build_notion(**kwargs)
     if name == "shared":
         return build_shared(**kwargs)
     if name == "evernote":

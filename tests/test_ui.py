@@ -354,7 +354,7 @@ def main():
             try { await doImport(true); return called; }
             finally { window.fetch = original; }
         }""")
-        assert called == ["sticky", "samsung", "onenote_local", "files", "redmine"], called
+        assert called == ["sticky", "samsung", "onenote_local", "files", "redmine", "notion"], called
         page.locator('[data-exchange-tab="share"]').click()
         expect(page.locator("#sharedFileStatus")).to_contain_text("handoff.json")
         print("OK import and sharing show separate tools; batch scope excludes hidden received file")

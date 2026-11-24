@@ -360,6 +360,7 @@ python -m memoinall import --commit --min-chars 20  # 너무 짧은 메모 제�
 | `sticky` | Windows 스티커 메모 | `%LOCALAPPDATA%\Packages\Microsoft.MicrosoftStickyNotes_*\LocalState\plum.sqlite` |
 | `samsung` | Samsung Notes | `...\SAMSUNGELECTRONICSCoLtd.SamsungNotes_*\LocalState\Storage.sqlite` |
 | `redmine` | Redmine 이슈·위키·문서·공지 | REST API (주소 + API 키) |
+| `notion` | Notion 페이지(연결을 추가한 페이지와 하위 페이지) | 공식 API (내부 연결 토큰) — [만드는 법](docs/import-sharing.md#notion에서-가져오기) |
 | `files` | `.txt` / `.md` 폴더 | `--path` 로 지정 |
 
 ### Redmine
@@ -520,6 +521,8 @@ python tests/test_ask_ui.py             # 검색창에서 AI에게 묻기: AI �
 python tests/test_memo_windows.py       # 항상 위 메모 창: 편집·저장·충돌 · 10개 제한 · 앱 켤 때 하나씩 다시 띄우기 (실제 WinForms)
 python tests/test_memo_window_ui.py     # 항상 위에 띄우기 버튼: 다 그려진 뒤 한 번만 다시 띄우기 · 개수 표시 · 10개 안내 (playwright)
 python tests/test_theme_ui.py           # 화면 테마: 처음 시작 때 고르기 → 튜토리얼 · 설정 맨 아래에서 바꾸기 · Windows 설정 따르기 (playwright)
+python tests/test_notion.py             # Notion 가져오기 (가짜 서버를 띄워 실제 소켓으로): 블록·속성·태그·호출 제한·오류 안내·재사용·갱신
+python tests/test_notion_ui.py          # Notion 가져오기 화면: 안내 · 연결 테스트 · 토큰 저장 · 미리보기 · 가져오기 (playwright)
 ```
 
 `test_generate.py` 는 각 어댑터가 **실제로 어떤 파라미터를 보내는지**까지 검사합니다 —

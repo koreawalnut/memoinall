@@ -690,7 +690,7 @@ def import_sources(path: str | None = None, shared: str | None = None):
                 "available": available,
                 "path": str(imp.path or ""),
                 "reason": "" if available else imp.unavailable_reason(),
-                "network": imp.name == "redmine",
+                "network": imp.name in ("redmine", "notion"),
                 "source_tag": SOURCE_TAGS.get(imp.name, ""),
                 # 이미 가져와 있는 양. 다시 가져올지 지울지 판단할 근거가 된다.
                 "stored": store.count_by_source(imp.name),
@@ -748,6 +748,29 @@ def _redmine_opts(payload: dict) -> dict:
     """UI 가 저장 전 값을 그대로 넘길 수 있게 매핑한다."""
     keys = ("url", "api_key", "projects", "kinds", "limit", "since", "include_notes")
     return {f"redmine_{k}": payload.get(k) for k in keys if payload.get(k) is not None}
+
+
+@app.post("/api/import/notion/test")
+def notion_test(payload: dict = Body(default={})):
+    """가져오기 전에 토큰과 연결한 페이지를 확인한다. 저장 전 입력값으로도 시험할 수 있다."""
+    try:
+        return importers.build_notion(**_notion_opts(payload)).test_connection()
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+def _notion_opts(payload: dict) -> dict:
+    """화면의 저장 전 값(token·limit·since)을 그대로 넘긴다. 날짜는 YYYY-MM-DD 만 받는다."""
+    since = payload.get("since")
+    if since not in (None, "") and (not isinstance(since, str) or not ASK_DATE.fullmatch(since)):
+        raise ValueError("‘이후 수정분만’ 날짜는 YYYY-MM-DD 형식으로 적어 주세요.")
+    limit = payload.get("limit")
+    if limit not in (None, "") and (type(limit) is not int or not 1 <= limit <= 5000):
+        raise ValueError("최대 페이지 수는 1~5000 사이의 숫자로 적어 주세요.")
+    token = payload.get("token")
+    if token is not None and not isinstance(token, str):
+        raise ValueError("토큰이 올바르지 않습니다.")
+    return {f"notion_{k}": v for k, v in (("token", token), ("limit", limit), ("since", since)) if v is not None}
 
 
 # --------------------------------------------------------------------------- 내보내기
@@ -890,8 +913,11 @@ def _run_imports(payload: dict, *, dry_run: bool):
         "onenote_filename": payload.get("onenote_filename"),
         "onenote_content": payload.get("onenote_content"),
         **_redmine_opts(payload.get("redmine") or {}),
+        # 미리보기는 Notion 을 새로 읽고, 이어지는 가져오기는 방금 읽은 것을 쓴다(페이지가 많으면 몇 분 걸린다).
+        "notion_reuse_preview": not dry_run,
     }
     try:
+        opts.update(_notion_opts(payload.get("notion") or {}))
         targets = (
             importers.all_importers(**opts)
             if source == "all"

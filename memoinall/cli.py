@@ -400,6 +400,8 @@ def cmd_import(args) -> int:
         "redmine_limit": args.redmine_limit,
         "redmine_since": args.redmine_since,
         "redmine_include_notes": args.redmine_notes,
+        "notion_limit": args.notion_limit,
+        "notion_since": args.notion_since,
     }
     if args.source == "all":
         targets = importers.all_importers(**opts)
@@ -610,6 +612,8 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--redmine-limit", type=int, help="최대 건수")
     i.add_argument("--redmine-since", help="이 날짜 이후 갱신분만 (YYYY-MM-DD)")
     i.add_argument("--redmine-notes", action="store_true", help="이슈 코멘트도 포함(느림)")
+    i.add_argument("--notion-limit", type=int, help="Notion 에서 가져올 최대 페이지 수 (토큰은 설정 또는 NOTION_TOKEN)")
+    i.add_argument("--notion-since", help="Notion 에서 이 날짜 이후 수정한 페이지만 (YYYY-MM-DD)")
     i.add_argument("--commit", action="store_true", help="실제로 저장 (기본은 미리보기)")
     i.add_argument("--min-chars", type=int, default=0, help="이 길이보다 짧은 메모는 건너뜀 (기본 0 = 전부)")
     i.add_argument("--update", action="store_true",

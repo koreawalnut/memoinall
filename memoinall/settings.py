@@ -52,6 +52,10 @@ def _build_schema() -> dict[str, Entry]:
         "import.redmine.kinds": (None, "issues,wiki,documents", False),
         "import.redmine.limit": (None, "300", False),
         "import.redmine.since": (None, "", False),
+        # Notion 가져오기 — 내부 연결(integration)의 API 토큰. 읽기 권한만 있으면 된다.
+        "import.notion.token": ("NOTION_TOKEN", "", True),
+        "import.notion.limit": (None, "300", False),
+        "import.notion.since": (None, "", False),
     }
     for name, spec in providers.SPECS.items():
         env = PROVIDER_ENV.get(name, {})

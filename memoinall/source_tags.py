@@ -6,6 +6,7 @@ SOURCE_TAGS = {
     "sticky": "스티커메모",
     "samsung": "삼성노트",
     "redmine": "Redmine",
+    "notion": "Notion",
     "evernote": "에버노트",
     "onenote": "OneNote",
     "onenote_local": "OneNote",
