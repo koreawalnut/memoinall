@@ -11,12 +11,14 @@ async function useFeedResults() {
   $("#documentFromSearch").textContent = "검색 결과를 모으는 중…";
   if (tab === "generate") genProgress("검색 결과를 모으는 중입니다…");
   try {
-    const {ids} = await api("/api/search/result-ids?" + qs({q: scope.feed_query}));
-    if (state.tab !== tab || version !== renderVersion) return;
+    const ids = tab === "generate" && state.selected.size ? [...state.selected.keys()]
+      : (await api("/api/search/result-ids?" + qs({q: scope.feed_query}))).ids;
+    if (state.tab !== tab || version !== renderVersion || (tab === "feed" && state.selected.size)) return;
     if (!ids.length) throw new Error("이 조건에 맞는 메모가 없습니다. 검색 조건을 바꿔주세요.");
     gen.busy = false;
     if (tab === "generate") {
       changeGenScope(scope, ids);
+      await planGenerate();
     } else {
       await startGenerate(ids, "이 검색 결과를 바탕으로 업무 내용을 정리해줘", scope);
     }
@@ -29,7 +31,7 @@ async function useFeedResults() {
   } finally {
     gen.busy = false;
     setGenBusy(false);
-    $("#documentFromSearch").textContent = "이 결과로 문서 만들기";
+    $("#documentFromSearch").textContent = "검색 결과 전체로 문서 만들기";
     if (state.tab === "feed") paintFeedTools();
   }
 }

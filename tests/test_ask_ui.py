@@ -1,4 +1,4 @@
-"""검색창에서 AI에게 묻기 — AI를 연결했을 때만 보이고, 답·근거·조건·실패를 보여 준다.  python tests/test_ask_ui.py"""
+"""검색 질문·문서의 Copilot 요청문과 연결된 AI의 답변을 검증한다."""
 import os
 import sys
 import tempfile
@@ -17,6 +17,43 @@ from memoinall.api import app  # noqa: E402
 from memoinall.providers import ProviderError  # noqa: E402
 
 ARTIFACTS = Path(__file__).resolve().parents[1] / "artifacts" / "ux-review"
+
+
+def check_file_selection(page, client):
+    result = client.post("/api/import/documents/save", json={
+        "filename": "운영 계획.pdf",
+        "parts": [{"key": "p1", "label": "1페이지", "text": "점검 결과는 재무팀에 공유한다."},
+                  {"key": "p2", "label": "2페이지", "text": "발표 시간은 금요일 오전으로 확정했다."}],
+    })
+    result.raise_for_status()
+    first, second = (m["id"] for m in result.json()["memos"])
+    page.evaluate("loadSidebar()")
+    page.locator("#q").fill("운영 계획")
+    group = page.get_by_role("checkbox", name="운영 계획.pdf · 2개 부분")
+    expect(group).to_be_visible()
+    group.check()
+    expect(page.locator("#selectionCount")).to_have_text("선택한 자료 2건")
+    page.get_by_role("button", name="운영 계획.pdf · 1페이지 선택 해제").click()
+    assert group.evaluate("e => e.indeterminate")
+    question = "발표 일정이 확정됐나요?"
+    page.locator("#selectionQuestion").fill(question)
+    page.locator("#askSelection").click()
+    box = page.locator("#askCopilot")
+    expect(box).to_be_visible()
+    prompt = box.locator("textarea").input_value()
+    assert question in prompt and f"[M{second}]" in prompt and "금요일 오전" in prompt
+    assert f"[M{first}]" not in prompt and "재무팀" not in prompt and "운영 계획.pdf · 2페이지" in prompt
+    expect(page.locator("#q")).to_have_value("운영 계획")
+    page.locator(f'[data-select="{first}"]').check()
+    expect(box).to_have_count(0)
+    expect(group).to_be_checked()
+    page.locator("#generateSelection").click()
+    expect(page.locator("#genInput")).to_have_value(question)
+    page.locator("#genRun").click()
+    doc = page.locator("#genCopilot")
+    expect(doc).to_be_visible()
+    assert all(f"[M{i}]" in doc.locator("textarea").input_value() for i in [first, second])
+    print("OK searched file sections can be checked together, removed individually, and used for a separate question or document")
 
 
 def main():
@@ -49,14 +86,57 @@ def main():
         page.goto("http://127.0.0.1:8787/")
         button, panel, q = page.locator("#askAi"), page.locator("#askPanel"), page.locator("#q")
 
-        # ---- AI 미설정: 버튼이 없고, Ctrl+Enter 도 아무 일 없다
+        # ---- 외부 접속과 시스템 클립보드 없이 실제 새 탭의 목적지·복사 내용을 확인한다.
+        page.context.route("https://m365.cloud.microsoft/**", lambda route: route.fulfill(body="Copilot"))
+        page.evaluate("""Object.defineProperty(navigator, 'clipboard', {configurable: true,
+            value: {writeText: async text => { window.copiedPrompt = text; }}})""")
         expect(page.locator("#status")).to_contain_text("미설정")
-        expect(button).to_be_hidden()
+        expect(button).to_have_text("Copilot에 묻기")
+        page.locator('#sidebarAutoTags [data-v="결제"]').click()
         q.fill("결제 재시도 어떻게 하기로 했지?")
         q.press("Control+Enter")
+        handoff = panel.locator("#askCopilot")
+        expect(handoff).to_be_visible()
+        prompt = handoff.locator("textarea").input_value()
+        assert "결제 재시도 어떻게 하기로 했지?" in prompt and pay["body"] in prompt and plan["body"] not in prompt
+        assert f"[M{pay['id']}]" in prompt and page.evaluate("window.copiedPrompt") is None
+        with page.context.expect_page() as opening:
+            handoff.get_by_role("button", name="요청문 복사하고 Copilot 열기").click()
+        popup = opening.value
+        expect(popup).to_have_url("https://m365.cloud.microsoft/chat")
+        assert page.evaluate("window.copiedPrompt") == prompt
+        popup.close()
+        q.fill("다른 질문")
         expect(panel).to_be_hidden()
-        expect(q).to_have_attribute("placeholder", "기억나는 단어나 내용으로 메모 찾기")
-        print("OK without an AI connection the ask button is hidden and the shortcut does nothing")
+        page.locator("#clear").click()
+        print("OK Copilot opens at the fixed work chat URL, with the question and only matching sources copied")
+
+        page.locator("#toggleSelection").click()
+        page.locator(f'[data-select="{pay["id"]}"]').check()
+        page.locator(f'[data-select="{plan["id"]}"]').check()
+        page.locator("#generateSelection").click()
+        page.locator("#genInput").fill("결제 재시도 결정 사항을 보고서로 정리해줘")
+        page.locator("#genFormat").select_option("report")
+        page.locator("#genPlan").click()
+        picker = page.locator("#genPicker")
+        picker.locator(f'[data-pick="{plan["id"]}"]').uncheck()
+        page.locator("#genRun2").click()
+        document = page.locator("#genCopilot")
+        expect(document).to_be_visible()
+        draft = document.locator("textarea").input_value()
+        assert "보고서" in draft and "출처" in draft and pay["body"] in draft and plan["body"] not in draft
+        page.evaluate("() => { navigator.clipboard.writeText = async () => { throw new Error('blocked'); }; }")
+        document.get_by_role("button", name="요청문 복사하고 Copilot 열기").click()
+        expect(document.locator("[role=status]")).to_contain_text("직접 복사")
+        expect(document.locator("textarea")).to_be_focused()
+        assert document.locator("textarea").evaluate("e => e.value.slice(e.selectionStart, e.selectionEnd)") == draft
+        expect(document.get_by_role("link")).to_have_attribute("href", "https://m365.cloud.microsoft/chat")
+        page.locator("#genFormat").select_option("email")
+        expect(document).to_be_hidden()
+        assert client.get("/api/generate/history").json()["items"] == []
+        page.locator('[data-tab="feed"]').click()
+        q.fill("결제 재시도 어떻게 하기로 했지?")
+        print("OK document prompt uses the reviewed selection and format, with manual copy available if denied")
 
         # ---- AI 연결: 다음 상태 갱신 때 나타난다
         ready = patch.object(settings, "provider_ready", return_value=True)
@@ -123,14 +203,13 @@ def main():
             page.locator("#askClose").click()
         ready.stop()
 
-        # ---- 설정이 풀리면: 서버가 거절하고 버튼이 사라진다
+        # ---- 화면을 연 뒤 연결이 해제되어도 로컬 요청문을 쓸 수 있다.
         page.evaluate("state.llmReady = true; paintAskButton()")              # 화면이 아직 모르는 사이에 누른 경우
         button.click()
-        expect(panel.locator("[role=alert]")).to_contain_text("AI가 연결되지 않았습니다")
-        expect(button).to_be_hidden()
-        expect(panel.get_by_role("link", name="설정에서 AI 연결하기")).to_be_visible()
-        print("OK when the AI connection goes away the server refuses and the button disappears")
+        expect(panel.locator("#askCopilot")).to_be_visible()
+        print("OK a connection removed between render and click returns a Copilot prompt")
 
+        check_file_selection(page, client)
         assert not errors, errors
         browser.close()
 

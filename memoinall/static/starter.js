@@ -5,11 +5,9 @@ function setupStarterTour() {
      text: "파일 선택을 눌러 문서를 미리 보세요. PC에 저장된 스티커 메모도 여기서 가져올 수 있어요."},
     {tab: "settings", title: "내 태그 1개 정하기",
      text: "이름을 입력하고 ‘만들기’를 눌러 보세요. 만든 태그는 메모를 쓸 때 바로 고를 수 있어요."},
-    {tab: "settings", title: "AI 연결하기",
-     text: "사용할 AI를 선택하세요. 선택한 서비스에 맞는 설정 입력란으로 이동합니다."},
   ];
   let index = 0, anchor, control, generation = 0;
-  let sticky = false, fileSelected = false, aiInput = false, moving = false;
+  let sticky = false, fileSelected = false, moving = false;
   const observer = new ResizeObserver(position);
   const blocked = new Set();
 
@@ -27,26 +25,22 @@ function setupStarterTour() {
   }
 
   function bindTarget() {
-    const credential = $("#setKey") || $("#setModel");
     let region, input;
     if (index === 0) {
       region = sticky ? $("#stickySource") : $("#chooseDocument");
       if (!sticky && fileSelected && (docImport.preview || docImport.error)) region = $("#documentPanel");
       input = sticky ? region?.querySelector('[data-src-preview]:enabled') || region
         : region?.querySelector("[data-document-part]:enabled") || $("#chooseDocument");
-    } else if (index === 1) {
+    } else {
       region = $("#tourTagField");
       input = $("#newTag");
-    } else {
-      region = aiInput ? credential?.closest(".panel") : $("#tourProviders");
-      input = aiInput ? credential : region?.querySelector(".on");
     }
     if (!region || !input) return false;
     if (region === anchor && input === control) return true;
     release();
     anchor = region;
     control = input;
-    if (anchor.matches("#documentPanel, #stickySource") || (index === 2 && aiInput)) anchor.classList.add("tour-work-area");
+    if (anchor.matches("#documentPanel, #stickySource")) anchor.classList.add("tour-work-area");
     // Keep the actual highlighted controls and the tutorial available to keyboard and screen reader users.
     for (let node = anchor; node && node !== document.body; node = node.parentElement) {
       for (const sibling of node.parentElement.children) {
@@ -58,7 +52,6 @@ function setupStarterTour() {
     $("#tourText").textContent = index === 0 && sticky
       ? "이 PC에서 발견한 스티커 메모를 미리 보세요. 사용 가능 여부도 이 영역에서 확인할 수 있어요."
       : index === 0 && fileSelected && docImport.preview ? "가져올 부분을 확인하고 ‘메모로 저장’을 누르세요. 마치면 다음 단계로 이동하세요."
-      : index === 2 && aiInput ? "서비스에 맞는 값을 입력하세요. 이 영역을 아래로 스크롤하면 연결 테스트와 저장을 할 수 있어요."
       : steps[index].text;
     control.setAttribute("aria-describedby", [control.getAttribute("aria-describedby"), "tourText"].filter(Boolean).join(" "));
     anchor.scrollIntoView({block: innerHeight < 480 ? "start" : "center", inline: "nearest", behavior: "instant"});
@@ -94,7 +87,6 @@ function setupStarterTour() {
     const token = ++generation;
     moving = true;
     index = i;
-    aiInput = false;
     const step = steps[i];
     const buttons = [$("#tourNext"), $("#tourBack"), $("#tourImportSwitch")];
     buttons.forEach(button => { button.disabled = true; });
@@ -158,10 +150,6 @@ function setupStarterTour() {
       event.stopPropagation();
       end();
     }
-  }, true);
-  document.addEventListener("click", event => {
-    if (!dialog.open || !anchor?.contains(event.target)) return;
-    if (index === 2 && event.target.closest("[data-prov]")) aiInput = true;
   }, true);
   document.addEventListener("change", event => {
     if (dialog.open && index === 0 && event.target.id === "documentFile" && event.target.files.length) fileSelected = true;

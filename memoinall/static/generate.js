@@ -39,6 +39,7 @@ async function startGenerate(ids, instruction, scope = null) {
   Object.assign(gen, { instruction, memoIds: ids, scope, queries: null, plan: null, output: null, collection: null,
     review: null, body: "", savedDraft: "", editing: false, initialized: true, error: "", followup: "", oldVersion: null, periodDay: genToday() });
   await goTab("generate");
+  if (scope?.feed_query != null && ids?.length && state.tab === "generate" && gen.memoIds === ids) await planGenerate();
 }
 
 // 태그 하나를 찾을 범위로 정해 'AI로 정리'를 연다(태그별 화면의 '이 태그로 AI 정리').
@@ -130,7 +131,7 @@ async function renderGenerate(version = renderVersion) {
   if (version !== renderVersion) return;
   workflowState.items = saved.items;
   gen.tagChoices = tagList.items;
-  gen.formats = formats; gen.periods = periods;
+  gen.formats = formats; gen.periods = periods; gen.llmReady = llm_ready;
   if (!gen.initialized) {
     gen.initialized = true;
     if (history.items.length) {
@@ -149,8 +150,9 @@ async function renderGenerate(version = renderVersion) {
     </details>
     <div class="panel">
       <div class="row"><h3 style="margin:0">무엇을 정리할까요?</h3><span class="spacer"></span><button class="btn ghost" id="genNew">새로 정리</button></div>
-      <div class="desc" style="margin-top:10px">원하는 내용을 적으면 메모를 찾아 정리합니다. 만든 결과는 자동으로 보관됩니다.
-        ${llm_ready ? "" : '<br>AI를 연결하면 바로 정리할 수 있어요. <a href="#" id="genSettings">AI 연결하기</a>'}</div>
+      <div class="desc" style="margin-top:10px">${llm_ready
+        ? "원하는 내용을 적으면 메모를 찾아 정리합니다. 만든 결과는 자동으로 보관됩니다."
+        : '원하는 내용을 적으면 관련 자료와 문서 형식을 담은 요청문을 만듭니다. 회사 계정의 Microsoft 365 Copilot에서 문서를 작성할 수 있습니다. <a href="#" id="genSettings">AI 연결 설정</a>'}</div>
       ${workflowBarHTML()}
       <textarea class="gen-input" id="genInput" aria-label="정리할 내용" placeholder="${usingCollection ? "예) 부서별 신청금액과 미처리 내역을 정리해줘" : "예) 이번 주 업무를 팀 공유용으로 정리해줘"}">${esc(gen.instruction)}</textarea>
       ${workflowQuickHTML()}
@@ -166,16 +168,16 @@ async function renderGenerate(version = renderVersion) {
         <div class="note" id="genTagMore"></div>
       </details>
       <div class="row" style="margin:10px 0"><label for="genFormat">형식</label><select id="genFormat">${formats.map((f) => `<option value="${f.key}" ${gen.format === f.key ? "selected" : ""}>${esc(f.label)}</option>`).join("")}</select>
-        <span class="spacer"></span><button class="btn" id="genPlan" ${usingCollection ? "hidden" : ""}>메모 고르기</button><button class="btn primary" id="genRun">${llm_ready ? "문서 만들기" : "요청문 만들기"}</button></div>
+        <span class="spacer"></span><button class="btn" id="genPlan" ${usingCollection ? "hidden" : ""}>메모 고르기</button><button class="btn primary" id="genRun">${llm_ready ? "문서 만들기" : "Copilot 요청문 만들기"}</button></div>
       <div class="note" id="genScope">${esc(genScopeLabel())}</div>
       <details class="capture-options" style="margin-top:12px" id="genScopeOptions" ${usingCollection ? "hidden" : ""}><summary>찾을 범위 바꾸기</summary>
-        <div class="row" style="margin:10px 0"><button class="btn" id="genAll">전체 메모에서 찾기</button><button class="btn" id="genFiltered">내 메모의 검색 결과 사용</button></div>
+        <div class="row" style="margin:10px 0"><button class="btn" id="genAll">전체 메모에서 찾기</button><button class="btn" id="genFiltered">${state.selected.size ? `선택한 검색 자료 ${state.selected.size}건 사용` : "내 메모의 검색 결과 사용"}</button></div>
         <div class="row" style="margin:10px 0"><label for="genPeriod">기간</label><select id="genPeriod">${genPeriodOptions()}</select></div>
         <div class="row" id="genDates" style="margin:10px 0"><input type="date" id="genSince" aria-label="정리할 작성 시작일" /><span>~</span><input type="date" id="genUntil" aria-label="정리할 작성 종료일" /></div>
         <label for="genBudget" class="status">읽을 분량</label> <select id="genBudget"><option value="6000">기본</option><option value="12000">넉넉히</option><option value="24000">많이</option></select>
         <div class="note">분량을 늘리면 처리 시간과 AI 사용량이 늘어날 수 있습니다.</div>
       </details><div class="status" id="genProgress" aria-live="polite"></div>
-    </div><div id="genPlanOut"></div><div id="genOut"></div>`;
+    </div><div class="panel" id="genCopilot" hidden></div><div id="genPlanOut"></div><div id="genOut"></div>`;
   $("#genBudget").value = String(gen.budget);
   $("#genInput").oninput = (e) => { gen.instruction = e.target.value; invalidatePlan(true); };
   $("#genInput").onkeydown = (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); runGenerate(); } };
@@ -281,11 +283,11 @@ function invalidatePlan(reset = false) {
 function genPayload() {
   if (gen.collection) {
     const c = gen.collection;
-    return { instruction: gen.instruction.trim(), format: gen.format, budget: gen.budget,
+    return { instruction: gen.instruction.trim(), format: gen.format, budget: gen.budget, prompt_only: !gen.llmReady,
       collection: { id: c.id, version: c.version, group_by: c.group_by || null, measure: c.measure || null } };
   }
   const items = gen.review?.items.filter((m) => gen.review.selected.has(m.key));
-  return { instruction: gen.instruction.trim(), format: gen.format, budget: gen.budget,
+  return { instruction: gen.instruction.trim(), format: gen.format, budget: gen.budget, prompt_only: !gen.llmReady,
     queries: gen.queries, memo_ids: items ? items.map((m) => m.id) : gen.memoIds,
     ...(items ? { source_revisions: Object.fromEntries(items.map((m) => [m.id, m.revision])) } : {}), ...(gen.scope || {}) };
 }
@@ -317,11 +319,12 @@ async function planGenerate() {
 
 function renderPlanPanel() {
   if (!$("#genPlanOut")) return;
+  updateGenPromptVisibility();
   if ($("#genScope")) $("#genScope").textContent = genScopeLabel();
   if (gen.collection) {
     // 메모를 고르지 않는다. AI 에 넘길 집계·원문을 그대로 보여 주고 복사할 수 있게만 한다.
     const p = gen.plan;
-    $("#genPlanOut").innerHTML = p?.prompt ? `<details class="panel" id="genReferences" ${gen.showSources ? "open" : ""}>
+    $("#genPlanOut").innerHTML = p?.prompt && !p.prompt_only ? `<details class="panel" id="genReferences" ${gen.showSources ? "open" : ""}>
       <summary>AI에 전달할 내용</summary><div class="note" style="margin-top:10px">앱이 포함 행 전체로 계산한 집계와 일부 원문 행입니다. AI를 연결하지 않았다면 복사해서 다른 AI에 붙여 넣을 수 있습니다.</div>
       <div id="genPromptChanged" class="note">요청을 바꿨습니다. 요청문 복사를 누르면 현재 요청으로 다시 만듭니다.</div>
       <pre id="genPromptText" class="pack">${esc(p.prompt)}</pre><button class="btn" id="copyGenPrompt">요청문 복사</button></details>` : "";
@@ -345,11 +348,11 @@ function renderPlanPanel() {
       <div id="genFound"></div><div class="row"><button class="btn" id="genFindPrev">이전</button><button class="btn" id="genFindNext">다음</button></div>
     </details>
     <div class="row" style="margin-top:12px"><span class="spacer"></span><button class="btn primary" id="genRun2">선택한 메모로 ${esc($("#genRun").textContent)}</button></div>
-    <details style="margin-top:10px"><summary class="status">AI에 전달할 내용</summary><div id="genPromptChanged" class="note">현재 선택으로 요청문을 다시 만듭니다.</div><pre id="genPromptText" class="pack">${esc(p?.prompt || "")}</pre><button class="btn" id="copyGenPrompt">요청문 복사</button></details>
+    ${p?.prompt_only ? "" : `<details style="margin-top:10px"><summary class="status">AI에 전달할 내용</summary><div id="genPromptChanged" class="note">현재 선택으로 요청문을 다시 만듭니다.</div><pre id="genPromptText" class="pack">${esc(p?.prompt || "")}</pre><button class="btn" id="copyGenPrompt">요청문 복사</button></details>`}
     </details>`;
   $("#genReferences").ontoggle = (e) => { if (e.target.isConnected) gen.showSources = e.target.open; };
   $("#genRun2").onclick = runGenerate;
-  $("#copyGenPrompt").onclick = copySelectedGenPrompt;
+  if ($("#copyGenPrompt")) $("#copyGenPrompt").onclick = copySelectedGenPrompt;
   let offset = 0, timer;
   $("#genAddPanel").ontoggle = (e) => { if (e.target.open) findGenMemos(offset); };
   $("#genFind").oninput = () => { offset = 0; ++gen.finderVersion; clearTimeout(timer); timer = setTimeout(() => findGenMemos(offset), 250); };
@@ -368,6 +371,12 @@ function paintGenPicker() {
 }
 function updateGenPromptVisibility() {
   const current = gen.plan?.prompt && gen.planKey === JSON.stringify(genPayload());
+  const host = $("#genCopilot");
+  if (host) {
+    host.hidden = !(current && gen.plan.prompt_only);
+    if (host.hidden) host.replaceChildren();
+    else if (host.querySelector("textarea")?.value !== gen.plan.prompt) showCopilotPrompt(host, gen.plan);
+  }
   if ($("#genPromptText")) $("#genPromptText").hidden = !current;
   if ($("#genPromptChanged")) $("#genPromptChanged").hidden = !!current;
 }
@@ -394,7 +403,7 @@ async function findGenMemos(offset) {
   try {
     const r = await api(genMemosUrl(query, offset));
     if (!host.isConnected || version !== gen.finderVersion) return;
-    host.innerHTML = r.items.map((m, i) => `<div class="src"><div class="src-body"><b>${esc(m.title)}</b><div class="meta">${esc((m.created_at || "").slice(0, 10))}</div><details><summary class="status">본문 확인</summary><pre class="pack">${esc(m.body)}</pre></details></div><button class="btn" data-gen-add="${i}">${gen.review.selected.has(m.key) ? "선택됨" : "추가"}</button></div>`).join("") || '<div class="status">찾은 메모가 없습니다.</div>';
+    host.innerHTML = r.items.map((m, i) => `<div class="src"><div class="src-body"><b>${esc(m.file_label || m.title)}</b><div class="meta">${esc((m.created_at || "").slice(0, 10))}</div><details><summary class="status">본문 확인</summary><pre class="pack">${esc(m.body)}</pre></details></div><button class="btn" data-gen-add="${i}">${gen.review.selected.has(m.key) ? "선택됨" : "추가"}</button></div>`).join("") || '<div class="status">찾은 메모가 없습니다.</div>';
     host.querySelectorAll("[data-gen-add]").forEach((b) => {
       const m = r.items[+b.dataset.genAdd]; b.disabled = gen.busy || gen.review.selected.has(m.key);
       b.onclick = () => {
@@ -413,25 +422,27 @@ async function runGenerate() {
   if (!gen.instruction.trim()) { toast("정리할 내용을 먼저 적어주세요"); $("#genInput")?.focus(); return; }
   if (gen.busy) return;
   refreshGenDay();
-  gen.busy = true; setGenBusy(true); genProgress("정리하는 중입니다. 오른쪽 아래에서 진행 상황을 볼 수 있습니다.");
-  aiWaitStart("AI로 정리하는 중", genWaitDetail());
+  gen.busy = true; setGenBusy(true);
+  genProgress(gen.llmReady ? "정리하는 중입니다. 오른쪽 아래에서 진행 상황을 볼 수 있습니다." : "Copilot 요청문을 준비하고 있습니다.");
+  aiWaitStart(gen.llmReady ? "AI로 정리하는 중" : "Copilot 요청문 만드는 중", gen.llmReady ? genWaitDetail() : "선택한 범위에서 근거 자료를 모으고 있습니다");
   let finished = "", ok = true;
   try {
     await flushGenDraft();
     const r = await api("/api/generate", { method: "POST", body: genPayload() });
-    finished = r.output ? "AI 정리가 끝났습니다" : "정리하지 못했습니다";
-    ok = !!r.output;
-    if (r.output) {
-      adoptGenResult(r); gen.showSources = false; gen.plan = r; gen.queries = r.queries || [];
-      if (!gen.review && !gen.collection) gen.review = { items: r.candidates || [], selected: new Set((r.candidates || []).map((m) => m.key)) };
-      gen.planKey = JSON.stringify(genPayload());
-      if (state.tab === "generate") { renderPlanPanel(); renderGenOutput(); loadGenHistory(); }
-      genProgress();
-    } else {
-      gen.plan = r;
-      if (!gen.review && !gen.collection) gen.review = { items: r.candidates || [], selected: new Set((r.candidates || []).map((m) => m.key)) };
-      gen.planKey = JSON.stringify(genPayload());
-      gen.showSources = true; renderPlanPanel(); genProgress(r.reason || "정리한 내용이 없습니다.");
+    finished = r.output ? "AI 정리가 끝났습니다" : r.prompt_only ? "Copilot 요청문을 준비했습니다" : "정리하지 못했습니다";
+    ok = !!(r.output || r.prompt_only);
+    gen.plan = r; gen.showSources = !ok;
+    if (ok) { adoptGenResult(r); gen.queries = r.queries || []; }
+    if (!gen.review && !gen.collection) {
+      const items = r.candidates || [];
+      gen.review = { items, selected: new Set(items.map((m) => m.key)) };
+    }
+    gen.planKey = JSON.stringify(genPayload());
+    if (state.tab === "generate") {
+      renderPlanPanel();
+      if (ok) renderGenOutput();
+      if (r.output) loadGenHistory();
+      genProgress(ok ? "" : r.reason || "정리한 내용이 없습니다.");
     }
   } catch (e) { genProgress(e.message); finished = "정리하지 못했습니다"; ok = false; }
   finally { gen.busy = false; setGenBusy(false); aiWaitStop(finished, ok); }

@@ -32,15 +32,15 @@ log = logging.getLogger(__name__)
 FORMATS: dict[str, dict[str, str]] = {
     "auto": {
         "label": "자동",
-        "hint": "내용에 맞는 형식을 알아서 고르세요.",
+        "hint": "요청에 적힌 독자와 형식을 우선하세요. 형식이 없으면 결론을 먼저 쓰고, 근거와 다음에 결정할 일을 짧게 정리하세요.",
     },
     "brief": {
         "label": "브리핑",
-        "hint": "핵심 3~5줄 → 세부 항목 순서로. 각 줄은 한 문장. 결론을 먼저 쓰세요.",
+        "hint": "핵심을 3~5줄로 요약하세요. 첫 줄에 가장 중요한 결론을, 다음 줄에 달라진 점과 필요한 결정을 쓰세요.",
     },
     "report": {
         "label": "보고서",
-        "hint": "배경 · 현황 · 쟁점 · 제안 순의 마크다운 보고서. 각 절은 짧게, 근거를 붙여서.",
+        "hint": "마크다운 보고서 첫 문단에 결론을 쓰고 배경·현황·쟁점·제안 순으로 정리하세요. 제안마다 어떤 쟁점과 근거에서 나왔는지 밝히세요.",
     },
     "outline": {
         "label": "개요/목차",
@@ -52,7 +52,7 @@ FORMATS: dict[str, dict[str, str]] = {
     },
     "email": {
         "label": "이메일 초안",
-        "hint": "제목 한 줄 + 본문. 존댓말, 5문장 이내 본문. 요청사항을 마지막에 명확히.",
+        "hint": "제목 한 줄과 존댓말 본문 5문장 이내로 작성하세요. 첫 문장에 연락 목적을, 마지막 문장에 수신자가 확인하거나 할 일을 명시하세요.",
     },
     "qna": {
         "label": "질문에 답하기",
@@ -61,7 +61,7 @@ FORMATS: dict[str, dict[str, str]] = {
     "handoff": {
         "label": "인수인계서",
         "hint": "업무 배경 · 현재 상태 · 결정 사항 · 남은 할 일 · 참고 자료 순으로 정리하세요. "
-                "담당자와 기한은 메모에 있을 때만 쓰고, 확인이 필요한 내용은 별도로 표시하세요.",
+                "담당자와 기한은 출처에서 확인된 값으로 쓰고, 미정인 항목은 별도로 표시하세요.",
     },
 }
 
@@ -69,13 +69,11 @@ SYSTEM = (
     "너는 사용자의 개인 업무 메모를 재료로 결과물을 만드는 조수다.\n"
     "\n"
     "규칙:\n"
-    "1. 아래 '근거 메모'에 있는 내용만 사실로 사용한다. 없는 사실을 지어내지 않는다.\n"
-    "2. 메모에서 가져온 내용에는 [M{id}] 로 출처를 붙인다.\n"
-    "3. 지시사항을 수행하는 데 근거가 부족하면, 결과물 앞에 '## 근거가 부족한 부분'\n"
-    "   절을 만들어 무엇이 없는지 먼저 밝힌 뒤 가능한 범위까지 작성한다.\n"
-    "4. 메모는 사용자가 급하게 적은 것이라 오탈자·비문·중복이 있다. 의미를 살려 정리하되\n"
-    "   내용을 바꾸지 않는다.\n"
-    "5. 한국어로, 지시사항이 요구하는 형식으로만 출력한다. 서두 인사나 메타 설명은 쓰지 않는다."
+    f"{context.EVIDENCE_RULES}\n"
+    "같은 사건을 여러 메모가 언급하면 중복을 합치고 출처를 함께 붙이세요. "
+    "후속 조치는 어느 자료의 결정인지, 작성자가 제안하는 일인지 드러내세요.\n"
+    "사용자가 지정한 독자와 용도에 맞게 아래 출력 형식을 따르세요. "
+    "한국어 완성본부터 제시하고, 작성에 꼭 필요한 빈칸은 해당 항목에 표시하세요."
 )
 
 COLLECTION_SYSTEM = (
@@ -89,6 +87,7 @@ COLLECTION_SYSTEM = (
     "4. 취합 자료에서 가져온 내용에는 [C{id}] 로 출처를 붙인다.\n"
     "5. 자료에 없는 원인·담당자·기한을 지어내지 않는다. 판단이 필요하면 '확인 필요'로 적는다.\n"
     "6. 제외한 파일이나 값 확인이 필요한 행이 있으면 결과의 범위가 그만큼 제한된다는 점을 밝힌다.\n"
+    "   두 집계를 비교할 때는 기간·단위·포함 행의 범위를 확인하고, 서로 다르면 그 차이를 함께 표시한다.\n"
     "7. 한국어로, 지시사항이 요구하는 형식으로만 출력한다. 서두 인사나 메타 설명은 쓰지 않는다."
 )
 
@@ -119,14 +118,14 @@ INSTRUCTION_NOISE = re.compile(
 PARTICLES = re.compile(r"(으로|로서|로써|에서|에게|한테|까지|부터|보다|처럼|같이|대해|관해|관련)\S*$")
 
 
-def derive_queries(instruction: str, count: int | None = None) -> dict:
+def derive_queries(instruction: str, count: int | None = None, *, use_llm: bool = True) -> dict:
     """지시사항 → 검색 질의 목록. LLM 이 있으면 LLM, 없으면 규칙."""
     count = count or settings.get_int("gen.query_count", 3)
     instruction = (instruction or "").strip()
     if not instruction:
         return {"queries": [], "topic": "", "method": "none"}
 
-    if llm.available():
+    if use_llm and llm.available():
         try:
             data = llm.complete_json(
                 QUERY_SYSTEM,
@@ -290,8 +289,9 @@ def build_pack(
     feed_query: str | None = None,
     period: str | None = None,
     collection: dict | None = None,
+    use_llm_queries: bool = True,
 ) -> dict:
-    """생성 직전까지 — 질의 도출, 검색, 프롬프트 조립. LLM 호출은 안 한다."""
+    """검색 질의를 도출하고 근거와 프롬프트를 조립한다. use_llm_queries=False면 검색 질의도 로컬에서 만든다."""
     budget_tokens = budget_tokens or settings.get_int("gen.budget_tokens", 6000)
     if collection is not None:
         return _collection_pack(instruction, fmt, budget_tokens, collection)
@@ -303,28 +303,12 @@ def build_pack(
     if feed_query is not None and (not isinstance(feed_query, str) or not memo_ids):
         raise ValueError("검색 결과에서 사용할 메모를 다시 선택하세요.")
     if memo_ids is not None:
-        if not memo_ids:
-            raise ValueError("근거로 쓸 메모를 하나 이상 선택하세요.")
         derived = {"queries": [], "topic": "", "method": "selected"}
-        hits = []
-        for memo_id in dict.fromkeys(memo_ids):
-            try:
-                hits.append(store.get_memo(memo_id))
-            except KeyError:
-                raise ValueError(f"선택한 메모 M{memo_id}를 찾을 수 없습니다. 다시 선택하세요.")
-        # 선택한 ID도 검색 범위를 우회할 수 없다. 태그가 나중에 바뀐 경우에도
-        # 조용히 일부만 보내지 않고, AI 호출 전에 다시 확인하도록 한다.
-        for hit in hits:
-            facets = hit.get("facets", {})
-            if ((feed_query is not None and hit.get("archived")) or not set(required_tags).issubset(facets.get("tag", []))
-                    or (person and person not in facets.get("person", []))
-                    or (since and hit["created_at"] < since)
-                    or (until and hit["created_at"] > (until + "T23:59:59" if len(until) == 10 else until))):
-                raise ValueError("선택한 메모가 찾을 범위와 맞지 않습니다. 메모 고르기를 눌러 다시 확인하세요.")
+        hits = context.selected_memos(memo_ids, required_tags, person, since, until, allow_archived=feed_query is None)
     else:
         derived = {"queries": queries or [], "topic": "", "method": "manual"}
         if not queries:
-            derived = derive_queries(instruction)
+            derived = derive_queries(instruction, use_llm=use_llm_queries)
         hits = multi_search(
             derived["queries"], limit=limit, tag=tag, tags=tags, person=person,
             since=since, until=until,
@@ -339,12 +323,14 @@ def build_pack(
     included: list[dict] = []
     dropped: list[dict] = []
     used = context.estimate_tokens(instruction) + 250  # 시스템 지시문 여유
+    selected = context.fit_selected(hits, instruction, budget_tokens - used) if memo_ids is not None else None
 
     for hit in hits:
         primary = (hit["body"] if full_body else (hit.get("matched_chunk") or hit["body"])).strip()
         secondary = (hit.get("matched_chunk") or "") if full_body else ""
         # 예산은 반드시 지킨다. 긴 메모는 전문 → 검색에 걸린 부분 → 잘라서 순으로 물러난다.
-        fitted = context.fit(primary, secondary, budget_tokens - used, force=not included)
+        fitted = (selected.get(hit["id"]) if selected is not None
+                  else context.fit(primary, secondary, budget_tokens - used, force=not included))
         if fitted is None:
             dropped.append(
                 {"id": hit["id"], "title": hit["title"], "tokens": context.estimate_tokens(primary)}
@@ -359,7 +345,8 @@ def build_pack(
                 "title": hit["title"],
                 "created_at": hit["created_at"],
                 "text": text,
-                "included_as": how,
+                "included_as": "chunk" if how == "full" and text != hit["body"].strip() else how,
+                "file_label": hit.get("file_label", ""),
                 "tags": facets.get("tag", []),
                 "people": facets.get("person", []),
                 "matched_queries": hit.get("matched_queries", []),
@@ -408,7 +395,7 @@ def _collection_pack(instruction: str, fmt: str, budget_tokens: int, collection:
 
 def render_collection(instruction: str, fmt: str, material: str) -> str:
     preset = FORMATS.get(fmt, FORMATS["auto"])
-    return "\n".join(["# 지시사항", instruction.strip(), "", f"# 출력 형식\n{preset['hint']}", "", material])
+    return "\n".join(["# 지시사항", instruction.strip(), "", f"# 출력 형식\n{preset['label']} · {preset['hint']}", "", material])
 
 
 def candidate(memo: dict) -> dict:
@@ -417,7 +404,7 @@ def candidate(memo: dict) -> dict:
     ).encode("utf-8")).hexdigest()
     return {"id": memo["id"], "key": str(memo["id"]), "title": memo["title"],
             "body": memo["body"], "created_at": memo["created_at"], "source": memo.get("source"),
-            "eligible": True, "revision": revision}
+            "file_label": memo.get("file_label", ""), "eligible": True, "revision": revision}
 
 
 def render(instruction: str, fmt: str, queries: list[str], sources: list[dict], dropped: list[dict]) -> str:
@@ -426,46 +413,40 @@ def render(instruction: str, fmt: str, queries: list[str], sources: list[dict], 
         "# 지시사항",
         instruction.strip(),
         "",
-        f"# 출력 형식\n{preset['hint']}",
+        f"# 출력 형식\n{preset['label']} · {preset['hint']}",
         "",
         "# 근거 메모",
         f"(검색 질의: {', '.join(queries) if queries else '없음'})",
     ]
-    if not sources:
+    if not sources and not dropped:
         lines.append("\n관련 메모를 찾지 못했습니다. 이 사실을 먼저 밝히고, "
                      "지시사항만으로 쓸 수 있는 부분이 있으면 그 범위를 명시해 작성하세요.")
-    for s in sources:
-        meta = [s["created_at"][:10]]
-        if s["tags"]:
-            meta.append(" ".join("#" + t for t in s["tags"]))
-        if s["people"]:
-            meta.append(" ".join("@" + p for p in s["people"]))
-        # 부분만 실린 근거는 그렇다고 밝힌다 — 모델이 '전부 봤다'고 오인하면 안 된다.
-        partial = {"chunk": "관련 부분만", "truncated": "앞부분만"}.get(s.get("included_as", "full"))
-        if partial:
-            meta.append(partial)
-        lines.append(f"\n## [M{s['id']}] {s['title']}  ({' · '.join(meta)})")
-        lines.append(s["text"])
-    if dropped:
-        ids = ", ".join(f"M{d['id']}" for d in dropped)
-        lines.append(f"\n---\n(토큰 예산 초과로 제외된 관련 메모: {ids})")
-    return "\n".join(lines)
+    return "\n".join([*lines, *context.evidence_lines(sources, dropped)])
 
 
-def generate(instruction: str, **kwargs) -> dict:
+def standalone_prompt(pack: dict) -> str:
+    system = COLLECTION_SYSTEM if pack.get("collection") else SYSTEM
+    return f"{system}\n\n{pack['prompt']}"
+
+
+def generate(instruction: str, *, prompt_only: bool = False, **kwargs) -> dict:
     """전체 파이프라인. 키가 없으면 프롬프트까지만 만들어 돌려준다."""
     effort = kwargs.pop("effort", None)
     max_tokens = kwargs.pop("max_tokens", None)
-    pack = build_pack(instruction, **kwargs)
+    local_only = prompt_only or not llm.available()
+    pack = build_pack(instruction, use_llm_queries=not local_only, **kwargs)
 
+    if not pack["sources"] and pack["dropped"]:
+        return {**pack, "output": None, "reason": "읽을 분량 안에 자료를 담을 수 없습니다. 지시사항을 줄이거나 읽을 분량을 늘려주세요."}
     if not pack["sources"] and any(pack["scope"].get(key) for key in ("tags", "person", "since", "until")):
         return {**pack, "output": None, "reason": "선택한 범위에서 참고할 메모를 찾지 못했습니다. 태그나 검색 조건을 바꿔 주세요."}
 
     if not pack["sources"] and not instruction.strip():
         return {**pack, "output": None, "reason": "지시사항이 비어 있습니다."}
 
-    if not llm.available():
-        return {**pack, "output": None, "reason": llm._no_key_reason()}
+    if local_only or not llm.available():
+        return {**pack, "prompt": standalone_prompt(pack), "output": None,
+                "prompt_only": True, "reason": None if prompt_only else llm._no_key_reason()}
 
     try:
         system = COLLECTION_SYSTEM if pack.get("collection") else SYSTEM
@@ -487,10 +468,11 @@ def refine(previous: dict, body: str, request: str) -> dict:
         material = render_collection(previous["instruction"], previous.get("format", "auto"), collection["material"])
     else:
         material = render(previous["instruction"], previous.get("format", "auto"), [], previous.get("sources", []), [])
+    source_guidance = ("취합 자료에 없는 사실·담당자·기한을 추가하지 마세요." if collection else
+                       "새로 보완한 사실에는 확인한 출처를 붙이세요.")
     prompt = (material + "\n\n# 수정할 초안\n" + body + "\n\n# 사용자의 수정 요청\n" + request
               + "\n\n요청을 반영한 문서 전체를 출력하세요. 초안은 수정할 대상이며 사실의 근거가 아닙니다. "
-                f"{'취합 자료' if collection else '참고 메모'}에 없는 사실·담당자·기한을 추가하지 말고 기존 출처 표시를 유지하세요. "
-                "요청과 관계없는 내용은 유지하세요.")
+                f"{source_guidance} 기존 출처 표시와 요청에 관계없는 내용은 유지하세요.")
     try:
         system = COLLECTION_SYSTEM if collection else SYSTEM
         return {"output": llm.complete(system, prompt), "reason": None, "provider": llm.current_label()}

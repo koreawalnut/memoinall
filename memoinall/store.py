@@ -285,11 +285,24 @@ def _index_fts(memo_id: int, body: str) -> None:
 # --------------------------------------------------------------------------- 읽기
 
 
+def _memo_with_file_label(row) -> dict:
+    memo = dict(row)
+    if memo["source"] == "document":
+        # 문서 가져오기는 메모마다 파일명과 페이지·시트를 본문 머리말에 보관한다.
+        lines = memo["body"].split("\n", 3)
+        if len(lines) >= 3 and lines[1].startswith("원본 파일: ") and lines[2].startswith("원본 위치: "):
+            memo["file_name"] = lines[1].removeprefix("원본 파일: ")
+            memo["file_label"] = memo["file_name"] + " · " + lines[2].removeprefix("원본 위치: ")
+    elif memo["source"] == "files" and memo.get("external_id"):
+        memo["file_label"] = memo["external_id"].replace("\\", "/").rsplit("/", 1)[-1]
+    return memo
+
+
 def get_memo(memo_id: int, *, with_facets: bool = True) -> dict:
     row = db.one("SELECT * FROM memos WHERE id=?", (memo_id,))
     if not row:
         raise KeyError(f"메모 {memo_id} 없음")
-    memo = dict(row)
+    memo = _memo_with_file_label(row)
     if with_facets:
         if memo["source"] in IMPORT_SOURCES:
             memo["tag_reference_pattern"] = extract.IMPORT_REFERENCE.pattern
@@ -353,7 +366,7 @@ def list_memos(
         return [dict(row) for row in rows]
     out = []
     for row in rows:
-        memo = dict(row)
+        memo = _memo_with_file_label(row)
         memo["facets"] = facets_of(memo["id"])
         out.append(memo)
     return out

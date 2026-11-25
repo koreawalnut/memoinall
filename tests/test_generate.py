@@ -382,6 +382,11 @@ def main() -> int:
     check("빈 질의 목록", generate.multi_search([]) == [])
 
     section("팩 조립")
+    from memoinall import context
+    long_notes = [{"id": n, "body": "공통 서론입니다. " * 300 + f"\n\n예산동결 근거 {n}번."} for n in [21, 22]]
+    fitted = context.fit_selected(long_notes, "예산동결", 500)
+    check("긴 선택 자료마다 관련 구절 포함", all(fitted[n][1] == "chunk" and f"근거 {n}번" in fitted[n][0] for n in [21, 22]))
+    check("여러 발췌의 총 분량 준수", sum(context.estimate_tokens(part) + context.ENTRY_OVERHEAD for part, _ in fitted.values()) <= 500)
     pack = generate.build_pack("AX 세미나 내용 정리해줘", budget_tokens=900, fmt="brief")
     check("근거 포함", len(pack["sources"]) > 0, len(pack["sources"]))
     check("예산 준수", pack["used_tokens"] <= 900, f"{pack['used_tokens']}/900")

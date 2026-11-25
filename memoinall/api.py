@@ -386,8 +386,8 @@ ASK_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 def ask(payload: dict = Body(...)):
     """내 메모를 근거로 답한다. tags·person·since·until 로 검색창의 조건을 그대로 걸 수 있다.
 
-    AI 가 설정되지 않았으면 원래는 근거를 붙인 프롬프트만 돌려준다(외부 도구·CLI 용).
-    검색창의 'AI에게 묻기'는 require_ai 를 보내 그때는 아예 거절받는다 — 설정했을 때만 쓰는 기능이다.
+    prompt_only 요청은 로컬에서 근거와 요청문만 준비한다.
+    require_ai 를 지정한 기존 호출자는 AI 미설정 시 409를 받는다.
     """
     q = payload.get("q")
     if not isinstance(q, str) or not q.strip():
@@ -396,7 +396,7 @@ def ask(payload: dict = Body(...)):
     if len(q) > 2000:
         raise HTTPException(400, "질문은 2,000자까지 적을 수 있습니다.")
     if payload.get("require_ai") and not llm.available():
-        raise HTTPException(409, "AI가 연결되지 않았습니다. 설정에서 AI를 연결하면 검색창에서 바로 물을 수 있습니다.")
+        raise HTTPException(409, "이 요청에는 AI 연결이 필요합니다. 설정에서 AI를 연결해 주세요.")
     filters: dict = {}
     raw_tags = payload.get("tags")
     if raw_tags is not None:
@@ -415,7 +415,12 @@ def ask(payload: dict = Body(...)):
         limit = min(max(int(payload.get("limit", 12)), 1), 30)
     except (TypeError, ValueError):
         raise HTTPException(400, "budget·limit 은 숫자여야 합니다.")
-    return llm.answer(q, budget_tokens=budget, limit=limit, **filters)
+    memo_ids = _memo_ids(payload.get("memo_ids"))
+    try:
+        return llm.answer(q, budget_tokens=budget, limit=limit, memo_ids=memo_ids,
+                          prompt_only=payload.get("prompt_only") is True, **filters)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 # --------------------------------------------------------------------------- 정리
@@ -1161,6 +1166,13 @@ def write_settings(payload: dict = Body(...)):
     return settings.public_view()
 
 
+@app.delete("/api/settings/ai-connections")
+def reset_ai_connections():
+    settings.reset_ai_connections()
+    llm.reset()
+    return {"ok": True}
+
+
 @app.get("/api/providers")
 def list_providers():
     return {
@@ -1319,13 +1331,17 @@ def _generate_request(payload: dict, instruction: str, *, run: bool = False):
         collection=payload.get("collection"),
     )
     try:
+        prompt_only = payload.get("prompt_only") is True
         if run:
-            result = generate.generate(instruction, effort=payload.get("effort"), **options)
+            result = generate.generate(instruction, prompt_only=prompt_only, effort=payload.get("effort"), **options)
             if result.get("output"):
                 saved = ai_history.create(result)
                 result.update({key: saved[key] for key in ("history_id", "version", "latest_version", "draft_body", "memo_id", "versions")})
             return result
-        return generate.build_pack(instruction, **options)
+        plan = generate.build_pack(instruction, use_llm_queries=not prompt_only, **options)
+        if prompt_only:
+            plan["prompt"] = generate.standalone_prompt(plan)
+        return plan
     except (KeyError, ValueError) as exc:
         raise HTTPException(400, str(exc))
 

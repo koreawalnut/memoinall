@@ -50,6 +50,43 @@ def wait_idle(c, timeout=20.0):
     return False
 
 
+def check_ai_connection_reset(c):
+    from memoinall import llm, providers, settings
+
+    keys = ["llm.anthropic.api_key", "llm.openai.api_key", "llm.gemini.api_key"]
+    env = {"ANTHROPIC_API_KEY": "test-env-claude", "OPENAI_API_KEY": "test-env-openai",
+           "GEMINI_API_KEY": "test-env-gemini", "MEMOINALL_LLM_PROVIDER": "ollama",
+           "OLLAMA_BASE_URL": "http://unused.test", "MEMOINALL_STT_ENGINE": "gemini"}
+    with patch.dict(os.environ, env):
+        values = {key: "test-stored-key" for key in keys}
+        values.update({"llm.provider": "ollama", "llm.ollama.model": "custom", "llm.openai.base_url": "http://unused.test",
+                       "stt.engine": "gemini", "stt.local.model": "large-v3-turbo", "gen.query_count": "4", "import.notion.token": "test-notion"})
+        c.put("/api/settings", json={"values": values}).raise_for_status()
+        db.set_meta("settings.llm.api_key", "legacy-test-key")
+        cached_adapter = llm.adapter()
+        for _ in range(2):
+            c.delete("/api/settings/ai-connections").raise_for_status()
+        cfg = c.get("/api/settings").json()
+        check("초기화 후 모든 AI 미연결", not cfg["llm_ready"] and not any(p["ready"] for p in cfg["providers"]))
+        check("저장 키와 구버전 키 삭제", all(not db.get_meta(settings.PREFIX + key) for key in [*keys, "llm.api_key"]))
+        check("환경변수는 유지하고 앱의 자동 재연결만 해제", all(os.environ[k] == v for k, v in env.items())
+              and all(not cfg["settings"][key]["configured"] for key in keys))
+        check("사용자 모델·서버·추론 초기화", settings.get("llm.ollama.model") == providers.spec("ollama").default_model
+              and settings.get("llm.openai.base_url") == providers.spec("openai").default_base_url
+              and settings.get("llm.anthropic.effort") == providers.spec("anthropic").default_effort)
+        check("기존 AI 어댑터 교체", llm.adapter() is not cached_adapter)
+        status = c.get("/api/stt/status").json()
+        check("Gemini 음성 연결 해제 및 로컬 선택 보존", status["engine"] == "local" and not status["gemini_key"]
+              and status["local_model"] == "large-v3-turbo")
+        check("AI 연결 외 설정 유지", settings.get("gen.query_count") == "4" and settings.get("import.notion.token") == "test-notion")
+        c.put("/api/settings", json={"values": {"llm.provider": "openai", "llm.openai.api_key": ""}}).raise_for_status()
+        check("선택한 환경변수 연결만 복구", settings.provider_ready() and settings.get("llm.openai.api_key") == env["OPENAI_API_KEY"]
+              and not settings.provider_ready("gemini") and not settings.provider_ready("anthropic"))
+        c.put("/api/settings", json={"values": {"llm.provider": "ollama"}}).raise_for_status()
+        check("키 없는 Ollama도 다시 연결 가능", settings.provider_ready())
+        c.delete("/api/settings/ai-connections").raise_for_status()
+
+
 def main() -> int:
     with TestClient(app) as c:
         r = c.post("/api/memos", json={"body": "결제 모듈 타임아웃 @김민수 확인해야 함 #결제\n[ ] 로그 확인"})
@@ -68,11 +105,30 @@ def main() -> int:
                     {"q": "결제", "tags": [1]}, {"q": "결제", "since": "어제"}, {"q": "결제", "budget": "많이"}):
             check(f"POST /api/ask 잘못된 요청 400 {list(bad)}", c.post("/api/ask", json=bad).status_code == 400)
         refused = c.post("/api/ask", json={"q": "결제 문제가 뭐였지?", "require_ai": True})
-        check("AI 미설정이면 검색창 묻기는 거절", refused.status_code == 409 and "설정" in refused.json()["detail"], refused.text)
+        check("require_ai 호출은 AI 미설정 시 거절", refused.status_code == 409 and "설정" in refused.json()["detail"], refused.text)
         prompt_only = c.post("/api/ask", json={"q": "결제 문제가 뭐였지?"}).json()
         check("외부 도구용 /api/ask 는 프롬프트만", prompt_only["answer"] is None and "[M" in prompt_only["prompt"])
+        for ids, filters in [([], {}), ([mid], {"since": "2999-01-01"}), ([999999], {}), (["bad"], {})]:
+            rejected = c.post("/api/ask", json={"q": "비교", "memo_ids": ids, "prompt_only": True, **filters})
+            check("질문에 쓸 수 없는 선택을 전체 검색으로 대체하지 않음", rejected.status_code == 400, rejected.text)
         with patch("memoinall.llm.available", return_value=True), \
+             patch("memoinall.llm.complete_json") as query_model, \
              patch("memoinall.llm.complete", return_value="PG사 지연이 원인입니다 [M3].") as complete:
+            local_ask = c.post("/api/ask", json={"q": "결제", "tags": ["결제"], "prompt_only": True}).json()
+            check("Copilot 질문에 검색 범위 적용", local_ask["prompt_only"] and "#결제" in local_ask["prompt"]
+                  and "온보딩" not in local_ask["prompt"] and local_ask["answer"] is None)
+            payload = {"instruction": "결제 이슈 보고", "format": "report", "tags": ["결제"], "prompt_only": True}
+            local_plan = c.post("/api/generate/plan", json=payload).json()
+            local_doc = c.post("/api/generate", json=payload).json()
+            for name, result in [("질문", local_ask), ("문서 미리보기", local_plan), ("문서", local_doc)]:
+                prompt = result["prompt"]
+                check(f"Copilot {name} 요청문은 메모를 우선하고 보충 출처를 구분", all(
+                    rule in prompt for rule in ("최우선 근거", "[M{id}]", "공개 웹 자료", "보충 자료", "문서명이나 링크")
+                ) and "검색하지 마세요" not in prompt)
+            check("Copilot 문서에 형식·출처·선택 범위 반영", local_doc["prompt_only"] and local_doc["output"] is None
+                  and "마크다운 보고서" in local_doc["prompt"] and "[M" in local_doc["prompt"] and "온보딩" not in local_doc["prompt"])
+            check("요청문 준비 중 AI가 연결돼도 로컬 검색만 사용", local_plan["query_method"] == "rule"
+                  and not query_model.called and not complete.called)
             asked = c.post("/api/ask", json={"q": "결제 문제가 뭐였지?", "require_ai": True, "tags": ["#기획"]}).json()
             check("AI 답변과 근거", asked["answer"] == "PG사 지연이 원인입니다 [M3]." and asked["sources"], asked)
             check("검색 조건(태그) 안의 메모만 근거", {s["title"][:6] for s in asked["sources"]} == {"온보딩 3단"}
@@ -427,6 +483,7 @@ def main() -> int:
 
         check("POST /api/settings/test (키 없음)", c.post("/api/settings/test").json()["ok"] is False)
         check("특정 프로바이더 테스트", c.post("/api/settings/test", json={"provider": "gemini"}).json()["ok"] is False)
+        check_ai_connection_reset(c)
 
         # --- 생성 ---
         fmts = c.get("/api/generate/formats").json()

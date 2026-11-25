@@ -133,6 +133,11 @@
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   .feed-tools .row { margin-bottom: 8px; }
   .selection-bar { padding: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  #selectedSources { display:flex; flex-wrap:wrap; gap:5px; max-height:6em; overflow:auto; }
+  #selectedSources .chip { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #fileChoices .chip { max-width:100%; white-space:normal; overflow-wrap:anywhere; }
+  #selectionQuestion { flex:1 1 230px; min-width:0; }
+  .file-label { color:var(--dim); font-size:13px; overflow-wrap:anywhere; }
   .feed-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 18px 0 8px; }
   .feed-heading h3 { margin: 0; font-size: 15px; font-weight: 600; }
   .filter-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
@@ -530,10 +535,24 @@
       <div id="activeFilters" class="tagrow" hidden></div>
       <div class="feed-heading"><h3>저장한 메모</h3><span class="spacer"></span>
         <button class="btn ghost" id="saveSearch" hidden>이 검색 저장</button>
-        <button class="btn" id="documentFromSearch" hidden>이 결과로 문서 만들기</button>
+        <button class="btn" id="documentFromSearch" hidden>검색 결과 전체로 문서 만들기</button>
         <button class="btn ghost" id="toggleSelection" aria-pressed="false">선택해서 정리·공유</button>
       </div>
-      <div id="selectionBar"></div>
+      <div class="selection-bar" id="selectionBar" hidden>
+        <div class="row"><strong id="selectionCount" role="status"></strong><span class="spacer"></span>
+          <button class="btn ghost" type="button" id="selectPage">이 페이지 선택</button>
+          <button class="btn ghost" type="button" id="clearSelection">전체 선택 해제</button></div>
+        <div id="fileSelection" hidden><span class="status">이 페이지에서 파일별로 선택</span><div class="tagrow" id="fileChoices"></div></div>
+        <div id="selectionActions" hidden>
+          <div id="selectedSources" aria-label="선택한 자료"></div>
+          <form class="row" id="selectionAskForm" style="margin-top:10px">
+            <input id="selectionQuestion" maxlength="2000" aria-label="선택한 자료에 대한 질문" placeholder="선택한 자료에 무엇을 물어볼까요?" />
+            <button class="btn primary" type="submit" id="askSelection">질문 요청문 만들기</button>
+          </form>
+          <div class="row"><button class="btn" type="button" id="generateSelection">선택한 자료로 문서 만들기</button>
+            <button class="btn ghost" type="button" id="exportSelection">공유·인수인계</button></div>
+        </div>
+      </div>
     </div>
 
     <div id="view"></div>
@@ -1164,11 +1183,12 @@ $("#q").addEventListener("input", (e) => {
   state.offset = 0;
   state.selected.clear();
   state.selecting = false;
+  state.feedItems = [];
   // 이미 진행 중인 검색도 새 입력 시점에 무효화한다.
   renderVersion++;
   clearTimeout(searchTimer);
   searchTimer = setTimeout(render, 220);
-  paintAskButton();
+  paintFeedTools();
 });
 // 검색은 치는 대로 된다. Ctrl+Enter 는 같은 글을 AI에게 묻는다(메모 저장의 Ctrl+Enter 와 같은 손버릇).
 $("#q").addEventListener("keydown", (e) => {
@@ -1181,16 +1201,61 @@ $("#clear").onclick = () => {
 };
 
 // ---------------------------------------------------------------- 검색창에서 AI에게 묻기
-// AI가 연결돼 있을 때만 보이고 쓸 수 있다. 지금 검색 조건(태그·사람·작성일) 안의 메모만 근거로 쓴다.
 const ask = { request: 0, q: "", scope: "", busy: false, result: null, error: "", started: 0, timer: null };
+
+function showCopilotPrompt(host, pack) {
+  const partial = pack.sources.filter(s => s.included_as !== "full").length;
+  const coverage = pack.collection ? "" : `<div class="status">요청문에 담긴 자료 ${pack.sources.length}건${partial ? ` · 일부 본문만 포함 ${partial}건` : ""}${pack.dropped.length ? ` · 분량 한도로 제외 ${pack.dropped.length}건` : ""}</div>`;
+  host.innerHTML = `<div class="note">회사 계정으로 로그인한 Microsoft 365 Copilot 채팅창에 요청문을 붙여넣고 전송하세요.</div>
+    ${coverage}<details><summary>요청문 미리 보기</summary><textarea readonly rows="8" aria-label="Copilot 요청문" style="width:100%"></textarea>
+      <button type="button" class="btn" data-copy>요청문만 복사</button></details>
+    <div class="row"><button type="button" class="btn primary" data-open>요청문 복사하고 Copilot 열기</button>
+      <a class="btn" href="https://m365.cloud.microsoft/chat" target="_blank" rel="noopener noreferrer" hidden>Copilot 채팅 열기</a></div>
+    <div class="status" role="status"></div>`;
+  const field = host.querySelector("textarea"), link = host.querySelector("a"), status = host.querySelector("[role=status]");
+  field.value = pack.prompt;
+  async function copy(openChat) {
+    try {
+      await navigator.clipboard.writeText(field.value);
+    } catch {
+      host.querySelector("details").open = true;
+      field.focus(); field.select();
+      link.hidden = !openChat;
+      status.textContent = "자동 복사를 사용할 수 없습니다. 선택된 요청문을 직접 복사하세요.";
+      return;
+    }
+    if (!host.isConnected || !link.isConnected || host.hidden) return;
+    if (!openChat) { status.textContent = "요청문을 복사했습니다."; return; }
+    link.hidden = false;
+    status.textContent = "복사했습니다. 회사 계정을 확인하고 채팅창에 붙여넣으세요(Ctrl+V). 창이 열리지 않으면 ‘Copilot 채팅 열기’를 누르세요.";
+    link.click();
+  }
+  host.querySelector("[data-copy]").onclick = () => copy(false);
+  host.querySelector("[data-open]").onclick = () => copy(true);
+}
+
+function askQuestion() {
+  return (state.selected.size && $("#selectionQuestion").value.trim()) || $("#q").value.trim();
+}
+
+function askKey() {
+  return JSON.stringify([askQuestion(), $("#q").value.trim(), askScope(), [...state.selected.keys()]]);
+}
 
 function paintAskButton() {
   const button = $("#askAi");
-  button.hidden = !state.llmReady;
-  button.disabled = !$("#q").value.trim() || ask.busy;
+  if (ask.q && ask.key !== askKey()) {
+    closeAsk(); return;
+  }
+  button.hidden = state.llmReady === undefined || state.selected.size > 0;
+  button.disabled = !askQuestion() || ask.busy;
+  $("#askSelection").disabled = !$("#selectionQuestion").value.trim() || ask.busy || state.llmReady === undefined;
+  $("#askSelection").textContent = state.llmReady ? "AI에게 묻기" : "Copilot 질문 요청문 만들기";
+  button.textContent = state.llmReady ? "✨ AI에게 묻기" : "Copilot에 묻기";
+  button.title = state.llmReady ? "내 메모를 근거로 AI에게 묻기 (Ctrl+Enter)" : "질문과 근거 메모로 Copilot 요청문 만들기 (Ctrl+Enter)";
   $("#q").placeholder = state.llmReady
     ? "단어로 찾거나, 궁금한 것을 적고 ✨ AI에게 묻기"
-    : "기억나는 단어나 내용으로 메모 찾기";
+    : "단어로 찾거나, 궁금한 것을 적고 Copilot에 묻기";
 }
 
 function askScope() {
@@ -1199,32 +1264,37 @@ function askScope() {
     ...(state.person ? ["@" + state.person] : []),
     ...(state.since ? [state.since + "부터"] : []),
     ...(state.until ? [state.until + "까지"] : []),
+    ...(state.selected.size ? [`선택한 자료 ${state.selected.size}건`] : []),
   ].join(" · ");
 }
 
 async function askAi() {
-  const q = $("#q").value.trim();
-  if (!q || !state.llmReady || ask.busy) return;
+  const q = askQuestion();
+  if (!q || state.llmReady === undefined || ask.busy) return;
   const request = ++ask.request;
-  Object.assign(ask, { q, scope: askScope(), busy: true, result: null, error: "", started: Date.now() });
+  const ids = [...state.selected.keys()];
+  Object.assign(ask, { q, key: askKey(), scope: askScope(), busy: true, result: null, error: "", started: Date.now() });
   // 치고 바로 누르면 검색이 아직 기다리는 중이다. 지금 돌려야 답 아래 목록이 같은 질문의 검색 결과가 된다.
   clearTimeout(searchTimer);
-  render();
+  if (!ids.length) render();
   clearInterval(ask.timer);
   ask.timer = setInterval(paintAskElapsed, 1000);
   paintAsk(); paintAskButton();
   try {
     const r = await api("/api/ask", { method: "POST", body: {
-      q, require_ai: true, tags: state.tags, person: state.person || null,
+      q, prompt_only: !state.llmReady, tags: state.tags, person: state.person || null,
+      ...(ids.length ? { memo_ids: ids } : {}),
       since: state.since || null, until: state.until || null,
     } });
     if (request !== ask.request) return;
-    if (r.answer) ask.result = r;
+    if (r.prompt_only && !r.sources.length) ask.error = r.dropped.length
+      ? "읽을 분량 안에 자료를 담을 수 없습니다. 질문을 줄이거나 문서 만들기에서 읽을 분량을 늘려주세요."
+      : "현재 검색 조건에서 근거 메모를 찾지 못했습니다. 질문이나 조건을 바꿔 보세요.";
+    else if (r.answer || r.prompt_only) ask.result = r;
     else ask.error = r.reason || "AI가 답을 주지 않았습니다. 잠시 뒤 다시 물어보세요.";
   } catch (e) {
     if (request !== ask.request) return;
     ask.error = e.message;
-    // 그 사이 설정이 풀렸을 수 있다 — 연결 상태를 먼저 맞춰야 버튼과 '설정에서 연결' 안내가 맞게 그려진다.
     await loadSidebar().catch(() => {});
     if (request !== ask.request) return;
   }
@@ -1252,26 +1322,25 @@ function paintAsk() {
   const scope = ask.scope ? `조건: ${esc(ask.scope)}` : "전체 메모에서";
   let body;
   if (ask.busy) {
-    body = `<div class="status" style="margin-top:8px">메모에서 근거를 찾아 답을 쓰는 중… <span id="askElapsed">0초</span> · ${scope}</div>`;
+    body = `<div class="status" style="margin-top:8px">${state.llmReady ? "메모에서 근거를 찾아 답을 쓰는 중" : "관련 메모로 Copilot 요청문을 만드는 중"}… <span id="askElapsed">0초</span> · ${scope}</div>`;
   } else if (ask.error) {
-    body = `<div class="status" role="alert" style="margin-top:8px;color:var(--danger)">${esc(ask.error)}</div>`
-      + (state.llmReady ? "" : `<a href="#" data-go="settings" style="color:var(--accent)">설정에서 AI 연결하기</a>`);
+    body = `<div class="status" role="alert" style="margin-top:8px;color:var(--danger)">${esc(ask.error)}</div>`;
   } else {
     const r = ask.result, ids = new Set(r.sources.map((s) => s.id));
-    const text = esc(r.answer).replace(/\[M(\d+)\]/g, (t, id) => ids.has(+id)
+    const text = esc(r.answer || "").replace(/\[M(\d+)\]/g, (t, id) => ids.has(+id)
       ? `<a href="#" data-ask-source="${id}" title="근거 메모 열기">${t}</a>` : t);
-    body = `<div class="ask-answer">${text}</div>
+    body = `${r.prompt_only ? '<div id="askCopilot"></div>' : `<div class="ask-answer">${text}</div>`}
       <div class="ask-foot"><span class="meta">근거 메모 ${r.sources.length}건 · ${scope}</span>
         ${r.sources.map((s) => `<button type="button" class="chip" data-ask-source="${s.id}" title="${esc(s.title)} 열기">M${s.id} ${esc(s.title)}</button>`).join("")}</div>
-      <div class="status">AI는 위 메모만 보고 답했습니다. 중요한 내용은 근거 메모를 열어 확인하세요.</div>`;
+      ${r.prompt_only ? "" : '<div class="status">답변의 [M번호]를 누르면 근거 메모가 열립니다. 보충 자료는 답변에 표시된 출처에서 확인하세요.</div>'}`;
   }
-  panel.innerHTML = `<div class="ask-h"><strong>✨ AI 답변</strong><span class="ask-q">${esc(ask.q)}</span>
+  panel.innerHTML = `<div class="ask-h"><strong>${ask.result?.prompt_only ? "Copilot 요청문" : "AI에게 묻기"}</strong><span class="ask-q">${esc(ask.q)}</span>
       <button class="btn ghost" type="button" id="askClose">닫기</button></div>${body}`;
   $("#askClose").onclick = closeAsk;
+  if ($("#askCopilot")) showCopilotPrompt($("#askCopilot"), ask.result);
   panel.querySelectorAll("[data-ask-source]").forEach((el) => {
     el.onclick = (e) => { e.preventDefault(); openMemo(+el.dataset.askSource); };
   });
-  panel.querySelectorAll("[data-go]").forEach((a) => { a.onclick = (e) => { e.preventDefault(); goTab(a.dataset.go); }; });
   paintAskElapsed();
 }
 function resetFeed() {
@@ -1478,7 +1547,6 @@ async function loadSidebar() {
   $("#sidebarTagSetup").hidden = tags.items.length > 0;
   $("#sidebarAutoGroup").hidden = !tags.suggested.length;
   renderSidebarChips("#people", people.items, "person");
-  // AI 연결 여부. 설정을 바꾸면 여기(6초마다·저장 직후)서 'AI에게 묻기'가 나타나거나 사라진다.
   state.llmReady = !!stats.llm_enabled;
   paintAskButton();
 
@@ -1576,7 +1644,8 @@ function cardHTML(m) {
   const pin = `<button type="button" class="pin-btn" data-pin="${m.id}" aria-pressed="${m.pinned ? "true" : "false"}"
     aria-label="${esc(m.title)} ${pinLabel}" title="${pinLabel}">📌</button>`;
   return `<div class="card${m.pinned ? " pinned" : ""}" data-id="${m.id}" tabindex="0" role="button" aria-label="${esc(m.title)} 열기">
-    <div class="card-h">${state.tab === "feed" ? `<input type="checkbox" class="memo-select" data-select="${m.id}" aria-label="${esc(m.title)} 선택" ${state.selected.has(m.id) ? "checked" : ""} ${state.selecting ? "" : "hidden"} />` : ""}<span class="card-title">${esc(m.title)}</span><span class="meta">${fmt(m.created_at)}</span>${pin}</div>
+    <div class="card-h">${state.tab === "feed" ? `<input type="checkbox" class="memo-select" data-select="${m.id}" aria-label="${esc(m.file_label || m.title)} 선택" ${state.selected.has(m.id) ? "checked" : ""} ${state.selecting ? "" : "hidden"} />` : ""}<span class="card-title">${esc(m.title)}</span><span class="meta">${fmt(m.created_at)}</span>${pin}</div>
+    ${m.file_label && m.file_label !== m.title ? `<div class="file-label">원본 · ${esc(m.file_label)}</div>` : ""}
     <div class="snip">${highlight(m.snippet || m.body.slice(0, 200), state.q)}</div>
     <div class="badges">${badges}</div>
   </div>`;
@@ -1594,7 +1663,10 @@ function bindCards() {
   document.querySelectorAll("[data-select]").forEach((c) => {
     c.onchange = () => {
       const id = +c.dataset.select;
-      if (c.checked) state.selected.set(id, state.feedItems.find((m) => m.id === id)?.title || `M${id}`);
+      const memo = state.feedItems.find(m => m.id === id);
+      if (!memo) return;
+      if (c.checked && state.selected.size >= 1000) { c.checked = false; toast("한 번에 1,000건까지 선택할 수 있습니다"); return; }
+      if (c.checked) state.selected.set(id, memo.file_label || memo.title);
       else state.selected.delete(id);
       paintFeedTools();
     };
@@ -1617,13 +1689,12 @@ function paintFeedTools() {
     ...(state.until ? [{ label: state.until + "까지", key: "until" }] : []),
   ];
   $("#feedFilters").hidden = !state.filtersOpen;
-  paintAskButton();   // 저장된 검색처럼 검색어가 코드로 바뀌어도 버튼 상태를 맞춘다
   $("#toggleFilters").setAttribute("aria-expanded", String(state.filtersOpen));
   $("#toggleFilters").textContent = "상세 검색" + (filters.length ? ` (${filters.length})` : "");
   $("#clear").hidden = !state.q.trim() && !filters.length;
   const narrowed = !$("#clear").hidden;
   $("#saveSearch").hidden = !narrowed && !state.filtersOpen;
-  $("#documentFromSearch").hidden = !narrowed || state.selecting;
+  $("#documentFromSearch").hidden = !narrowed || state.selected.size > 0;
   $("#documentFromSearch").disabled = !state.feedItems.length || gen.busy;
   $("#activeFilters").hidden = !filters.length;
   $("#activeFilters").innerHTML = filters.map((f, i) =>
@@ -1642,36 +1713,74 @@ function paintFeedTools() {
     };
   });
   const n = state.selected.size;
-  $("#selectionBar").hidden = !state.selecting;
+  $("#selectionBar").hidden = !narrowed && !state.selecting;
+  $("#toggleSelection").hidden = narrowed;
   $("#toggleSelection").textContent = state.selecting ? "선택 마치기" : "선택해서 정리·공유";
   $("#toggleSelection").disabled = !state.feedItems.length && !state.selecting;
   $("#toggleSelection").setAttribute("aria-pressed", String(state.selecting));
   document.querySelectorAll("[data-select]").forEach((c) => {
-    c.hidden = !state.selecting;
+    c.hidden = !narrowed && !state.selecting;
+    c.disabled = !state.feedItems.length;
     c.checked = state.selected.has(+c.dataset.select);
   });
-  $("#selectionBar").innerHTML = `<div class="row selection-bar">
-    <button class="btn ghost" id="selectPage" ${state.feedItems.length ? "" : "disabled"}>이 페이지 선택</button>
-    <span class="status">${n ? `${n}건 선택 · 다른 페이지의 선택 포함` : "활용할 메모를 체크하세요"}</span>
-    <span class="spacer"></span>
-    <button class="btn ghost" id="clearSelection" ${n ? "" : "hidden"}>선택 해제</button>
-    <button class="btn" id="generateSelection" ${n ? "" : "hidden"}>선택한 메모로 문서 만들기</button>
-    <button class="btn primary" id="exportSelection" ${n ? "" : "hidden"}>공유·인수인계</button>
-  </div>`;
-  $("#selectPage").onclick = () => {
-    state.feedItems.forEach((m) => state.selected.set(m.id, m.title));
-    document.querySelectorAll("[data-select]").forEach((c) => { c.checked = true; });
-    paintFeedTools();
-  };
-  $("#clearSelection").onclick = () => {
-    state.selected.clear();
-    document.querySelectorAll("[data-select]").forEach((c) => { c.checked = false; });
-    paintFeedTools();
-  };
-  $("#generateSelection").onclick = () => startGenerate([...state.selected.keys()], "선택한 메모를 바탕으로 업무 내용을 정리해줘",
-    narrowed ? feedDocumentScope() : null);
-  $("#exportSelection").onclick = () => prepareExport(true);
+  $("#selectionCount").textContent = n ? `선택한 자료 ${n}건` : "요청문에 쓸 자료를 체크하세요";
+  $("#selectPage").disabled = !state.feedItems.length;
+  $("#clearSelection").hidden = !n;
+  if (n && $("#selectionActions").hidden && ask.q === state.q.trim()) $("#selectionQuestion").value = ask.q;
+  $("#selectionActions").hidden = !n;
+  paintFileChoices();
+  $("#selectedSources").innerHTML = [...state.selected].map(([id, title]) =>
+    `<button class="chip on" type="button" data-remove-source="${id}" aria-label="${esc(title)} 선택 해제" title="${esc(title)} 선택 해제">${esc(title)} ×</button>`).join("");
+  if (!n) $("#selectionQuestion").value = "";
+  paintAskButton();
 }
+
+function paintFileChoices() {
+  const files = new Map();
+  for (const m of state.feedItems) {
+    if (!m.file_name) continue;
+    if (!files.has(m.file_name)) files.set(m.file_name, []);
+    files.get(m.file_name).push(m);
+  }
+  const groups = [...files].filter(([, parts]) => parts.length > 1);
+  $("#fileSelection").hidden = !groups.length;
+  $("#fileChoices").innerHTML = groups.map(([name, parts], i) =>
+    `<label class="chip"><input type="checkbox" data-file-group="${i}" /> ${esc(name)} · ${parts.length}개 부분</label>`).join("");
+  $("#fileChoices").querySelectorAll("input").forEach((box, i) => {
+    const parts = groups[i][1], count = parts.filter(m => state.selected.has(m.id)).length;
+    box.checked = count === parts.length;
+    box.indeterminate = count > 0 && count < parts.length;
+    box.onchange = () => {
+      if (box.checked) selectFeedItems(parts);
+      else { parts.forEach(m => state.selected.delete(m.id)); paintFeedTools(); }
+      $("#fileChoices").querySelector(`[data-file-group="${i}"]`)?.focus();
+    };
+  });
+}
+
+$("#selectedSources").onclick = e => {
+  const chip = e.target.closest("[data-remove-source]");
+  if (!chip) return;
+  state.selected.delete(+chip.dataset.removeSource);
+  paintFeedTools();
+  ($("#selectedSources button") || $("#selectPage")).focus();
+};
+function selectFeedItems(items) {
+  const additions = items.filter(m => !state.selected.has(m.id));
+  if (state.selected.size + additions.length > 1000) { toast("한 번에 1,000건까지 선택할 수 있습니다"); paintFeedTools(); return; }
+  additions.forEach(m => state.selected.set(m.id, m.file_label || m.title));
+  paintFeedTools();
+}
+$("#selectPage").onclick = () => selectFeedItems(state.feedItems);
+$("#clearSelection").onclick = () => { state.selected.clear(); paintFeedTools(); };
+$("#selectionQuestion").oninput = paintAskButton;
+$("#selectionAskForm").onsubmit = e => {
+  e.preventDefault();
+  if (state.selected.size && $("#selectionQuestion").value.trim()) askAi();
+};
+$("#generateSelection").onclick = () => startGenerate([...state.selected.keys()], $("#selectionQuestion").value.trim() || "선택한 자료를 바탕으로 업무 내용을 정리해줘",
+  $("#clear").hidden ? null : feedDocumentScope());
+$("#exportSelection").onclick = () => prepareExport(true);
 
 async function renderFeed(version = renderVersion) {
   state.feedItems = [];
@@ -2817,7 +2926,7 @@ async function openShared(content, name, status, viaQr, version = ++sharedLoadVe
 function memoPicker(target, review, changed = () => {}) {
   if (!target) return;
   target.innerHTML = `<div style="margin-top:12px;padding:12px;background:var(--panel-2);border-radius:8px">
-    <div class="row"><input type="search" data-picker-search aria-label="목록에서 제목·본문 검색" placeholder="목록에서 제목·본문 검색" style="flex:1" />
+    <div class="row"><input type="search" data-picker-search aria-label="목록에서 파일명·제목·본문 검색" placeholder="파일명·제목·본문으로 찾기" style="flex:1" />
       <label class="status"><input type="checkbox" data-picker-only /> 선택한 메모만</label></div>
     <div class="row" style="margin:8px 0"><button class="btn" data-picker-all>검색 결과 선택</button>
       <button class="btn" data-picker-none>검색 결과 해제</button><span class="status" data-picker-count aria-live="polite"></span></div>
@@ -2830,7 +2939,7 @@ function memoPicker(target, review, changed = () => {}) {
   const matches = () => {
     const q = find("[data-picker-search]").value.trim().toLocaleLowerCase();
     return review.items.filter((m) => (!find("[data-picker-only]").checked || review.selected.has(m.key)) &&
-      (!q || `${m.title}\n${m.body}`.toLocaleLowerCase().includes(q)));
+      (!q || `${m.title}\n${m.file_label || ""}\n${m.body}`.toLocaleLowerCase().includes(q)));
   };
   function draw() {
     const rows = matches();
@@ -2840,7 +2949,8 @@ function memoPicker(target, review, changed = () => {}) {
     find("[data-picker-count]").textContent = `전체 ${review.items.length}건 중 ${review.selected.size}건 선택 · 검색 결과 ${rows.length}건`;
     find("[data-picker-list]").innerHTML = rows.slice(offset, offset + 50).map((m) => `<div style="padding:9px 0;border-bottom:1px solid var(--line)">
       <label style="display:flex;gap:8px;align-items:baseline"><input type="checkbox" data-pick="${esc(m.key)}" ${review.selected.has(m.key) ? "checked" : ""} ${m.eligible ? "" : "disabled"} />
-        <span style="overflow-wrap:anywhere">${esc(m.title || "(제목 없음)")}</span></label>
+        <span style="overflow-wrap:anywhere">${esc(m.file_label || m.title || "(제목 없음)")}</span></label>
+      ${m.file_label && m.title !== m.file_label ? `<div class="file-label">${esc(m.title)}</div>` : ""}
       <div class="meta">${esc((m.created_at || "").slice(0, 10))} · ${esc(m.status || ({web:"직접 작성",cli:"직접 작성",shared:"받은 메모",evernote:"에버노트",onenote:"OneNote",onenote_local:"PC의 OneNote",files:"파일",sticky:"스티커 메모",samsung:"삼성 노트",redmine:"Redmine",notion:"Notion"})[m.source] || "메모")}${m.tags?.length ? " · " + m.tags.map((t) => "#" + esc(t)).join(" ") : ""}</div>
       ${(m.warnings || []).map((w) => `<div class="note" style="color:var(--warn)">${esc(w)}</div>`).join("")}
       <details data-picker-detail="${esc(m.key)}" ${expanded.has(m.key) ? "open" : ""}><summary class="status">본문 확인</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:13px">${esc(m.body)}</pre></details>
@@ -3460,14 +3570,16 @@ async function renderSettings(version = renderVersion) {
         원하는 LLM 에 붙여 넣으면 됩니다. 키는 이 PC 의 <code>${esc(cfg.db_path)}</code> 에
         <b>평문으로</b> 저장되니 공용 PC 라면 환경변수 쪽을 쓰세요.
       </div>
-      <div class="tabs" id="tourProviders" style="margin-bottom:14px">${tabs}</div>
+      <div class="tabs" style="margin-bottom:14px">${tabs}</div>
       <div class="desc" style="margin-bottom:14px">${esc(p.note)}</div>
 
       ${p.needs_key ? `
       <div class="field">
         <label>API 키</label>
         <input type="password" id="setKey" placeholder="${s[K("api_key")]?.configured ? esc(s[K("api_key")].value) + " — 바꾸려면 새로 입력" : esc(p.key_hint || "키를 입력하세요")}" />
-        <div class="note">${src(K("api_key"))} 비워 두고 저장하면 환경변수 값으로 되돌아갑니다.</div>
+        <div class="note">${src(K("api_key"))} ${s[K("api_key")].source === "초기화"
+          ? "새 키를 입력하세요. 비워 두고 저장하면 이 서비스의 환경변수 키를 다시 사용합니다."
+          : "새 키를 입력하고 저장하면 이 서비스의 키를 바꿉니다."}</div>
       </div>` : `
       <div class="field">
         <label>API 키</label>
@@ -3504,6 +3616,7 @@ async function renderSettings(version = renderVersion) {
         <input type="number" id="setMax" value="${esc(s["llm.max_tokens"].value)}" min="500" step="500" />
       </div>
       <div class="row" style="margin-top:12px">
+        <button class="btn ghost" type="button" id="resetAiConnections">AI 연결 전체 초기화</button>
         <span class="spacer"></span>
         <button class="btn" id="testLlm">연결 테스트</button>
         <button class="btn primary" id="saveLlm">${active === cfg.provider ? "저장" : "저장하고 이 프로바이더 사용"}</button>
@@ -3667,7 +3780,7 @@ async function renderSettings(version = renderVersion) {
     if ($("#setBase")) values[K("base_url")] = $("#setBase").value.trim();
     if ($("#setEffort")) values[K("effort")] = $("#setEffort").value;
     const key = $("#setKey") ? $("#setKey").value.trim() : "";
-    if (key) values[K("api_key")] = key;
+    if (key || s[K("api_key")]?.source === "초기화") values[K("api_key")] = key;
     settingsProvider = null;
     save(values, `${p.label} 로 설정했습니다`);
   };
@@ -3675,6 +3788,23 @@ async function renderSettings(version = renderVersion) {
     "gen.budget_tokens": $("#setBudget").value,
     "gen.query_count": $("#setQ").value,
   }, "저장했습니다");
+  $("#resetAiConnections").onclick = async (event) => {
+    if (!confirm("모든 AI 서비스의 저장된 API 키, 모델, 서버 주소, 추론 설정을 초기화할까요?\n환경변수 연결도 이 앱에서 해제되며, Gemini 음성 입력은 로컬 Whisper로 전환됩니다.")) return;
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await api("/api/settings/ai-connections", { method: "DELETE" });
+      settingsProvider = null;
+      state.llmReady = false;
+      paintAskButton();
+      toast("모든 AI 연결을 초기화했습니다");
+      await Promise.all([render(), loadSidebar()]);
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      button.disabled = false;
+    }
+  };
   $("#testLlm").onclick = async () => {
     $("#testOut").innerHTML = `<div class="status">테스트 중…</div>`;
     // 저장 전 입력값 그대로 테스트한다 — 잘못된 키를 저장하고 나서 알게 되면 늦다.

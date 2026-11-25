@@ -103,37 +103,48 @@ def migrate_legacy() -> None:
     db.set_meta(PREFIX + "_migrated_providers", "1")
 
 
-def get(key: str) -> str:
-    """DB → 환경변수 → 기본값 순으로 해석."""
-    if key not in SCHEMA:
-        raise KeyError(key)
+def _resolve(key: str) -> tuple[str, str]:
     env_name, default, _ = SCHEMA[key]
-    stored = db.get_meta(PREFIX + key)
+    # 기존의 빈 문자열과 없는 행은 환경변수를 따른다. 일괄 초기화로 기록한
+    # SQL NULL은 환경변수에 남은 키나 서버로 자동 재연결되는 것을 막는다.
+    stored = db.get_meta(PREFIX + key, "")
+    if stored is None:
+        return default, "초기화"
     if stored:
-        return stored
+        return stored, "설정"
     if env_name:
         from_env = os.environ.get(env_name, "")
         if from_env:
-            return from_env
-    return default
+            return from_env, "환경변수"
+    return default, "기본값"
+
+
+def get(key: str) -> str:
+    return _resolve(key)[0]
 
 
 def source_of(key: str) -> str:
     """이 값이 어디서 왔는지 — UI 에서 '환경변수로 설정됨'을 보여주기 위해."""
-    env_name, _, _ = SCHEMA[key]
-    if db.get_meta(PREFIX + key):
-        return "설정"
-    if env_name and os.environ.get(env_name):
-        return "환경변수"
-    return "기본값"
+    return _resolve(key)[1]
+
+
+def _store_values(values: dict[str, str | None]) -> None:
+    with db.connect() as conn:
+        conn.executemany(
+            "INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            ((PREFIX + key, value) for key, value in values.items()),
+        )
 
 
 def set_many(values: dict[str, str]) -> None:
-    for key, value in values.items():
-        if key not in SCHEMA:
-            continue
-        # 빈 문자열은 '해제'로 본다 — 환경변수/기본값으로 되돌아간다.
-        db.set_meta(PREFIX + key, "" if value is None else str(value))
+    _store_values({key: "" if value is None else str(value) for key, value in values.items() if key in SCHEMA})
+
+
+def reset_ai_connections() -> None:
+    prefixes = tuple(f"llm.{name}." for name in providers.SPECS)
+    keys = [key for key in SCHEMA if key.startswith(prefixes)]
+    # Gemini 음성 입력은 LLM과 키를 공유한다. 초기화 후에는 로컬 음성 입력을 쓴다.
+    _store_values(dict.fromkeys([*keys, *LEGACY_MOVES, "llm.provider", "stt.engine"]))
 
 
 THEMES = ("light", "dark")
@@ -185,7 +196,8 @@ def provider_ready(name: str | None = None) -> bool:
     name = name or provider_name()
     spec = providers.spec(name)
     if not spec.needs_key:
-        return True  # Ollama 는 키가 없어도 '설정됨' — 실제 연결은 테스트로 확인
+        # 키가 없는 Ollama도 일괄 초기화 후에는 다시 선택해 저장해야 연결된다.
+        return name == provider_name() or db.get_meta(f"{PREFIX}llm.{name}.base_url", "") is not None
     return bool(get(f"llm.{name}.api_key"))
 
 
@@ -193,12 +205,12 @@ def public_view() -> dict:
     """UI 로 내보내는 형태. 비밀값은 마스킹해서 나간다."""
     out: dict[str, dict] = {}
     for key, (env_name, default, secret) in SCHEMA.items():
-        value = get(key)
+        value, source = _resolve(key)
         out[key] = {
             "value": mask(value) if secret else value,
             "configured": bool(value),
             "secret": secret,
-            "source": source_of(key),
+            "source": source,
             "env": env_name,
             "default": default,
         }

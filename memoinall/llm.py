@@ -130,9 +130,8 @@ def enrich_memo(body: str) -> dict | None:
 # --------------------------------------------------------------------------- 질의응답
 
 ANSWER_SYSTEM = (
-    "너는 사용자의 개인 업무 메모를 근거로만 답하는 어시스턴트다.\n"
-    "근거에 없는 내용은 지어내지 말고 '메모에 없습니다'라고 말한다.\n"
-    "인용한 문장에는 [M{id}] 형식으로 출처를 붙인다. 한국어로 간결하게 답한다."
+    "너는 사용자의 업무 질문에 한국어로 간결하게 답하는 어시스턴트다. "
+    "제공된 메모를 최우선 근거로 삼고, 보충한 내용은 출처를 구분한다."
 )
 
 
@@ -145,13 +144,14 @@ def _no_key_reason() -> str:
     )
 
 
-def answer(query: str, *, budget_tokens: int = 3000, **kwargs) -> dict:
+def answer(query: str, *, budget_tokens: int = 3000, prompt_only: bool = False, **kwargs) -> dict:
     """메모 기반 RAG 응답. 준비가 안 됐으면 컨텍스트 팩만 돌려준다."""
     from . import context
 
     pack = context.build(query, budget_tokens=budget_tokens, **kwargs)
-    if not available():
-        return {"answer": None, "reason": _no_key_reason(), **pack}
+    if prompt_only or not available():
+        return {**pack, "answer": None, "prompt_only": True,
+                "reason": None if prompt_only else _no_key_reason()}
     try:
         return {"answer": complete(ANSWER_SYSTEM, pack["prompt"]), "reason": None, **pack}
     except ProviderError as exc:
