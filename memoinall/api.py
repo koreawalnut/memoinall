@@ -198,7 +198,7 @@ def read_memo(memo_id: int):
     except KeyError:
         raise HTTPException(404, "메모를 찾을 수 없습니다.")
     memo["similar"] = [
-        {"id": s["id"], "title": s["title"], "created_at": s["created_at"], "score": s["score"]}
+        {"id": s["id"], "title": s["title"], "created_at": s["created_at"], "updated_at": s["updated_at"], "score": s["score"]}
         for s in search.similar(memo_id)
     ]
     return memo
@@ -826,6 +826,7 @@ def export_preview(payload: dict = Body(default={})):
                 "id": m["id"],
                 "title": m["title"],
                 "created_at": m["created_at"],
+                "updated_at": m["updated_at"],
                 "source": m.get("source") or "",
                 "body": item["body"],
                 "tags": item["tags"],

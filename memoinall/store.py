@@ -92,20 +92,20 @@ def update_memo(memo_id: int, body: str, *, expected_body: str | None = None, en
     # 시간이 걸리는 임베딩과 나머지 추출만 뒤의 보강 작업에 맡긴다.
     conn = db.connect()
     with conn:
-        sql = "UPDATE memos SET body=?, title=?, updated_at=?, enriched_at=NULL WHERE id=?"
-        params = (body, textutil.title_from(body), now_iso(), memo_id)
-        if expected_body is not None:
-            sql += " AND body=?"
-            params += (expected_body,)
-        cur = conn.execute(sql, params)
-        if not cur.rowcount:
-            if expected_body is not None:
-                current = conn.execute("SELECT body FROM memos WHERE id=?", (memo_id,)).fetchone()
-                if current is not None:
-                    if current["body"] == body:
-                        return get_memo(memo_id)
-                    raise MemoEditConflict("다른 창에서 이 메모를 수정했습니다.")
+        conn.execute("BEGIN IMMEDIATE")
+        current = conn.execute("SELECT body FROM memos WHERE id=?", (memo_id,)).fetchone()
+        if current is None:
             raise KeyError(f"메모 {memo_id} 없음")
+        if expected_body is not None and current["body"] != expected_body:
+            if current["body"] == body:
+                return get_memo(memo_id)
+            raise MemoEditConflict("다른 창에서 이 메모를 수정했습니다.")
+        if current["body"] == body:
+            return get_memo(memo_id)
+        conn.execute(
+            "UPDATE memos SET body=?, title=?, updated_at=?, enriched_at=NULL WHERE id=?",
+            (body, textutil.title_from(body), now_iso(), memo_id),
+        )
         _index_body(conn, memo_id, body)
         saved = get_memo(memo_id)
     if enqueue_enrich:
@@ -358,7 +358,7 @@ def list_memos(
     if until:
         sql.append("AND m.created_at <= ?")
         params.append(until + "T23:59:59" if len(until) == 10 else until)
-    sql.append("ORDER BY m.pinned DESC, m.created_at DESC, m.id DESC LIMIT ? OFFSET ?")
+    sql.append("ORDER BY m.pinned DESC, m.updated_at DESC, m.id DESC LIMIT ? OFFSET ?")
     params.extend([limit, offset])
 
     rows = db.query(" ".join(sql), params)

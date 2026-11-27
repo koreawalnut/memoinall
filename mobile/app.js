@@ -205,7 +205,7 @@ function snippet(m, ts) {
 
 // ================================================================ 메모
 function sortMemos() {
-  S.memos.sort((a, b) => (b.created_at || "").localeCompare(a.created_at || "") || b.id - a.id);
+  S.memos.sort((a, b) => (b.updated_at || b.created_at || "").localeCompare(a.updated_at || a.created_at || "") || b.id - a.id);
 }
 function fixMemo(m) {
   m.tags = Array.isArray(m.tags) ? m.tags : [];
@@ -253,7 +253,7 @@ function renderMemos() {
         <div class="body">
           <div class="title">${highlight(X.titleFrom(m.body), ts)}</div>
           ${snip ? `<div class="snip">${highlight(snip, ts)}</div>` : ""}
-          <div class="meta"><span>${esc(whenLabel(m.created_at))}</span>${m.origin === "ai" ? '<span class="badge">AI 정리</span>' : ""}${m.tags.map((t) => `<span class="tag">#${highlight(t, ts)}</span>`).join("")}</div>
+          <div class="meta"><span>${esc(whenLabel(m.updated_at || m.created_at))}</span>${m.origin === "ai" ? '<span class="badge">AI 정리</span>' : ""}${m.tags.map((t) => `<span class="tag">#${highlight(t, ts)}</span>`).join("")}</div>
         </div></div>`;
     }).join("");
   }
@@ -435,6 +435,7 @@ $("#memoSave").onclick = async () => {
   try {
     await idb.put("memos", next);
     Object.assign(m, next);
+    sortMemos();
     closeSheet(memoDlg, { force: true });
     renderAllMemos();
     toast("저장했습니다");

@@ -34,6 +34,8 @@ def check_feed_search_tools(page, client):
     page.locator("#q").fill("결제")
     page.locator('#tags [data-v="업무"]').click()
     expect(page.locator("#view")).to_contain_text("뜻이 비슷한")
+    expect(page.locator("#selectionBar")).to_be_hidden()
+    page.locator("#toggleSelection").click()
     page.locator("#nextPage").click()
     expect(page.locator("#view")).to_contain_text("41–80")
     page.locator("[data-select]").first.check()

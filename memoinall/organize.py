@@ -155,7 +155,7 @@ def rollup(period: str = "week", anchor: str | None = None) -> dict:
         "start": since,
         "end": until,
         "memo_count": len(memos),
-        "memos": [{"id": m["id"], "title": m["title"], "created_at": m["created_at"]} for m in memos],
+        "memos": [{"id": m["id"], "title": m["title"], "created_at": m["created_at"], "updated_at": m["updated_at"]} for m in memos],
         "decisions": decisions,
         "questions": questions,
         "todos_open": todos_open,
@@ -173,7 +173,7 @@ def _tag_groups(memos: list[dict], per: int = 8) -> dict:
     """
     from . import tags  # tags → store 순환을 피해 여기서 부른다
 
-    brief = lambda m: {"id": m["id"], "title": m["title"], "created_at": m["created_at"]}  # noqa: E731
+    brief = lambda m: {"id": m["id"], "title": m["title"], "created_at": m["created_at"], "updated_at": m["updated_at"]}  # noqa: E731
     mine = tags.all_tags(with_counts=False)
     groups = []
     for tag in mine:

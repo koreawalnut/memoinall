@@ -403,7 +403,8 @@ def candidate(memo: dict) -> dict:
         [memo["id"], memo["body"], memo["title"], memo["created_at"]], ensure_ascii=False,
     ).encode("utf-8")).hexdigest()
     return {"id": memo["id"], "key": str(memo["id"]), "title": memo["title"],
-            "body": memo["body"], "created_at": memo["created_at"], "source": memo.get("source"),
+            "body": memo["body"], "created_at": memo["created_at"],
+            "updated_at": memo.get("updated_at") or memo["created_at"], "source": memo.get("source"),
             "file_label": memo.get("file_label", ""), "eligible": True, "revision": revision}
 
 

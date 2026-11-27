@@ -375,6 +375,10 @@
   .ask-answer a { color: var(--accent); }
   .ask-foot { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }
   .ask-foot .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ask-sources { margin: 12px 0; }
+  .ask-source-list { max-height: 210px; overflow-y: auto; }
+  .ask-source-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+  .ask-source-row > :first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; text-align: left; }
 
   /* 화면 테마 고르기 — 처음 시작할 때와 설정 맨 아래. 미리보기 그림은 테마와 상관없이 그 테마의 실제 색으로 그린다. */
   #themeChooser { width: min(520px, calc(100vw - 32px)); }
@@ -515,7 +519,7 @@
     </div>
 
     <div class="searchbar">
-      <input id="q" aria-label="메모 검색" placeholder="기억나는 단어나 내용으로 메모 찾기" />
+      <input id="q" aria-label="메모 검색" placeholder="기억나는 단어를 입력하면 뜻이 비슷한 메모도 찾아요" />
       <button class="btn" id="askAi" type="button" hidden aria-controls="askPanel" disabled
         title="검색창에 적은 질문에 AI가 내 메모를 근거로 답합니다 (Ctrl+Enter)">✨ AI에게 묻기</button>
       <button class="btn ghost" id="toggleFilters" aria-expanded="false" aria-controls="feedFilters">상세 검색</button>
@@ -647,6 +651,7 @@
 <script src="/static/stt-live.js"></script>
 <script src="/static/generate.js"></script>
 <script src="/static/search-tools.js"></script>
+<script src="/static/ask-sources.js"></script>
 <script src="/static/workflows.js"></script>
 <script src="/static/collections.js"></script>
 <script src="/static/todos.js"></script>
@@ -1204,12 +1209,14 @@ $("#clear").onclick = () => {
 const ask = { request: 0, q: "", scope: "", busy: false, result: null, error: "", started: 0, timer: null };
 
 function showCopilotPrompt(host, pack) {
+  const autoFill = window.pywebview?.api?.open_copilot_web;
   const partial = pack.sources.filter(s => s.included_as !== "full").length;
   const coverage = pack.collection ? "" : `<div class="status">요청문에 담긴 자료 ${pack.sources.length}건${partial ? ` · 일부 본문만 포함 ${partial}건` : ""}${pack.dropped.length ? ` · 분량 한도로 제외 ${pack.dropped.length}건` : ""}</div>`;
-  host.innerHTML = `<div class="note">회사 계정으로 로그인한 Microsoft 365 Copilot 채팅창에 요청문을 붙여넣고 전송하세요.</div>
+  host.innerHTML = `<div class="note">${autoFill ? "업무용 Copilot 웹 채팅에 요청문을 입력합니다. 회사 계정과 초안을 확인한 뒤 전송하세요." : "회사 계정으로 로그인한 Microsoft 365 Copilot 채팅창에 요청문을 붙여넣고 전송하세요."}</div>
     ${coverage}<details><summary>요청문 미리 보기</summary><textarea readonly rows="8" aria-label="Copilot 요청문" style="width:100%"></textarea>
-      <button type="button" class="btn" data-copy>요청문만 복사</button></details>
-    <div class="row"><button type="button" class="btn primary" data-open>요청문 복사하고 Copilot 열기</button>
+      <button type="button" class="btn" data-copy>요청문만 복사</button>
+      ${autoFill ? '<button type="button" class="btn" data-browser>복사하고 기본 브라우저에서 열기</button>' : ""}</details>
+    <div class="row"><button type="button" class="btn primary" data-open>${autoFill ? "Copilot 웹에 자동 입력" : "요청문 복사하고 Copilot 열기"}</button>
       <a class="btn" href="https://m365.cloud.microsoft/chat" target="_blank" rel="noopener noreferrer" hidden>Copilot 채팅 열기</a></div>
     <div class="status" role="status"></div>`;
   const field = host.querySelector("textarea"), link = host.querySelector("a"), status = host.querySelector("[role=status]");
@@ -1218,6 +1225,7 @@ function showCopilotPrompt(host, pack) {
     try {
       await navigator.clipboard.writeText(field.value);
     } catch {
+      if (!field.isConnected) return;
       host.querySelector("details").open = true;
       field.focus(); field.select();
       link.hidden = !openChat;
@@ -1231,7 +1239,20 @@ function showCopilotPrompt(host, pack) {
     link.click();
   }
   host.querySelector("[data-copy]").onclick = () => copy(false);
-  host.querySelector("[data-open]").onclick = () => copy(true);
+  const open = host.querySelector("[data-open]");
+  if (!autoFill) { open.onclick = () => copy(true); return; }
+  host.querySelector("[data-browser]").onclick = () => copy(true);
+  open.onclick = async () => {
+    open.disabled = true;
+    try {
+      await autoFill(field.value);
+      status.textContent = "열린 Copilot 웹 창에서 요청문을 확인하세요.";
+    } catch {
+      if (!field.isConnected) return;
+      host.querySelector("details").open = true;
+      status.textContent = "자동 입력 창을 열지 못했습니다. ‘복사하고 기본 브라우저에서 열기’를 사용하세요.";
+    } finally { open.disabled = false; }
+  };
 }
 
 function askQuestion() {
@@ -1253,9 +1274,6 @@ function paintAskButton() {
   $("#askSelection").textContent = state.llmReady ? "AI에게 묻기" : "Copilot 질문 요청문 만들기";
   button.textContent = state.llmReady ? "✨ AI에게 묻기" : "Copilot에 묻기";
   button.title = state.llmReady ? "내 메모를 근거로 AI에게 묻기 (Ctrl+Enter)" : "질문과 근거 메모로 Copilot 요청문 만들기 (Ctrl+Enter)";
-  $("#q").placeholder = state.llmReady
-    ? "단어로 찾거나, 궁금한 것을 적고 ✨ AI에게 묻기"
-    : "단어로 찾거나, 궁금한 것을 적고 Copilot에 묻기";
 }
 
 function askScope() {
@@ -1287,10 +1305,7 @@ async function askAi() {
       since: state.since || null, until: state.until || null,
     } });
     if (request !== ask.request) return;
-    if (r.prompt_only && !r.sources.length) ask.error = r.dropped.length
-      ? "읽을 분량 안에 자료를 담을 수 없습니다. 질문을 줄이거나 문서 만들기에서 읽을 분량을 늘려주세요."
-      : "현재 검색 조건에서 근거 메모를 찾지 못했습니다. 질문이나 조건을 바꿔 보세요.";
-    else if (r.answer || r.prompt_only) ask.result = r;
+    if (r.answer || r.prompt_only) ask.result = r;
     else ask.error = r.reason || "AI가 답을 주지 않았습니다. 잠시 뒤 다시 물어보세요.";
   } catch (e) {
     if (request !== ask.request) return;
@@ -1325,19 +1340,21 @@ function paintAsk() {
     body = `<div class="status" style="margin-top:8px">${state.llmReady ? "메모에서 근거를 찾아 답을 쓰는 중" : "관련 메모로 Copilot 요청문을 만드는 중"}… <span id="askElapsed">0초</span> · ${scope}</div>`;
   } else if (ask.error) {
     body = `<div class="status" role="alert" style="margin-top:8px;color:var(--danger)">${esc(ask.error)}</div>`;
+  } else if (ask.result.prompt_only) {
+    body = '<div id="askSources" class="ask-sources"></div><div id="askCopilot"></div>';
   } else {
     const r = ask.result, ids = new Set(r.sources.map((s) => s.id));
     const text = esc(r.answer || "").replace(/\[M(\d+)\]/g, (t, id) => ids.has(+id)
       ? `<a href="#" data-ask-source="${id}" title="근거 메모 열기">${t}</a>` : t);
-    body = `${r.prompt_only ? '<div id="askCopilot"></div>' : `<div class="ask-answer">${text}</div>`}
+    body = `<div class="ask-answer">${text}</div>
       <div class="ask-foot"><span class="meta">근거 메모 ${r.sources.length}건 · ${scope}</span>
         ${r.sources.map((s) => `<button type="button" class="chip" data-ask-source="${s.id}" title="${esc(s.title)} 열기">M${s.id} ${esc(s.title)}</button>`).join("")}</div>
-      ${r.prompt_only ? "" : '<div class="status">답변의 [M번호]를 누르면 근거 메모가 열립니다. 보충 자료는 답변에 표시된 출처에서 확인하세요.</div>'}`;
+      <div class="status">답변의 [M번호]를 누르면 근거 메모가 열립니다. 보충 자료는 답변에 표시된 출처에서 확인하세요.</div>`;
   }
   panel.innerHTML = `<div class="ask-h"><strong>${ask.result?.prompt_only ? "Copilot 요청문" : "AI에게 묻기"}</strong><span class="ask-q">${esc(ask.q)}</span>
       <button class="btn ghost" type="button" id="askClose">닫기</button></div>${body}`;
   $("#askClose").onclick = closeAsk;
-  if ($("#askCopilot")) showCopilotPrompt($("#askCopilot"), ask.result);
+  if ($("#askSources")) editAskSources($("#askSources"), $("#askCopilot"), ask.result, ask.q);
   panel.querySelectorAll("[data-ask-source]").forEach((el) => {
     el.onclick = (e) => { e.preventDefault(); openMemo(+el.dataset.askSource); };
   });
@@ -1644,7 +1661,7 @@ function cardHTML(m) {
   const pin = `<button type="button" class="pin-btn" data-pin="${m.id}" aria-pressed="${m.pinned ? "true" : "false"}"
     aria-label="${esc(m.title)} ${pinLabel}" title="${pinLabel}">📌</button>`;
   return `<div class="card${m.pinned ? " pinned" : ""}" data-id="${m.id}" tabindex="0" role="button" aria-label="${esc(m.title)} 열기">
-    <div class="card-h">${state.tab === "feed" ? `<input type="checkbox" class="memo-select" data-select="${m.id}" aria-label="${esc(m.file_label || m.title)} 선택" ${state.selected.has(m.id) ? "checked" : ""} ${state.selecting ? "" : "hidden"} />` : ""}<span class="card-title">${esc(m.title)}</span><span class="meta">${fmt(m.created_at)}</span>${pin}</div>
+    <div class="card-h">${state.tab === "feed" ? `<input type="checkbox" class="memo-select" data-select="${m.id}" aria-label="${esc(m.file_label || m.title)} 선택" ${state.selected.has(m.id) ? "checked" : ""} ${state.selecting ? "" : "hidden"} />` : ""}<span class="card-title">${esc(m.title)}</span><span class="meta">${fmt(m.updated_at || m.created_at)}</span>${pin}</div>
     ${m.file_label && m.file_label !== m.title ? `<div class="file-label">원본 · ${esc(m.file_label)}</div>` : ""}
     <div class="snip">${highlight(m.snippet || m.body.slice(0, 200), state.q)}</div>
     <div class="badges">${badges}</div>
@@ -1713,17 +1730,16 @@ function paintFeedTools() {
     };
   });
   const n = state.selected.size;
-  $("#selectionBar").hidden = !narrowed && !state.selecting;
-  $("#toggleSelection").hidden = narrowed;
+  $("#selectionBar").hidden = !state.selecting;
   $("#toggleSelection").textContent = state.selecting ? "선택 마치기" : "선택해서 정리·공유";
   $("#toggleSelection").disabled = !state.feedItems.length && !state.selecting;
   $("#toggleSelection").setAttribute("aria-pressed", String(state.selecting));
   document.querySelectorAll("[data-select]").forEach((c) => {
-    c.hidden = !narrowed && !state.selecting;
+    c.hidden = !state.selecting;
     c.disabled = !state.feedItems.length;
     c.checked = state.selected.has(+c.dataset.select);
   });
-  $("#selectionCount").textContent = n ? `선택한 자료 ${n}건` : "요청문에 쓸 자료를 체크하세요";
+  $("#selectionCount").textContent = `선택한 자료 ${n}건`;
   $("#selectPage").disabled = !state.feedItems.length;
   $("#clearSelection").hidden = !n;
   if (n && $("#selectionActions").hidden && ask.q === state.q.trim()) $("#selectionQuestion").value = ask.q;
@@ -1801,7 +1817,7 @@ async function renderFeed(version = renderVersion) {
   }
   const filtered = state.q.trim() || state.tags.length || state.person || state.since || state.until;
   $("#view").innerHTML = items.length
-    ? `<div class="status" style="margin-bottom:10px">${offset + 1}–${offset + items.length}번째 메모${state.q.trim() ? " · 뜻이 비슷한 메모까지 함께 찾았습니다" : items.some((m) => m.pinned) ? " · 📌 고정한 메모 먼저, 그다음 최근 작성순" : " · 최근 작성순"}</div>` + items.map(cardHTML).join("")
+    ? `<div class="status" style="margin-bottom:10px">${offset + 1}–${offset + items.length}번째 메모${state.q.trim() ? " · 뜻이 비슷한 메모까지 함께 찾았습니다" : items.some((m) => m.pinned) ? " · 📌 고정한 메모 먼저, 그다음 최근 수정순" : " · 최근 수정순"}</div>` + items.map(cardHTML).join("")
     : `<div class="empty">${filtered
         ? `조건에 맞는 메모가 없습니다.<br/><span style="font-size:14px">검색어·태그·사람·작성일 조건을 줄여 보세요.</span>`
         : offset ? "이 페이지에 메모가 없습니다. 이전 페이지로 돌아가세요."
@@ -1827,7 +1843,7 @@ async function renderTagBoard(version = renderVersion) {
   const d = await api("/api/tags/board?per=5");
   if (version !== renderVersion) return;
   const memoList = (memos) => `<ul>${memos.map((m) =>
-    `<li data-memo="${m.id}" tabindex="0" role="button">· ${esc(m.title)} <span class="meta">${fmt(m.created_at)}</span></li>`).join("")}</ul>`;
+    `<li data-memo="${m.id}" tabindex="0" role="button">· ${esc(m.title)} <span class="meta">${fmt(m.updated_at || m.created_at)}</span></li>`).join("")}</ul>`;
   const suggest = d.suggested.length ? `<div class="cluster">
       <h3>내 태그에 없는 자주 쓰는 태그</h3>
       <div class="status" style="margin-bottom:8px">눌러서 내 태그로 등록하면 여기에 묶음이 생깁니다.</div>
@@ -1936,7 +1952,7 @@ async function renderRollup(version = renderVersion) {
 function rollupTagGroups(d) {
   const groups = d.tag_groups || [], rest = d.untagged || { count: 0, memos: [] };
   if (!groups.length && !rest.count) return "";
-  const titles = (memos, count) => `<ul>${memos.map((m) => `<li data-memo="${m.id}">· ${esc(m.title)} <span class="meta">${fmt(m.created_at)}</span></li>`).join("")}${
+  const titles = (memos, count) => `<ul>${memos.map((m) => `<li data-memo="${m.id}">· ${esc(m.title)} <span class="meta">${fmt(m.updated_at || m.created_at)}</span></li>`).join("")}${
     count > memos.length ? `<li class="meta">… 외 ${count - memos.length}건</li>` : ""}</ul>`;
   return `<div class="cluster" id="rollupTags"><h3>내 태그별 <span class="meta">${groups.length}개 태그</span></h3>
     ${groups.map((g) => `<div class="rollup-tag" data-rollup-group="${esc(g.name)}" style="margin:10px 0 4px">
@@ -2951,7 +2967,7 @@ function memoPicker(target, review, changed = () => {}) {
       <label style="display:flex;gap:8px;align-items:baseline"><input type="checkbox" data-pick="${esc(m.key)}" ${review.selected.has(m.key) ? "checked" : ""} ${m.eligible ? "" : "disabled"} />
         <span style="overflow-wrap:anywhere">${esc(m.file_label || m.title || "(제목 없음)")}</span></label>
       ${m.file_label && m.title !== m.file_label ? `<div class="file-label">${esc(m.title)}</div>` : ""}
-      <div class="meta">${esc((m.created_at || "").slice(0, 10))} · ${esc(m.status || ({web:"직접 작성",cli:"직접 작성",shared:"받은 메모",evernote:"에버노트",onenote:"OneNote",onenote_local:"PC의 OneNote",files:"파일",sticky:"스티커 메모",samsung:"삼성 노트",redmine:"Redmine",notion:"Notion"})[m.source] || "메모")}${m.tags?.length ? " · " + m.tags.map((t) => "#" + esc(t)).join(" ") : ""}</div>
+      <div class="meta">${esc((m.updated_at || m.created_at || "").slice(0, 10))} · ${esc(m.status || ({web:"직접 작성",cli:"직접 작성",shared:"받은 메모",evernote:"에버노트",onenote:"OneNote",onenote_local:"PC의 OneNote",files:"파일",sticky:"스티커 메모",samsung:"삼성 노트",redmine:"Redmine",notion:"Notion"})[m.source] || "메모")}${m.tags?.length ? " · " + m.tags.map((t) => "#" + esc(t)).join(" ") : ""}</div>
       ${(m.warnings || []).map((w) => `<div class="note" style="color:var(--warn)">${esc(w)}</div>`).join("")}
       <details data-picker-detail="${esc(m.key)}" ${expanded.has(m.key) ? "open" : ""}><summary class="status">본문 확인</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:13px">${esc(m.body)}</pre></details>
       </div>`).join("") || '<div class="status">해당하는 메모가 없습니다.</div>';
@@ -4113,7 +4129,7 @@ async function openMemo(id, hit = null, refreshOnly = false) {
     ...(f.decision || []).map((d) => `<span class="badge">결정: ${esc(d.slice(0, 40))}</span>`),
   ].join("");
   $("#dSimilar").innerHTML = m.similar?.length
-    ? `<div class="side-h">비슷한 메모</div><ul style="padding:0">${m.similar.map((s) => `<li data-memo="${s.id}" style="list-style:none;color:var(--dim);cursor:pointer;padding:2px 0">· ${esc(s.title)} <span class="meta">${fmt(s.created_at)}</span></li>`).join("")}</ul>`
+    ? `<div class="side-h">비슷한 메모</div><ul style="padding:0">${m.similar.map((s) => `<li data-memo="${s.id}" style="list-style:none;color:var(--dim);cursor:pointer;padding:2px 0">· ${esc(s.title)} <span class="meta">${fmt(s.updated_at || s.created_at)}</span></li>`).join("")}</ul>`
     : "";
   $("#dSimilar").querySelectorAll("[data-memo]").forEach((li) => (li.onclick = () => openMemo(+li.dataset.memo)));
   // 엑셀 취합의 대표 메모는 표 자체로 이어진다. 메모 본문은 요약일 뿐이다.

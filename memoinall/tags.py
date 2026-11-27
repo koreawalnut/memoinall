@@ -98,9 +98,9 @@ def board(per: int = 5) -> dict:
     groups = []
     for tag in defs:
         rows = db.query(
-            "SELECT m.id, m.title, m.created_at FROM memos m "
+            "SELECT m.id, m.title, m.created_at, m.updated_at FROM memos m "
             "JOIN facets f ON f.memo_id=m.id AND f.kind='tag' AND f.value=? "
-            "WHERE m.archived=0 ORDER BY m.pinned DESC, m.created_at DESC, m.id DESC LIMIT ?",
+            "WHERE m.archived=0 ORDER BY m.pinned DESC, m.updated_at DESC, m.id DESC LIMIT ?",
             (tag["name"], per),
         )
         groups.append({**tag, "memos": [dict(r) for r in rows]})
@@ -109,8 +109,8 @@ def board(per: int = 5) -> dict:
     outside = (f"AND NOT EXISTS (SELECT 1 FROM facets f WHERE f.memo_id=m.id AND f.kind='tag' AND f.value IN ({marks}))"
                if mine else "")
     count = db.one(f"SELECT COUNT(*) n FROM memos m WHERE m.archived=0 {outside}", mine)["n"]
-    rows = db.query(f"SELECT m.id, m.title, m.created_at FROM memos m WHERE m.archived=0 {outside} "
-                    "ORDER BY m.created_at DESC, m.id DESC LIMIT ?", [*mine, per])
+    rows = db.query(f"SELECT m.id, m.title, m.created_at, m.updated_at FROM memos m WHERE m.archived=0 {outside} "
+                    "ORDER BY m.pinned DESC, m.updated_at DESC, m.id DESC LIMIT ?", [*mine, per])
     return {"groups": groups, "untagged": {"count": count, "memos": [dict(r) for r in rows]},
             "suggested": unregistered()}
 

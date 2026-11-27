@@ -1,5 +1,6 @@
 """검색 질문·문서의 Copilot 요청문과 연결된 AI의 답변을 검증한다."""
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -12,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fastapi.testclient import TestClient  # noqa: E402
 from playwright.sync_api import expect, sync_playwright  # noqa: E402
-from memoinall import db, llm, settings, store  # noqa: E402
+from memoinall import copilot_web, db, llm, settings, store  # noqa: E402
 from memoinall.api import app  # noqa: E402
 from memoinall.providers import ProviderError  # noqa: E402
 
@@ -29,6 +30,8 @@ def check_file_selection(page, client):
     first, second = (m["id"] for m in result.json()["memos"])
     page.evaluate("loadSidebar()")
     page.locator("#q").fill("운영 계획")
+    expect(page.locator("#selectionBar")).to_be_hidden()
+    page.locator("#toggleSelection").click()
     group = page.get_by_role("checkbox", name="운영 계획.pdf · 2개 부분")
     expect(group).to_be_visible()
     group.check()
@@ -44,6 +47,29 @@ def check_file_selection(page, client):
     assert question in prompt and f"[M{second}]" in prompt and "금요일 오전" in prompt
     assert f"[M{first}]" not in prompt and "재무팀" not in prompt and "운영 계획.pdf · 2페이지" in prompt
     expect(page.locator("#q")).to_have_value("운영 계획")
+    sources = page.locator("#askSources")
+    sources.get_by_role("button", name="메모 추가").click()
+    sources.get_by_role("searchbox").fill("운영 계획")
+    add_first = sources.locator(f'[data-add="{first}"]')
+    add_first.click()
+    box.locator("summary").click()
+    expect(box.locator("textarea")).to_have_value(re.compile("재무팀"))
+    sources.locator(f'[data-remove="{second}"]').click()
+    expect(box.locator("textarea")).not_to_have_value(re.compile("금요일 오전"))
+    assert question in box.locator("textarea").input_value()
+    sources.locator(f'[data-remove="{first}"]').click()
+    expect(box.locator("[data-open]")).to_have_count(0)
+    expect(sources).to_contain_text("근거 메모 0건")
+    sources.locator(f'[data-add="{second}"]').click()
+    expect(box.locator("textarea")).to_have_value(re.compile("금요일 오전"))
+    page.evaluate("""() => {
+      window.pywebview = {api: {open_copilot_web: async text => { window.webDraft = text; }}};
+    }""")
+    add_first.click()
+    box.get_by_role("button", name="Copilot 웹에 자동 입력").click()
+    assert page.evaluate("window.webDraft") == box.locator("textarea").input_value()
+    assert "재무팀" in page.evaluate("window.webDraft")
+    page.evaluate("delete window.pywebview")
     page.locator(f'[data-select="{first}"]').check()
     expect(box).to_have_count(0)
     expect(group).to_be_checked()
@@ -54,6 +80,30 @@ def check_file_selection(page, client):
     expect(doc).to_be_visible()
     assert all(f"[M{i}]" in doc.locator("textarea").input_value() for i in [first, second])
     print("OK searched file sections can be checked together, removed individually, and used for a separate question or document")
+
+
+def check_web_draft(browser):
+    page = browser.new_page()
+    draft = "확인해 주세요.\n\n[M1] 첫 줄 & <원문>\n둘째 줄"
+    script = copilot_web.draft_script(draft)
+    page.route("**/*", lambda route: route.fulfill(content_type="text/html; charset=utf-8", body=
+        '<form><input type="password"><textarea placeholder="검색"></textarea>'
+        '<div contenteditable="true" aria-label="Message Copilot"></div></form>'))
+    for url in ["https://login.microsoftonline.com/", "https://example.org/chat", "https://m365.cloud.microsoft/settings"]:
+        page.goto(url)
+        assert not copilot_web.is_work_chat(url)
+        assert page.evaluate(script) == "waiting"
+    for url in [copilot_web.CHAT_URL, "https://copilot.cloud.microsoft/"]:
+        page.goto(url)
+        assert copilot_web.is_work_chat(url)
+        page.evaluate("() => { document.querySelector('form').onsubmit = () => { window.submitted = true; return false; }; }")
+        result = page.evaluate(script)
+        assert result == "filled", (result, page.locator("[contenteditable]").inner_html(), page.locator("[contenteditable]").inner_text())
+        assert page.locator("[contenteditable]").inner_text() == draft
+        assert page.evaluate(script) == "occupied"
+        assert page.locator("textarea").input_value() == "" and not page.evaluate("window.submitted")
+    page.close()
+    print("OK work chat receives a multiline draft, preserves existing text, and waits for the user to send")
 
 
 def main():
@@ -92,6 +142,7 @@ def main():
             value: {writeText: async text => { window.copiedPrompt = text; }}})""")
         expect(page.locator("#status")).to_contain_text("미설정")
         expect(button).to_have_text("Copilot에 묻기")
+        expect(q).to_have_attribute("placeholder", "기억나는 단어를 입력하면 뜻이 비슷한 메모도 찾아요")
         page.locator('#sidebarAutoTags [data-v="결제"]').click()
         q.fill("결제 재시도 어떻게 하기로 했지?")
         q.press("Control+Enter")
@@ -106,6 +157,14 @@ def main():
         expect(popup).to_have_url("https://m365.cloud.microsoft/chat")
         assert page.evaluate("window.copiedPrompt") == prompt
         popup.close()
+        sources = panel.locator("#askSources")
+        sources.locator(f'[data-remove="{pay["id"]}"]').click()
+        expect(handoff.locator("[data-open]")).to_have_count(0)
+        sources.get_by_role("button", name="메모 추가").click()
+        expect(sources.locator(f'[data-add="{plan["id"]}"]')).to_have_count(0)
+        sources.locator(f'[data-add="{pay["id"]}"]').click()
+        expect(handoff.locator("textarea")).to_have_value(re.compile("멱등키"))
+        assert plan["body"] not in handoff.locator("textarea").input_value()
         q.fill("다른 질문")
         expect(panel).to_be_hidden()
         page.locator("#clear").click()
@@ -145,7 +204,7 @@ def main():
             page.evaluate("loadSidebar()")
             expect(button).to_be_visible()
             expect(button).to_be_enabled()
-            expect(q).to_have_attribute("placeholder", "단어로 찾거나, 궁금한 것을 적고 ✨ AI에게 묻기")
+            expect(q).to_have_attribute("placeholder", "기억나는 단어를 입력하면 뜻이 비슷한 메모도 찾아요")
             q.fill("")
             expect(button).to_be_disabled()                                     # 질문이 없으면 못 누른다
             q.fill("결제 재시도 어떻게 하기로 했지?")
@@ -210,6 +269,7 @@ def main():
         print("OK a connection removed between render and click returns a Copilot prompt")
 
         check_file_selection(page, client)
+        check_web_draft(browser)
         assert not errors, errors
         browser.close()
 

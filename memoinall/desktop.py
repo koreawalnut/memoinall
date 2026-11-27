@@ -226,12 +226,13 @@ def run() -> int:
         if sys.platform == "win32":
             from .quick_capture import QuickCapture
             from .memo_windows import MemoWindows
-            from . import teams_share
+            from . import copilot_web, teams_share
 
             QuickCapture(window).install()
             memo_windows = MemoWindows(window)
             window.expose(memo_windows.open_memo_window, memo_windows.restore_memo_windows)
             teams_share.install(window)
+            copilot_web.install(window)
         _install_downloader(window)
         log.info("webview.start() 진입 — 창이 닫힐 때까지 블로킹")
         # GUI 는 메인 스레드에서 바로 시작하고, 서버 확인만 별도 스레드에서 한다.

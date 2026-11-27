@@ -403,7 +403,7 @@ async function findGenMemos(offset) {
   try {
     const r = await api(genMemosUrl(query, offset));
     if (!host.isConnected || version !== gen.finderVersion) return;
-    host.innerHTML = r.items.map((m, i) => `<div class="src"><div class="src-body"><b>${esc(m.file_label || m.title)}</b><div class="meta">${esc((m.created_at || "").slice(0, 10))}</div><details><summary class="status">본문 확인</summary><pre class="pack">${esc(m.body)}</pre></details></div><button class="btn" data-gen-add="${i}">${gen.review.selected.has(m.key) ? "선택됨" : "추가"}</button></div>`).join("") || '<div class="status">찾은 메모가 없습니다.</div>';
+    host.innerHTML = r.items.map((m, i) => `<div class="src"><div class="src-body"><b>${esc(m.file_label || m.title)}</b><div class="meta">${esc((m.updated_at || m.created_at || "").slice(0, 10))}</div><details><summary class="status">본문 확인</summary><pre class="pack">${esc(m.body)}</pre></details></div><button class="btn" data-gen-add="${i}">${gen.review.selected.has(m.key) ? "선택됨" : "추가"}</button></div>`).join("") || '<div class="status">찾은 메모가 없습니다.</div>';
     host.querySelectorAll("[data-gen-add]").forEach((b) => {
       const m = r.items[+b.dataset.genAdd]; b.disabled = gen.busy || gen.review.selected.has(m.key);
       b.onclick = () => {

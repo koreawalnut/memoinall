@@ -19,6 +19,7 @@ from memoinall.api import app
 def main():
     errors = []
     with patch.object(store, "start_worker"), TestClient(app) as client, sync_playwright() as pw:
+        older = store.add_memo("먼저 적은 회의 메모 #업무", created_at="2026-11-08T10:00:00", enqueue_enrich=False)
         memo = store.add_memo("가져온 회의 메모 #업무", source="evernote", created_at="2026-11-09T14:30:00",
                               updated_at="2026-11-09T23:05:00", enqueue_enrich=False)
         browser = pw.chromium.launch(headless=True)
@@ -52,7 +53,7 @@ def main():
             for value, expected in cases.items():
                 assert page.evaluate("value => fmt(value)", value) == expected, (locale, value)
             card = page.locator(f'.card[data-id="{memo["id"]}"]')
-            expect(card.locator(".card-h .meta")).to_have_text("2026-11-09 14:30")
+            expect(card.locator(".card-h .meta")).to_have_text("2026-11-09 23:05")
             expect(card.locator(".badges")).to_contain_text("#에버노트")
             card.click()
             expect(page.locator("#dMeta")).to_have_text("작성 2026-11-09 14:30 · 수정 2026-11-09 23:05")
@@ -63,6 +64,19 @@ def main():
                 page.set_viewport_size({"width": 390, "height": 844})
                 assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
                 expect(page.locator("#dMeta")).to_be_visible()
+            else:
+                page.locator("#dClose").click()
+                old_card = page.locator(f'.card[data-id="{older["id"]}"]')
+                expect(old_card.locator(".card-h .meta")).to_have_text("2026-11-08 10:00")
+                old_card.click()
+                with patch.object(store, "now_iso", return_value="2026-11-25T21:35:00"):
+                    page.locator("#dBody").fill("먼저 적은 회의 메모 수정본 #업무")
+                    page.locator("#dSave").click()
+                    expect(page.locator("#detail")).to_be_hidden()
+                expect(page.locator(".card[data-id]").first).to_have_attribute("data-id", str(older["id"]))
+                expect(old_card.locator(".card-h .meta")).to_have_text("2026-11-25 21:35")
+                old_card.click()
+                expect(page.locator("#dMeta")).to_have_text("작성 2026-11-08 10:00 · 수정 2026-11-25 21:35")
             context.close()
             print(f"OK {locale}: local 24-hour display, midnight, timezone conversion, detail and source tag")
         assert not errors, errors

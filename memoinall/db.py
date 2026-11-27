@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS memos (
     external_id TEXT            -- 외부 앱에서 가져온 메모의 원본 식별자
 );
 CREATE INDEX IF NOT EXISTS idx_memos_created ON memos(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memos_updated ON memos(updated_at DESC);
 CREATE TABLE IF NOT EXISTS memo_windows (
     memo_id INTEGER PRIMARY KEY REFERENCES memos(id) ON DELETE CASCADE,
     x INTEGER, y INTEGER, width INTEGER, height INTEGER
@@ -274,6 +275,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_memos_external ON memos(source, external_id) "
         "WHERE external_id IS NOT NULL"
     )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memos_updated ON memos(updated_at DESC)")
     # 예전 완료 체크도 사용자 결정으로 보존한다. 이후에는 재추출로 덮어쓰지 않는다.
     conn.execute("UPDATE todos SET status='done', overrides_json='{\"status\":\"done\"}' "
                  "WHERE done=1 AND derived_json='{}' AND overrides_json='{}'")
